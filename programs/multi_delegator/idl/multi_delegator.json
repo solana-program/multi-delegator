@@ -1,0 +1,169 @@
+{
+  "version": "0.1.0",
+  "name": "multi_delegator",
+  "instructions": [
+    {
+      "name": "InitMultiDelegate",
+      "accounts": [
+        {
+          "name": "owner",
+          "isMut": true,
+          "isSigner": true,
+          "docs": [
+            "The owner of the multi-delegate program"
+          ]
+        },
+        {
+          "name": "multiDelegate",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "The multi_delegate PDA that will be the delegate instance for this token"
+          ]
+        },
+        {
+          "name": "tokenMint",
+          "isMut": false,
+          "isSigner": false,
+          "docs": [
+            "The token mint that we are creating a multi delegate account for"
+          ]
+        },
+        {
+          "name": "userAta",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "The ata that we are setting up delegation for"
+          ]
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false,
+          "docs": [
+            "The system program"
+          ]
+        },
+        {
+          "name": "tokenProgram",
+          "isMut": false,
+          "isSigner": false,
+          "docs": [
+            "Token program"
+          ]
+        }
+      ],
+      "args": [],
+      "discriminant": {
+        "type": "u8",
+        "value": 0
+      }
+    },
+    {
+      "name": "CreateSimpleDelegation",
+      "accounts": [
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true,
+          "docs": [
+            "The user user who is initializing the multidelegate instance for a particular token"
+          ]
+        },
+        {
+          "name": "multiDelegate",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "The multi_delegate PDA that will be the delegate instance for this token"
+          ]
+        },
+        {
+          "name": "delegateAccount",
+          "isMut": false,
+          "isSigner": false,
+          "docs": [
+            "The account which will be keeping track of how much the delegate is able to pull"
+          ]
+        },
+        {
+          "name": "delegate",
+          "isMut": false,
+          "isSigner": false,
+          "docs": [
+            "The user is being designated as a delegate. They will be able to spend the users tokens"
+          ]
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false,
+          "docs": [
+            "The system program"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "addDelegateInstructionData",
+          "type": {
+            "defined": "AddDelegateInstructionData"
+          }
+        }
+      ],
+      "discriminant": {
+        "type": "u8",
+        "value": 1
+      }
+    }
+  ],
+  "accounts": [
+    {
+      "name": "MultiDelegate",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "publicKey"
+          },
+          {
+            "name": "tokenMint",
+            "type": "publicKey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "AddDelegateInstructionData",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "expiryS",
+            "type": "u64"
+          }
+        ]
+      }
+    }
+  ],
+  "metadata": {
+    "origin": "shank",
+    "address": "3PuMsYqaLY4Sy1DR8np3aAiHravZXCeyMYDUECLqfswY"
+  }
+}

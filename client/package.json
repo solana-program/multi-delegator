@@ -1,0 +1,36 @@
+{
+  "name": "@multidelegator/client",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "generate": "codama run js",
+    "test": "bun test --timeout 60000",
+    "clean": "rm -rf dist && rm -rf src/generated"
+  },
+  "dependencies": {
+    "@solana/kit": "latest",
+    "gill": "^0.14.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.6",
+    "@codama/cli": "^1.1.1",
+    "@codama/nodes-from-anchor": "^1.3.8",
+    "@codama/renderers-js": "^1.5.5",
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0",
+    "@types/node": "^25.0.10",
+    "@solana-program/system": "latest",
+    "@solana-program/token": "latest"
+  }
+}

@@ -1,0 +1,17 @@
+################################################################
+# Manage multi_delegator deployment through Crypto Infrastructure as Code
+################################################################
+
+addon "svm" {
+    rpc_api_url = input.rpc_api_url
+    network_id = input.network_id
+}
+
+action "deploy_multi_delegator" "svm::deploy_program" {
+    description = "Deploy multi_delegator program"
+    program = svm::get_program_from_native_project("multi_delegator", "programs/multi_delegator/target/deploy/multi_delegator-keypair.json", "programs/multi_delegator/idl/multi_delegator.json", "programs/multi_delegator/target/deploy/multi_delegator.so") 
+    authority = signer.authority
+    payer = signer.payer
+    // Use instant deployment for localnet, otherwise use standard deployment
+    instant_surfnet_deployment = input.network_id == "localnet"
+}

@@ -1,0 +1,32 @@
+cargo-features = ["edition2024"]
+
+[package]
+name = "multi-delegator"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["lib", "cdylib"]
+
+[dependencies]
+pinocchio = "0.9.2"
+pinocchio-associated-token-account = "0.2.0"
+pinocchio-pubkey = "0.3.0"
+pinocchio-system = "0.3.0"
+pinocchio-token = "0.4.0"
+pinocchio-token-2022 = "0.1.0"
+shank = "0.4.6"
+
+[dev-dependencies]
+litesvm = "^0.7"
+litesvm-token = { version = "^0.7", features = ["token-2022"] }
+solana-account = "^2"
+solana-instruction = "^2"
+solana-keypair = "^2"
+solana-message = "^2"
+solana-pubkey = "^2"
+solana-signer = "^2"
+solana-transaction = "^2"
+spl-associated-token-account = "7.0.0"
+spl-token-2022 = "^8"
+

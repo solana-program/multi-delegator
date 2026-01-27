@@ -1,0 +1,12 @@
+**/target
+.idea
+**/node_modules
+dist
+.next
+bun.lockb
+
+# where the generated typescript files from idl and codama are kept
+client/src/generated
+
+# Surfpool logs and temporary files
+.surfpool/
