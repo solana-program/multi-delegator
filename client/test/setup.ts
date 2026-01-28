@@ -1,26 +1,26 @@
+import { getCreateAccountInstruction } from '@solana-program/system';
 import {
-  createSolanaClient,
-  generateKeyPairSigner,
-  pipe,
-  createTransactionMessage,
-  setTransactionMessageFeePayerSigner,
-  setTransactionMessageLifetimeUsingBlockhash,
-  appendTransactionMessageInstructions,
-  signTransactionMessageWithSigners,
-  lamports,
-  type KeyPairSigner,
-  type Address,
-} from "gill";
-import { getCreateAccountInstruction } from "@solana-program/system";
-import {
+  findAssociatedTokenPda,
+  getCreateAssociatedTokenInstructionAsync,
   getInitializeMintInstruction,
   getMintSize,
-  TOKEN_PROGRAM_ADDRESS,
-  getCreateAssociatedTokenInstructionAsync,
-  findAssociatedTokenPda,
   getMintToInstruction,
-} from "@solana-program/token";
-import { MultiDelegatorClient } from "../src/client.js";
+  TOKEN_PROGRAM_ADDRESS,
+} from '@solana-program/token';
+import {
+  type Address,
+  appendTransactionMessageInstructions,
+  createSolanaClient,
+  createTransactionMessage,
+  generateKeyPairSigner,
+  type KeyPairSigner,
+  lamports,
+  pipe,
+  setTransactionMessageFeePayerSigner,
+  setTransactionMessageLifetimeUsingBlockhash,
+  signTransactionMessageWithSigners,
+} from 'gill';
+import { MultiDelegatorClient } from '../src/client.js';
 
 export const SURFPOOL_PORT = 8899;
 export const SURFPOOL_RPC_URL = `http://127.0.0.1:${SURFPOOL_PORT}`;
@@ -36,7 +36,7 @@ export class IntegrationTest {
   public readonly client: MultiDelegatorClient;
 
   /** Direct RPC access for queries and assertions */
-  public readonly rpc: SolanaClient["rpc"];
+  public readonly rpc: SolanaClient['rpc'];
 
   /** Pre-funded keypair signer (10 SOL), also the mint authority for tokenMint */
   public readonly payer: KeyPairSigner;
@@ -65,7 +65,7 @@ export class IntegrationTest {
    */
   static async create(): Promise<IntegrationTest> {
     await isSurfnetRunning(); // Just verify surfpool is running
-    const solanaClient = createSolanaClient({ urlOrMoniker: "localnet" });
+    const solanaClient = createSolanaClient({ urlOrMoniker: 'localnet' });
     const client = new MultiDelegatorClient(solanaClient);
 
     // Create and fund payer with 10 SOL
@@ -123,24 +123,24 @@ export class IntegrationTest {
 async function isSurfnetRunning(): Promise<string> {
   try {
     const response = await fetch(SURFPOOL_RPC_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        jsonrpc: "2.0",
+        jsonrpc: '2.0',
         id: 1,
-        method: "getHealth",
+        method: 'getHealth',
       }),
     });
 
     if (response.ok) {
       const data = (await response.json()) as { result?: string };
-      if (data.result === "ok") {
+      if (data.result === 'ok') {
         return SURFPOOL_RPC_URL;
       }
     }
 
-    throw new Error("Surfpool returned unhealthy status");
-  } catch (error) {
+    throw new Error('Surfpool returned unhealthy status');
+  } catch (_error) {
     throw new Error(
       `Surfpool is not running at ${SURFPOOL_RPC_URL}. Please start it with: surfpool start`,
     );
@@ -166,8 +166,8 @@ async function createFundedKeypair(
   for (let i = 0; i < 30; i++) {
     const status = await client.rpc.getSignatureStatuses([signature]).send();
     if (
-      status.value[0]?.confirmationStatus === "confirmed" ||
-      status.value[0]?.confirmationStatus === "finalized"
+      status.value[0]?.confirmationStatus === 'confirmed' ||
+      status.value[0]?.confirmationStatus === 'finalized'
     ) {
       confirmed = true;
       break;
@@ -176,7 +176,7 @@ async function createFundedKeypair(
   }
 
   if (!confirmed) {
-    throw new Error("Airdrop confirmation timeout");
+    throw new Error('Airdrop confirmation timeout');
   }
 
   return keypair;

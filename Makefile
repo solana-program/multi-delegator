@@ -1,4 +1,4 @@
-.PHONY: build build-program build-client test test-program test-client clean clean-program clean-client surfpool ensure-surfpool generate-client generate-idl kill-validator setup prepare-deploy-keys
+.PHONY: build build-program build-client test test-program test-client clean clean-program clean-client ensure-surfpool generate-client generate-idl kill-validator setup prepare-deploy-keys fmt-check fmt lint fmt-check lint-check
 
 # Setup target to check prerequisites and install dependencies
 setup:
@@ -38,7 +38,7 @@ build: setup $(DEPLOY_KEY_FILE) build-program build-client
 $(SO_FILE): $(RUST_SOURCES)
 	cd programs/multi_delegator && cargo build-sbf
 
-build-program: $(SO_FILE)
+build-program: $(DEPLOY_KEY_FILE) $(SO_FILE)
 
 # IDL generation - rebuilds if ANY .rs file changes
 $(IDL_FILE): $(RUST_SOURCES)
@@ -62,6 +62,9 @@ test: setup test-program test-client
 test-program:
 	cd programs/multi_delegator && cargo test-sbf
 
+# Program ID from keypair (used to verify deployment)
+PROGRAM_ID := 3PuMsYqaLY4Sy1DR8np3aAiHravZXCeyMYDUECLqfswY
+
 # Ensure surfpool is running (starts if not running, no-op if already running)
 ensure-surfpool:
 	@if ! curl -s -X POST http://localhost:8899 -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"getHealth","params":[]}' > /dev/null 2>&1; then \
@@ -70,7 +73,22 @@ ensure-surfpool:
 		nohup surfpool start --watch --no-tui > /tmp/surfpool.log 2>&1  & \
 		echo $$! > .surfpool/pid.txt; \
 		echo "Waiting for surfpool to start..."; \
-		sleep 2; \
+		for i in 1 2 3 4 5 6 7; do \
+			if curl -s -X POST http://localhost:8899 -H "Content-Type: application/json" \
+				-d '{"jsonrpc":"2.0","id":1,"method":"getAccountInfo","params":["$(PROGRAM_ID)",{"encoding":"base64"}]}' \
+				| grep -q '"executable":true'; then \
+				echo "Program deployed successfully"; \
+				break; \
+			fi; \
+			echo "Waiting for program deployment... ($$i/7)"; \
+			sleep 1; \
+		done; \
+		if [ $$i -eq 7 ]; then \
+			echo "Program deployment failed"; \
+			echo "Surfpool logs:"; \
+			cat /tmp/surfpool.log; \
+			exit 1; \
+		fi; \
 	else \
 		echo "validator is already running"; \
 	fi
@@ -102,6 +120,33 @@ clean-program:
 
 clean-client:
 	cd client && bun run clean
+
+# Format and Lint targets
+fmt-check:
+	@echo "Checking Rust formatting..."
+	cd programs/multi_delegator && cargo fmt --check
+	@echo "Checking TypeScript formatting..."
+	cd client && bun run format:check
+
+fmt:
+	@echo "Formatting Rust code..."
+	cd programs/multi_delegator && cargo fmt
+	@echo "Formatting TypeScript code..."
+	cd client && bun run format
+
+lint:
+	@echo "Linting Rust code..."
+	cd programs/multi_delegator && cargo clippy --all-targets --no-deps -- -D warnings
+	@echo "Linting TypeScript code..."
+	cd client && bun run lint
+
+lint-check:
+	@echo "Linting Rust code..."
+	cd programs/multi_delegator && cargo clippy --all-targets --no-deps -- -D warnings
+	@echo "Linting TypeScript code..."
+	cd client && bun run lint:check
+
+check: fmt-check lint-check
 
 # Default target
 .DEFAULT_GOAL := build

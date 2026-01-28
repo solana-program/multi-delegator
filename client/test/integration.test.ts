@@ -1,18 +1,18 @@
-import { describe, test, expect } from "bun:test";
-import { initTestSuite } from "./setup.ts";
-import { getMultiDelegatePDA } from "../src/pdas.ts";
-import { fetchMultiDelegate } from "../src/generated/index.ts";
+import { describe, expect, test } from 'bun:test';
+import { fetchMultiDelegate } from '../src/generated/index.ts';
+import { getMultiDelegatePDA } from '../src/pdas.ts';
+import { initTestSuite } from './setup.ts';
 
-describe("MultiDelegator Integration Tests", () => {
-  test("can connect to surfpool validator", async () => {
+describe('MultiDelegator Integration Tests', () => {
+  test('can connect to surfpool validator', async () => {
     const testSuite = await initTestSuite();
 
     const res = await testSuite.rpc.getHealth().send();
 
-    expect(res).toBe("ok");
+    expect(res).toBe('ok');
   });
 
-  test("initialize multi delegate", async () => {
+  test('initialize multi delegate', async () => {
     // Setup - testSuite has payer and tokenMint pre-created
     const testSuite = await initTestSuite();
 

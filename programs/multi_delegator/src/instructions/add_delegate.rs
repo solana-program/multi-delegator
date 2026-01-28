@@ -12,8 +12,8 @@ use pinocchio_system::instructions::CreateAccount;
 use shank::ShankType;
 
 use crate::{
-    AccountCheck, TermsState, OneTimeTerms, MultiDelegatorError, SignerAccount,
-    SystemAccount, DELEGATE_BASE_SEED,
+    AccountCheck, MultiDelegatorError, OneTimeTerms, SignerAccount, SystemAccount,
+    DELEGATE_BASE_SEED,
 };
 
 pub struct AddDelegateAccounts<'a> {
@@ -129,7 +129,6 @@ pub fn process((data, accounts): (&[u8], &[AccountInfo])) -> ProgramResult {
 
     delegation_state.kind = call_data.kind.try_into()?;
     delegation_state.delegator = *accounts.owner.key();
-    delegation_state.status = TermsState::Active;
     delegation_state.max_amount = call_data.amount;
     delegation_state.remaining_amount = call_data.amount;
     delegation_state.expiry_s = call_data.expiry_s;
@@ -154,7 +153,7 @@ mod tests {
                 initialize_multidelegate_action, setup,
             },
         },
-        TermsKind, OneTimeTerms,
+        OneTimeTerms, TermsKind,
     };
 
     #[test]

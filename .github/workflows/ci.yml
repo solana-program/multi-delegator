@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Restore Cargo cache
+        id: restore-cargo
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            programs/multi_delegator/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('programs/multi_delegator/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Install Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+      - name: Create Solana keypair
+        run: |
+          mkdir -p ~/.config/solana
+          solana-keygen new --no-bip39-passphrase -o ~/.config/solana/id.json
+
+      - name: Install shank-cli
+        run: command -v shank || cargo install shank-cli
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install surfpool
+        run: curl -sL https://run.surfpool.run/ | bash
+
+      - name: Restore Bun cache
+        id: restore-bun
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            client/node_modules
+            ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('client/package.json') }}
+          restore-keys: ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        run: make setup
+
+      - name: Check formatting
+        run: make fmt-check
+
+      - name: Lint
+        run: make lint
+
+      - name: Build program
+        run: make build-program
+
+      - name: Build client
+        run: make build-client
+
+      - name: Test program
+        run: make test-program
+
+      - name: Test client
+        run: make test-client
+
+      - name: Save Cargo cache
+        uses: actions/cache/save@v4
+        if: always() && steps.restore-cargo.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            programs/multi_delegator/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('programs/multi_delegator/Cargo.toml') }}
+
+      - name: Save Bun cache
+        uses: actions/cache/save@v4
+        if: always() && steps.restore-bun.outputs.cache-hit != 'true'
+        with:
+          path: |
+            client/node_modules
+            ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('client/package.json') }}
+
+      - name: Kill surfpool validator
+        if: always()
+        run: make kill-validator

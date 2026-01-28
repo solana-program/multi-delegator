@@ -1,8 +1,5 @@
-pub mod terms;
 pub mod multi_delegate;
+pub mod terms;
 
-pub use terms::{
-    TermsKind, TermsState, OneTimeTerms, 
-    DELEGATE_BASE_SEED,
-};
 pub use multi_delegate::MultiDelegate;
+pub use terms::{OneTimeTerms, TermsKind, DELEGATE_BASE_SEED};

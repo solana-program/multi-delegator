@@ -19,40 +19,20 @@ impl TryFrom<u8> for TermsKind {
     }
 }
 
-#[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum TermsState {
-    Pending = 0,
-    Active = 1,
-}
-
-impl TryFrom<u8> for TermsState {
-    type Error = ProgramError;
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
+impl From<TermsKind> for u8 {
+    fn from(value: TermsKind) -> Self {
         match value {
-            0 => Ok(Self::Pending),
-            1 => Ok(Self::Active),
-            _ => Err(ProgramError::InvalidInstructionData),
+            TermsKind::OneTime => 0,
+            TermsKind::Recurring => 1,
         }
     }
 }
-
-impl From<TermsState> for u8 {
-    fn from(val: TermsState) -> Self {
-        match val {
-            TermsState::Pending => 0,
-            TermsState::Active => 1,
-        }
-    }
-}
-
 
 #[repr(C)]
 #[derive(Debug)]
 pub struct OneTimeTerms {
     pub delegator: Pubkey,
     pub kind: TermsKind,
-    pub status: TermsState,
     pub max_amount: u64,
     pub remaining_amount: u64,
     pub expiry_s: u64,
@@ -67,7 +47,7 @@ impl OneTimeTerms {
         multidelegate: &Pubkey,
         delegate: &Pubkey,
         payer: &Pubkey,
-        kind: TermsState,
+        kind: TermsKind,
     ) -> (Pubkey, u8) {
         find_program_address(
             &[
@@ -91,7 +71,7 @@ impl OneTimeTerms {
 
     #[inline(always)]
     pub fn load_mut(bytes: &mut [u8]) -> Result<&mut Self, ProgramError> {
-        if bytes.len() < Self::LEN {
+        if bytes.len() != Self::LEN {
             return Err(ProgramError::InvalidAccountData);
         }
         Ok(unsafe { &mut *transmute::<*mut u8, *mut Self>(bytes.as_mut_ptr()) })

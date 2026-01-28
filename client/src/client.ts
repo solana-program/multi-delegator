@@ -1,21 +1,26 @@
-import type { Address, TransactionSigner } from "gill";
-import { createTransaction, signTransactionMessageWithSigners } from "gill";
+import type { Address, Instruction, TransactionSigner } from 'gill';
 import {
-  getInitMultiDelegateInstruction,
+  type createSolanaClient,
+  createTransaction,
+  signTransactionMessageWithSigners,
+} from 'gill';
+import {
   getCreateSimpleDelegationInstruction,
-} from "./generated/index.js";
-import { getMultiDelegatePDA, getFixedDelegatePDA } from "./pdas.js";
+  getInitMultiDelegateInstruction,
+} from './generated/index.js';
+import { getFixedDelegatePDA, getMultiDelegatePDA } from './pdas.js';
 
-type SolanaClient = {
-  rpc: any;
-  sendAndConfirmTransaction: (tx: any) => Promise<string>;
-};
+type SolanaClient = ReturnType<typeof createSolanaClient>;
+
+interface TransactionResult {
+  signature: string;
+}
 
 export class MultiDelegatorClient {
   constructor(public readonly client: SolanaClient) {}
 
   private async buildAndSendTransaction(
-    instructions: any[],
+    instructions: Instruction[],
     signers: TransactionSigner[],
   ): Promise<string> {
     const { value: latestBlockhash } = await this.client.rpc
@@ -38,8 +43,8 @@ export class MultiDelegatorClient {
     owner: TransactionSigner,
     tokenMint: Address,
     userAta: Address,
-  ): Promise<any> {
-    const user = owner.address || (owner as any).address;
+  ): Promise<TransactionResult> {
+    const user = owner.address || (owner as TransactionSigner).address;
     const [multiDelegate] = await getMultiDelegatePDA(user, tokenMint);
 
     const instruction = getInitMultiDelegateInstruction({
@@ -60,8 +65,8 @@ export class MultiDelegatorClient {
     kind: number,
     amount: number | bigint,
     expiryS: number | bigint,
-  ): Promise<any> {
-    const user = owner.address || (owner as any).address;
+  ): Promise<TransactionResult> {
+    const user = owner.address || (owner as TransactionSigner).address;
     const [multiDelegate] = await getMultiDelegatePDA(user, tokenMint);
     const [delegateAccount] = await getFixedDelegatePDA(
       multiDelegate,

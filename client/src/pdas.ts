@@ -1,9 +1,9 @@
 import {
   type Address,
-  getProgramDerivedAddress,
   getAddressEncoder,
-} from "gill";
-import { MULTI_DELEGATOR_PROGRAM_ADDRESS } from "./generated/index.js";
+  getProgramDerivedAddress,
+} from 'gill';
+import { MULTI_DELEGATOR_PROGRAM_ADDRESS } from './generated/index.js';
 
 const addressEncoder = getAddressEncoder();
 
@@ -12,7 +12,7 @@ export async function getMultiDelegatePDA(
   tokenMint: Address,
 ): Promise<[Address, number]> {
   const seeds = [
-    new TextEncoder().encode("MultiDelegate"),
+    new TextEncoder().encode('MultiDelegate'),
     addressEncoder.encode(user),
     addressEncoder.encode(tokenMint),
   ];
@@ -31,7 +31,7 @@ export async function getFixedDelegatePDA(
   kind: number,
 ): Promise<[Address, number]> {
   const seeds = [
-    new TextEncoder().encode("Delegate"),
+    new TextEncoder().encode('Delegate'),
     addressEncoder.encode(multiDelegate),
     addressEncoder.encode(delegate),
     addressEncoder.encode(payer),

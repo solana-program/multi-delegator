@@ -1,4 +1,4 @@
-use litesvm::{types::TransactionResult, LiteSVM};
+use litesvm::{types::FailedTransactionMetadata, types::TransactionMetadata, LiteSVM};
 use solana_account::Account;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
@@ -57,13 +57,13 @@ pub fn build_and_send_transaction(
     signers: &[&Keypair],
     payer: &Pubkey,
     ixs: &[Instruction],
-) -> TransactionResult {
+) -> Result<TransactionMetadata, Box<FailedTransactionMetadata>> {
     let tx = Transaction::new(
         signers,
         Message::new(ixs, Some(payer)),
         litesvm.latest_blockhash(),
     );
-    litesvm.send_transaction(tx)
+    litesvm.send_transaction(tx).map_err(Box::new)
 }
 
 pub fn init_wallet(litesvm: &mut LiteSVM, lamports: u64) -> Keypair {
@@ -146,7 +146,11 @@ pub fn initialize_multidelegate_action(
     litesvm: &mut LiteSVM,
     payer: &Keypair,
     mint: Pubkey,
-) -> (TransactionResult, Pubkey, u8) {
+) -> (
+    Result<TransactionMetadata, Box<FailedTransactionMetadata>>,
+    Pubkey,
+    u8,
+) {
     let user_ata = get_associated_token_address(&payer.pubkey(), &mint);
     let (multi_delegate_pda, bump) = get_multidelegate_pda(&payer.pubkey(), &mint);
 
@@ -178,7 +182,10 @@ pub fn create_simple_delegate_action(
     amount: u64,
     expiry_s: u64,
     kind: TermsKind,
-) -> (TransactionResult, Pubkey) {
+) -> (
+    Result<TransactionMetadata, Box<FailedTransactionMetadata>>,
+    Pubkey,
+) {
     let (multi_delegate_pda, _bump) = get_multidelegate_pda(&payer.pubkey(), &mint);
     let (delegate_pda, _bump) =
         get_delegate_pda(&multi_delegate_pda, &delegate, &payer.pubkey(), kind);
