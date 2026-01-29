@@ -32,7 +32,7 @@ impl<'a> TryFrom<&'a [AccountInfo]> for InitializeMultiDelegateAccounts<'a> {
         let [user, multi_delegate, token_mint, user_ata, system_program, token_program, ..] =
             accounts
         else {
-            return Err(ProgramError::NotEnoughAccountKeys);
+            return Err(MultiDelegatorError::NotEnoughAccountKeys.into());
         };
 
         SignerAccount::check(user)?;

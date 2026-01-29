@@ -24,18 +24,21 @@ export async function getMultiDelegatePDA(
   return [pda, bump];
 }
 
-export async function getFixedDelegatePDA(
+export async function getDelegationPDA(
   multiDelegate: Address,
-  delegate: Address,
-  payer: Address,
-  kind: number,
+  delegator: Address,
+  delegatee: Address,
+  nonce: number | bigint,
 ): Promise<[Address, number]> {
+  const nonceBytes = new Uint8Array(8);
+  new DataView(nonceBytes.buffer).setBigUint64(0, BigInt(nonce), true);
+
   const seeds = [
-    new TextEncoder().encode('Delegate'),
+    new TextEncoder().encode('delegation'),
     addressEncoder.encode(multiDelegate),
-    addressEncoder.encode(delegate),
-    addressEncoder.encode(payer),
-    new Uint8Array([kind]),
+    addressEncoder.encode(delegator),
+    addressEncoder.encode(delegatee),
+    nonceBytes,
   ];
 
   const [pda, bump] = await getProgramDerivedAddress({

@@ -1,4 +1,5 @@
-pub mod add_delegate;
+pub mod create_fixed_delegation;
+pub mod create_recurring_delegation;
 pub mod helpers;
 pub mod initialize_multidelegate;
 
@@ -6,11 +7,12 @@ pub use helpers::*;
 
 use shank::ShankInstruction;
 
-use crate::add_delegate::AddDelegateInstructionData;
+use crate::create_fixed_delegation::CreateFixedDelegationData;
+use crate::create_recurring_delegation::CreateRecurringDelegationData;
+
 #[derive(Debug, ShankInstruction)]
 #[repr(u8)]
-pub enum VaultInstruction {
-    /// Initialize a token vault, starts inactivate. Add tokens in subsequent instructions, then activate.
+pub enum MultiDelegatorInstruction {
     #[account(
         0,
         signer,
@@ -39,30 +41,49 @@ pub enum VaultInstruction {
     #[account(5, name = "token_program", desc = "Token program")]
     InitMultiDelegate = 0,
 
-    /// Initialize a token vault, starts inactivate. Add tokens in subsequent instructions, then activate.
     #[account(
         0,
         signer,
         writable,
-        name = "user",
-        desc = "The user user who is initializing the multidelegate instance for a particular token"
+        name = "delegator",
+        desc = "The user creating the delegation"
     )]
     #[account(
         1,
         writable,
         name = "multi_delegate",
-        desc = "The multi_delegate PDA that will be the delegate instance for this token"
+        desc = "The multi_delegate PDA for this token"
     )]
     #[account(
         2,
-        name = "delegate_account",
-        desc = "The account which will be keeping track of how much the delegate is able to pull"
+        writable,
+        name = "delegation_account",
+        desc = "The fixed delegation PDA being created"
+    )]
+    #[account(3, name = "delegatee", desc = "The user receiving delegation rights")]
+    #[account(4, name = "system_program", desc = "The system program")]
+    CreateFixedDelegation(CreateFixedDelegationData) = 1,
+
+    #[account(
+        0,
+        signer,
+        writable,
+        name = "delegator",
+        desc = "The user creating the delegation"
     )]
     #[account(
-        3,
-        name = "delegate",
-        desc = "The user is being designated as a delegate. They will be able to spend the users tokens"
+        1,
+        writable,
+        name = "multi_delegate",
+        desc = "The multi_delegate PDA for this token"
     )]
+    #[account(
+        2,
+        writable,
+        name = "delegation_account",
+        desc = "The recurring delegation PDA being created"
+    )]
+    #[account(3, name = "delegatee", desc = "The user receiving delegation rights")]
     #[account(4, name = "system_program", desc = "The system program")]
-    CreateSimpleDelegation(AddDelegateInstructionData) = 1,
+    CreateRecurringDelegation(CreateRecurringDelegationData) = 2,
 }

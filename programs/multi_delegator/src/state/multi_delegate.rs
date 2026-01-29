@@ -2,6 +2,8 @@ use core::mem::{size_of, transmute};
 use pinocchio::{program_error::ProgramError, pubkey::find_program_address, pubkey::Pubkey};
 use shank::ShankAccount;
 
+use crate::MultiDelegatorError;
+
 #[repr(C)]
 #[derive(ShankAccount)]
 pub struct MultiDelegate {
@@ -17,7 +19,7 @@ impl MultiDelegate {
     #[inline(always)]
     pub fn load_mut(bytes: &mut [u8]) -> Result<&mut Self, ProgramError> {
         if bytes.len() != Self::LEN {
-            return Err(ProgramError::InvalidAccountData);
+            return Err(MultiDelegatorError::InvalidAccountData.into());
         }
         Ok(unsafe { &mut *transmute::<*mut u8, *mut Self>(bytes.as_mut_ptr()) })
     }
@@ -25,7 +27,7 @@ impl MultiDelegate {
     #[inline(always)]
     pub fn load(bytes: &[u8]) -> Result<&Self, ProgramError> {
         if bytes.len() != Self::LEN {
-            return Err(ProgramError::InvalidAccountData);
+            return Err(MultiDelegatorError::InvalidAccountData.into());
         }
         Ok(unsafe { &*transmute::<*const u8, *const Self>(bytes.as_ptr()) })
     }

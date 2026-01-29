@@ -6,7 +6,7 @@
 
 Solana's SPL Token delegate model allows only **one delegate per token account**. This creates friction for:
 - Subscription payments where merchants need to pull recurring payments
-- P2P allowances where users want to authorize friends/services to spend on their behalf
+- P2P delegations where users want to authorize friends/services to spend on their behalf
 - Multiple simultaneous payment authorizations from a single token account
 
 ## Decision
@@ -14,14 +14,14 @@ Solana's SPL Token delegate model allows only **one delegate per token account**
 We implement a **dual-track model** that allows:
 
 1. **Subscriptions**: **Delegatee-driven**. The delegatee (merchant) creates a Plan PDA with pre-configured terms; delegators subscribe by creating Delegation PDAs that reference it (one-to-many pattern).
-2. **Allowances**: **Delegator-driven**. The delegator creates a Delegation PDA with embedded allowance terms for a specific recipient (one-to-one pattern). No Plan PDA required.
+2. **Delegations**: **Delegator-driven**. The delegator creates a Delegation PDA with embedded delegation terms for a specific recipient (one-to-one pattern). No Plan PDA required.
 3. **Tech Stack**: Pinocchio framework, Shank for IDL generation, Codama for TypeScript client generation
 
 Notes:
 - **Plan PDAs** are reusable accounts containing the terms (e.g., one-time, recurring) which subscriptions act upon.
 - **Subscriptions**: An agreement between delegator and delegatee over a shared Plan. The delegatee publishes a Plan PDA containing the Terms (defined by `kind`: Recurring or OneTime); delegators accept by creating a Delegation PDA that references it.
-- **Allowances**: A direct grant from delegator to delegatee. The delegator creates a Delegation PDA with embedded Terms (also defined by `kind`); no Plan PDA needed.
-- Both tracks use a unified `pull` instruction. Authorization depends on track: Subscriptions check Plan's whitelist (or permissionless), Allowances require the delegatee to pull.
+- **Delegations**: A direct grant from delegator to delegatee. The delegator creates a Delegation PDA with embedded Terms (also defined by `kind`); no Plan PDA needed.
+- Both tracks use a unified `pull` instruction. Authorization depends on track: Subscriptions check Plan's whitelist (or permissionless), Delegations require the delegatee to pull.
 
 ## Architecture Overview
 
@@ -35,8 +35,8 @@ graph TB
         X[Anyone/Whitelist] -->|IX:pull| DA & DB
     end
 
-    subgraph "Allowances (Delegator-driven)"
-        U2[Delegator] -->|IX:create_allowance| D3[Delegation PDA]
+    subgraph "Delegations (Delegator-driven)"
+        U2[Delegator] -->|IX:create_delegation| D3[Delegation PDA]
         Delegatee -->|IX:pull| D3
     end
 
@@ -69,18 +69,18 @@ getProgramAccounts(PROGRAM_ID, {
 | `update_plan` | Delegatee | Update plan validity, pull whitelist, set sunset |
 | `subscribe` | Delegator | Subscribe to a plan, create Delegation PDA |
 
-### Allowances (Delegator-driven)
+### Delegations (Delegator-driven)
 
 | Instruction | Actor | Purpose |
 |-------------|-------|---------|
-| `create_allowance` | Delegator | Create Delegation PDA with embedded allowance |
+| `create_delegation` | Delegator | Create Delegation PDA with embedded delegation terms |
 
 ### Shared
 
 | Instruction | Actor | Purpose |
 |-------------|-------|---------|
-| `revoke` | Delegator | Cancel subscription or revoke allowance |
-| `pull` | Varies | Execute transfer (Subscriptions: anyone or whitelist, Allowances: delegatee only) |
+| `revoke` | Delegator | Cancel subscription or revoke delegation |
+| `pull` | Varies | Execute transfer (Subscriptions: anyone or whitelist, Delegations: delegatee only) |
 
 ---
 
@@ -147,7 +147,7 @@ pub struct OneTimeTerms {
 | Recurring | 0 | `RecurringTerms` |
 | OneTime | 1 | `OneTimeTerms` |
 
-> **Note:** `AllowanceTerms` is a type alias for `PlanTerms`. Both use the same structure; the naming reflects usage context (Plan-based subscriptions vs direct allowances).
+> **Note:** `DelegationTerms` is a type alias for `PlanTerms`. Both use the same structure; the naming reflects usage context (Plan-based subscriptions vs direct delegations).
 
 ### Plan PDA
 
@@ -181,30 +181,30 @@ The Delegation account represents an active delegation. Used by both tracks with
 #[repr(C)]
 #[derive(Pod, Zeroable, Clone, Copy)]
 pub struct Delegation {
-    pub flags: u8,                   // bit0: is_allowance
+    pub flags: u8,                        // bit0: is_direct_delegation
     pub bump: u8,
     pub _reserved: [u8; 6],
-    pub delegator: Pubkey,           // 32 bytes - The user granting the delegation
-    pub plan_pda: Pubkey,            // 32 bytes - Subscriptions: valid, Allowances: default
-    pub allowance: AllowanceTerms,   // 104 bytes - Allowances only (zeroed for Subscriptions)
-    pub state: u8,                   // 1 byte - Active/Cancelled/Revoked
+    pub delegator: Pubkey,                // 32 bytes - The user granting the delegation
+    pub plan_pda: Pubkey,                 // 32 bytes - Subscriptions: valid, Delegations: default
+    pub delegation_terms: DelegationTerms, // 104 bytes - Delegations only (zeroed for Subscriptions)
+    pub state: u8,                        // 1 byte - Active/Cancelled/Revoked
     pub _padding2: [u8; 7],
-    pub period_pulled: u64,          // 8 bytes - Tracking
-    pub total_pulled: u64,           // 8 bytes - Tracking
-    pub last_pull_ts: u64,           // 8 bytes - Tracking
+    pub period_pulled: u64,               // 8 bytes - Tracking
+    pub total_pulled: u64,                // 8 bytes - Tracking
+    pub last_pull_ts: u64,                // 8 bytes - Tracking
 }
 ```
 
 **Field usage by track:**
 
-| Field | Subscriptions | Allowances |
-|-------|---------------|------------|
+| Field | Subscriptions | Delegations |
+|-------|---------------|-------------|
 | `plan_pda` | Valid (references Plan) | `Pubkey::default()` |
-| `allowance` | Zeroed (use Plan.terms) | Embedded terms |
+| `delegation_terms` | Zeroed (use Plan.terms) | Embedded terms |
 
 **PDA seeds by track:**
 - **Subscriptions**: `["delegation", plan_pda, delegator]` - keyed by Plan to prevent duplicate subscriptions
-- **Allowances**: `["delegation", delegator, delegatee]` - keyed by parties to prevent duplicate allowances
+- **Delegations**: `["delegation", delegator, delegatee]` - keyed by parties to prevent duplicate delegations
 
 ---
 
@@ -241,16 +241,16 @@ pub struct Delegation {
   |------|------|-------------|
   | `plan_pda` | Pubkey | Plan to subscribe to |
 
-### Allowances (Delegator-driven)
+### Delegations (Delegator-driven)
 
-- **IX: `create_allowance`**
+- **IX: `create_delegation`**
 
-  Delegator creates a Delegation PDA with embedded allowance terms.
+  Delegator creates a Delegation PDA with embedded delegation terms.
 
   | Parameter | Type | Description |
   |------|------|-------------|
   | `delegatee` | Pubkey | Destination for pulled funds |
-  | `allowance` | AllowanceTerms | Allowance terms (embedded in Delegation) |
+  | `delegation_terms` | DelegationTerms | Delegation terms (embedded in Delegation) |
 
 ### Shared
 
@@ -274,7 +274,7 @@ pub struct Delegation {
 
   **Authorization logic:**
   - **Subscriptions**: Check `Plan.use_pull_whitelist`; if true, caller must be in `Plan.pull_whitelist`; if false, anyone can call `pull`
-  - **Allowances**: Only the delegatee can call `pull`
+  - **Delegations**: Only the delegatee can call `pull`
 
 ---
 
@@ -304,7 +304,7 @@ sequenceDiagram
 
 > **Note:** The destination address (recipient of funds) is specified in `terms.destination` and can differ from the Plan owner.
 
-### Allowance: Delegator Creates Allowance for Bob
+### Delegation: Delegator Creates Delegation for Bob
 
 ```mermaid
 sequenceDiagram
@@ -312,11 +312,11 @@ sequenceDiagram
     participant P as Program
     participant B as Bob (Delegatee)
 
-    U->>P: create_allowance(delegatee=Bob, allowance)
+    U->>P: create_delegation(delegatee=Bob, delegation_terms)
     Note over P: Create Delegation PDA<br/>seeds: ["delegation", delegator, delegatee]
 
     B->>P: pull(delegation_pda, amount, claim_max)
-    Note over P: Verify caller is delegatee<br/>Enforce allowance limits
+    Note over P: Verify caller is delegatee<br/>Enforce delegation limits
     Note over P: CPI: spl_token::transfer<br/>from Alice's ATA via MDA
     P->>B: transfer(amount)
 ```
@@ -363,8 +363,8 @@ flowchart TB
         A1[subscribe_handler]
     end
 
-    subgraph "Allowances (Delegator-driven)"
-        A2[create_allowance_handler]
+    subgraph "Delegations (Delegator-driven)"
+        A2[create_delegation_handler]
     end
 
     subgraph "Shared Helper"
@@ -388,8 +388,8 @@ flowchart TB
 | Delegatee exceeds limits | Delegation tracks period_pulled, total_pulled |
 | Double-pull in same period | Period tracking with reset logic |
 | Pull after expiry | end_ts check |
-| Unauthorized pull | Subscriptions: whitelist check; Allowances: delegatee-only check |
-| Allowance hijacking via `subscribe` | Impossible, Allowances have no Plan PDA |
+| Unauthorized pull | Subscriptions: whitelist check; Delegations: delegatee-only check |
+| Delegation hijacking via `subscribe` | Impossible, Delegations have no Plan PDA |
 | Orphaned MDA delegation | Harmless; transfers require valid Delegation state |
 
 ---
@@ -397,21 +397,21 @@ flowchart TB
 ## Consequences
 
 ### Positive
-- `+` **Unified Delegation PDA** - single account type for both Subscriptions and Allowances
+- `+` **Unified Delegation PDA** - single account type for both Subscriptions and Delegations
 - `+` **Unified pull instruction** - single `pull` simplifies interface
 - `+` **Immutable terms** - `update_plan` cannot modify terms (amount, period, destination)
-- `+` **Configurable pull permissions** - Subscriptions: permissionless or whitelist; Allowances: delegatee-only
+- `+` **Configurable pull permissions** - Subscriptions: permissionless or whitelist; Delegations: delegatee-only
 - `+` **Sunset mechanism** - graceful plan discontinuation
 - `+` **Code reuse** - shared `init_delegation_helper`
 - `+` **Zero-copy performance** - Pinocchio with Pod/Zeroable
 - `+` **Reusable Plans** - one Plan serves many delegators
 - `+` **Immediate cancellation** - delegators can stop anytime
-- `+` **Allowances immune to hijacking** - no Plan PDA to subscribe on
+- `+` **Delegations immune to hijacking** - no Plan PDA to subscribe on
 
 ### Negative
-- `-` Two instruction paths to maintain (Subscriptions + Allowances)
+- `-` Two instruction paths to maintain (Subscriptions + Delegations)
 - `-` PlanTerms payload sized for largest variant
-- `-` Allowance Delegations larger (embeds terms)
+- `-` Delegation PDAs larger when using embedded terms
 
 ### Neutral
 - `~` Plan rent paid by delegatee (Subscriptions only)

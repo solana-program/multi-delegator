@@ -1,20 +1,24 @@
-import type { Address, Instruction, TransactionSigner } from 'gill';
-import {
-  type createSolanaClient,
-  createTransaction,
-  signTransactionMessageWithSigners,
+import type {
+  Address,
+  GetLatestBlockhashApi,
+  Instruction,
+  Rpc,
+  TransactionSigner,
 } from 'gill';
+import { createTransaction, signTransactionMessageWithSigners } from 'gill';
 import {
-  getCreateSimpleDelegationInstruction,
+  getCreateFixedDelegationInstruction,
+  getCreateRecurringDelegationInstruction,
   getInitMultiDelegateInstruction,
 } from './generated/index.js';
-import { getFixedDelegatePDA, getMultiDelegatePDA } from './pdas.js';
+import { getDelegationPDA, getMultiDelegatePDA } from './pdas.js';
 
-type SolanaClient = ReturnType<typeof createSolanaClient>;
-
-interface TransactionResult {
-  signature: string;
-}
+type SolanaClient = {
+  rpc: Rpc<GetLatestBlockhashApi>;
+  sendAndConfirmTransaction: (
+    tx: Awaited<ReturnType<typeof signTransactionMessageWithSigners>>,
+  ) => Promise<string>;
+};
 
 export class MultiDelegatorClient {
   constructor(public readonly client: SolanaClient) {}
@@ -43,8 +47,8 @@ export class MultiDelegatorClient {
     owner: TransactionSigner,
     tokenMint: Address,
     userAta: Address,
-  ): Promise<TransactionResult> {
-    const user = owner.address || (owner as TransactionSigner).address;
+  ): Promise<{ signature: string }> {
+    const user = owner.address;
     const [multiDelegate] = await getMultiDelegatePDA(user, tokenMint);
 
     const instruction = getInitMultiDelegateInstruction({
@@ -58,34 +62,67 @@ export class MultiDelegatorClient {
     return { signature: sig };
   }
 
-  async createSimpleDelegation(
-    owner: TransactionSigner,
+  async createFixedDelegation(
+    delegator: TransactionSigner,
     tokenMint: Address,
-    delegate: Address,
-    kind: number,
+    delegatee: Address,
+    nonce: number | bigint,
     amount: number | bigint,
     expiryS: number | bigint,
-  ): Promise<TransactionResult> {
-    const user = owner.address || (owner as TransactionSigner).address;
+  ): Promise<{ signature: string }> {
+    const user = delegator.address;
     const [multiDelegate] = await getMultiDelegatePDA(user, tokenMint);
-    const [delegateAccount] = await getFixedDelegatePDA(
+    const [delegationAccount] = await getDelegationPDA(
       multiDelegate,
-      delegate,
       user,
-      kind,
+      delegatee,
+      nonce,
     );
 
-    const instruction = getCreateSimpleDelegationInstruction({
-      user: owner,
+    const instruction = getCreateFixedDelegationInstruction({
+      delegator,
       multiDelegate,
-      delegateAccount,
-      delegate,
-      kind,
+      delegationAccount,
+      delegatee,
+      nonce,
       amount,
       expiryS,
     });
 
-    const sig = await this.buildAndSendTransaction([instruction], [owner]);
+    const sig = await this.buildAndSendTransaction([instruction], [delegator]);
+    return { signature: sig };
+  }
+
+  async createRecurringDelegation(
+    delegator: TransactionSigner,
+    tokenMint: Address,
+    delegatee: Address,
+    nonce: number | bigint,
+    amountPerPeriod: number | bigint,
+    periodLengthS: number | bigint,
+    expiryS: number | bigint,
+  ): Promise<{ signature: string }> {
+    const user = delegator.address;
+    const [multiDelegate] = await getMultiDelegatePDA(user, tokenMint);
+    const [delegationAccount] = await getDelegationPDA(
+      multiDelegate,
+      user,
+      delegatee,
+      nonce,
+    );
+
+    const instruction = getCreateRecurringDelegationInstruction({
+      delegator,
+      multiDelegate,
+      delegationAccount,
+      delegatee,
+      nonce,
+      amountPerPeriod,
+      periodLengthS,
+      expiryS,
+    });
+
+    const sig = await this.buildAndSendTransaction([instruction], [delegator]);
     return { signature: sig };
   }
 }

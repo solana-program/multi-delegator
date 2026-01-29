@@ -19,4 +19,8 @@ pub enum MultiDelegatorError {
     InvalidTokenSplTokenAccountData,
     InvalidDelegatePda,
     InvalidDelegationKind,
+    InvalidAccountData,
+    InvalidInstructionData,
+    NotEnoughAccountKeys,
+    InvalidInstruction,
 }

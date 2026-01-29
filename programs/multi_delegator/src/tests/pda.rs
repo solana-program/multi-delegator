@@ -1,6 +1,6 @@
 use solana_pubkey::Pubkey;
 
-use crate::{tests::constants::PROGRAM_ID, MultiDelegate, TermsKind, DELEGATE_BASE_SEED};
+use crate::{tests::constants::PROGRAM_ID, MultiDelegate, DELEGATE_BASE_SEED};
 
 pub fn get_multidelegate_pda(user: &Pubkey, token_mint: &Pubkey) -> (Pubkey, u8) {
     Pubkey::find_program_address(
@@ -9,19 +9,19 @@ pub fn get_multidelegate_pda(user: &Pubkey, token_mint: &Pubkey) -> (Pubkey, u8)
     )
 }
 
-pub fn get_delegate_pda(
+pub fn get_delegation_pda(
     multidelegate: &Pubkey,
-    delegate: &Pubkey,
-    payer: &Pubkey,
-    kind: TermsKind,
+    delegator: &Pubkey,
+    delegatee: &Pubkey,
+    nonce: u64,
 ) -> (Pubkey, u8) {
     Pubkey::find_program_address(
         &[
             DELEGATE_BASE_SEED,
             multidelegate.as_ref(),
-            delegate.as_ref(),
-            payer.as_ref(),
-            &[kind as u8],
+            delegator.as_ref(),
+            delegatee.as_ref(),
+            &nonce.to_le_bytes(),
         ],
         &PROGRAM_ID,
     )

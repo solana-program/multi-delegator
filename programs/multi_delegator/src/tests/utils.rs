@@ -1,4 +1,4 @@
-use litesvm::{types::FailedTransactionMetadata, types::TransactionMetadata, LiteSVM};
+use litesvm::{types::TransactionResult, LiteSVM};
 use solana_account::Account;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
@@ -18,12 +18,13 @@ use spl_token_2022::state::{Account as TokenAccount, AccountState, Mint as Mint2
 use solana_instruction::AccountMeta;
 
 use crate::{
-    instructions::{add_delegate, initialize_multidelegate},
+    instructions::{
+        create_fixed_delegation, create_recurring_delegation, initialize_multidelegate,
+    },
     tests::{
         constants::{PROGRAM_ID, SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID},
-        pda::{get_delegate_pda, get_multidelegate_pda},
+        pda::{get_delegation_pda, get_multidelegate_pda},
     },
-    TermsKind,
 };
 
 pub fn setup() -> (LiteSVM, Keypair) {
@@ -52,18 +53,19 @@ pub fn fetch_account<T: Pack + IsInitialized>(litesvm: &LiteSVM, pubkey: &Pubkey
     T::unpack(account.data.as_ref()).unwrap()
 }
 
+#[allow(clippy::result_large_err)]
 pub fn build_and_send_transaction(
     litesvm: &mut LiteSVM,
     signers: &[&Keypair],
     payer: &Pubkey,
     ixs: &[Instruction],
-) -> Result<TransactionMetadata, Box<FailedTransactionMetadata>> {
+) -> TransactionResult {
     let tx = Transaction::new(
         signers,
         Message::new(ixs, Some(payer)),
         litesvm.latest_blockhash(),
     );
-    litesvm.send_transaction(tx).map_err(Box::new)
+    litesvm.send_transaction(tx)
 }
 
 pub fn init_wallet(litesvm: &mut LiteSVM, lamports: u64) -> Keypair {
@@ -146,11 +148,7 @@ pub fn initialize_multidelegate_action(
     litesvm: &mut LiteSVM,
     payer: &Keypair,
     mint: Pubkey,
-) -> (
-    Result<TransactionMetadata, Box<FailedTransactionMetadata>>,
-    Pubkey,
-    u8,
-) {
+) -> (TransactionResult, Pubkey, u8) {
     let user_ata = get_associated_token_address(&payer.pubkey(), &mint);
     let (multi_delegate_pda, bump) = get_multidelegate_pda(&payer.pubkey(), &mint);
 
@@ -174,34 +172,31 @@ pub fn initialize_multidelegate_action(
     )
 }
 
-pub fn create_simple_delegate_action(
+pub fn create_fixed_delegation_action(
     litesvm: &mut LiteSVM,
     payer: &Keypair,
     mint: Pubkey,
-    delegate: Pubkey,
+    delegatee: Pubkey,
+    nonce: u64,
     amount: u64,
     expiry_s: u64,
-    kind: TermsKind,
-) -> (
-    Result<TransactionMetadata, Box<FailedTransactionMetadata>>,
-    Pubkey,
-) {
+) -> (TransactionResult, Pubkey) {
     let (multi_delegate_pda, _bump) = get_multidelegate_pda(&payer.pubkey(), &mint);
-    let (delegate_pda, _bump) =
-        get_delegate_pda(&multi_delegate_pda, &delegate, &payer.pubkey(), kind);
+    let (delegation_pda, _bump) =
+        get_delegation_pda(&multi_delegate_pda, &payer.pubkey(), &delegatee, nonce);
 
     let ix = Instruction {
         program_id: PROGRAM_ID,
         accounts: vec![
             AccountMeta::new(payer.pubkey(), true),
             AccountMeta::new(multi_delegate_pda, false),
-            AccountMeta::new(delegate_pda, false),
-            AccountMeta::new_readonly(delegate, false),
+            AccountMeta::new(delegation_pda, false),
+            AccountMeta::new_readonly(delegatee, false),
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
         ],
         data: [
-            vec![*add_delegate::DISCRIMINATOR],
-            vec![kind as u8],
+            vec![*create_fixed_delegation::DISCRIMINATOR],
+            nonce.to_le_bytes().to_vec(),
             amount.to_le_bytes().to_vec(),
             expiry_s.to_le_bytes().to_vec(),
         ]
@@ -210,6 +205,80 @@ pub fn create_simple_delegate_action(
 
     (
         build_and_send_transaction(litesvm, &[payer], &payer.pubkey(), &[ix]),
-        delegate_pda,
+        delegation_pda,
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn create_recurring_delegation_action(
+    litesvm: &mut LiteSVM,
+    payer: &Keypair,
+    mint: Pubkey,
+    delegatee: Pubkey,
+    nonce: u64,
+    amount_per_period: u64,
+    period_length_s: u64,
+    expiry_s: u64,
+) -> (TransactionResult, Pubkey) {
+    let (multi_delegate_pda, _bump) = get_multidelegate_pda(&payer.pubkey(), &mint);
+    let (delegation_pda, _bump) =
+        get_delegation_pda(&multi_delegate_pda, &payer.pubkey(), &delegatee, nonce);
+
+    let ix = Instruction {
+        program_id: PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(payer.pubkey(), true),
+            AccountMeta::new(multi_delegate_pda, false),
+            AccountMeta::new(delegation_pda, false),
+            AccountMeta::new_readonly(delegatee, false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+        ],
+        data: [
+            vec![*create_recurring_delegation::DISCRIMINATOR],
+            nonce.to_le_bytes().to_vec(),
+            amount_per_period.to_le_bytes().to_vec(),
+            period_length_s.to_le_bytes().to_vec(),
+            expiry_s.to_le_bytes().to_vec(),
+        ]
+        .concat(),
+    };
+
+    (
+        build_and_send_transaction(litesvm, &[payer], &payer.pubkey(), &[ix]),
+        delegation_pda,
+    )
+}
+
+#[allow(clippy::too_many_arguments, clippy::result_large_err)]
+pub fn create_fixed_delegation_action_with_pda(
+    litesvm: &mut LiteSVM,
+    payer: &Keypair,
+    mint: Pubkey,
+    delegatee: Pubkey,
+    delegation_pda: Pubkey,
+    nonce: u64,
+    amount: u64,
+    expiry_s: u64,
+) -> TransactionResult {
+    let (multi_delegate_pda, _bump) = get_multidelegate_pda(&payer.pubkey(), &mint);
+
+    let ix = Instruction {
+        program_id: PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(payer.pubkey(), true),
+            AccountMeta::new(multi_delegate_pda, false),
+            AccountMeta::new(delegation_pda, false),
+            AccountMeta::new_readonly(delegatee, false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+        ],
+        data: [
+            vec![*create_fixed_delegation::DISCRIMINATOR],
+            nonce.to_le_bytes().to_vec(),
+            amount.to_le_bytes().to_vec(),
+            expiry_s.to_le_bytes().to_vec(),
+        ]
+        .concat(),
+    };
+
+    build_and_send_transaction(litesvm, &[payer], &payer.pubkey(), &[ix])
 }

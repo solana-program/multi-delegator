@@ -1,7 +1,4 @@
-use pinocchio::{
-    account_info::AccountInfo, entrypoint, program_error::ProgramError, pubkey::Pubkey,
-    ProgramResult,
-};
+use pinocchio::{account_info::AccountInfo, entrypoint, pubkey::Pubkey, ProgramResult};
 
 entrypoint!(process_instruction);
 
@@ -29,7 +26,8 @@ fn process_instruction(
 ) -> ProgramResult {
     match instruction_data.split_first() {
         Some((0, data)) => initialize_multidelegate::process((data, accounts)),
-        Some((1, data)) => add_delegate::process((data, accounts)),
-        _ => Err(ProgramError::InvalidInstructionData),
+        Some((1, data)) => create_fixed_delegation::process((data, accounts)),
+        Some((2, data)) => create_recurring_delegation::process((data, accounts)),
+        _ => Err(MultiDelegatorError::InvalidInstruction.into()),
     }
 }

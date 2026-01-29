@@ -24,3 +24,14 @@ impl AccountCheck for SystemAccount {
         Ok(())
     }
 }
+
+pub struct MultiDelegateAccount;
+
+impl AccountCheck for MultiDelegateAccount {
+    fn check(account: &AccountInfo) -> Result<(), ProgramError> {
+        if account.owner() != &crate::ID {
+            return Err(MultiDelegatorError::InvalidMultiDelegatePda.into());
+        }
+        Ok(())
+    }
+}
