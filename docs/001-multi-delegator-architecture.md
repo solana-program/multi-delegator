@@ -5,415 +5,469 @@
 ## Context
 
 Solana's SPL Token delegate model allows only **one delegate per token account**. This creates friction for:
-- Subscription payments where merchants need to pull recurring payments
+
 - P2P delegations where users want to authorize friends/services to spend on their behalf
 - Multiple simultaneous payment authorizations from a single token account
+- Need for controlled, recurring payments with enforceable limits
 
 ## Decision
 
-We implement a **dual-track model** that allows:
+We implement a **single-track delegation model** that provides:
 
-1. **Subscriptions**: **Delegatee-driven**. The delegatee (merchant) creates a Plan PDA with pre-configured terms; delegators subscribe by creating Delegation PDAs that reference it (one-to-many pattern).
-2. **Delegations**: **Delegator-driven**. The delegator creates a Delegation PDA with embedded delegation terms for a specific recipient (one-to-one pattern). No Plan PDA required.
-3. **Tech Stack**: Pinocchio framework, Shank for IDL generation, Codama for TypeScript client generation
+1. **MultiDelegate Authority (MDA)**: A programmatic delegate with unlimited token approval authority (`u64::MAX`) over user token accounts
+2. **Delegation PDAs**: Individual constraints governing MDA spending behavior
+3. **Delegation Types**: Fixed (one-time with expiry) and Recurring (periodic pulls with limits)
+4. **Tech Stack**: Pinocchio framework, Shank for IDL generation, Codama for TypeScript client generation
 
-Notes:
-- **Plan PDAs** are reusable accounts containing the terms (e.g., one-time, recurring) which subscriptions act upon.
-- **Subscriptions**: An agreement between delegator and delegatee over a shared Plan. The delegatee publishes a Plan PDA containing the Terms (defined by `kind`: Recurring or OneTime); delegators accept by creating a Delegation PDA that references it.
-- **Delegations**: A direct grant from delegator to delegatee. The delegator creates a Delegation PDA with embedded Terms (also defined by `kind`); no Plan PDA needed.
-- Both tracks use a unified `pull` instruction. Authorization depends on track: Subscriptions check Plan's whitelist (or permissionless), Delegations require the delegatee to pull.
+**Key Design**: MDA receives unlimited approval, but can only transfer when Delegation PDA constraints allow. The program validates constraints before executing transfers, making the system as secure as traditional approval-based delegations while enabling multi-delegation capabilities.
 
 ## Architecture Overview
 
+### Fixed Delegation Flow
+
+At a high level, Alice will first create a MultiDelegatePDA which she will give the power to transfer tokens on her behalf.
+After this, she will be able to create `Delegations` of different kinds to different users.
+
+Once she creates a Delegation for Bob, he will be able to perform transfers through the program.
+The multidelegate program will perform the relevant checks depending on the type of delegation between Alice and Bob.
+
 ```mermaid
 graph TB
-    subgraph "Subscriptions (Delegatee-driven)"
-        M[Delegatee] -->|IX:create_plan| Plan[Plan PDA]
-        Alice[Delegator Alice] -->|IX:subscribe| DA[Delegation PDA]
-        Bob[Delegator Bob] -->|IX:subscribe| DB[Delegation PDA]
-        Plan -.-> DA & DB
-        X[Anyone/Whitelist] -->|IX:pull| DA & DB
-    end
-
-    subgraph "Delegations (Delegator-driven)"
-        U2[Delegator] -->|IX:create_delegation| D3[Delegation PDA]
-        Delegatee -->|IX:pull| D3
-    end
-
-    subgraph "Multi-delegate program"
-        MDA[Multi-Delegate Authority PDA]
-    end
-
-    DA & DB -.->|transfers via| MDA
-    D3 -.->|transfers via| MDA
+    B[Bob] -->|transfer| FD
+    A[Alice] -->|initialize_multidelegate| MD[MultiDelegate PDA]
+    A -->|create_delegation | FD[Delegation]
+    FD -->|transfer| MD
+    MD -->|transfer| TP[Token Program]
+    TP -->|Transfers from Alice's ATA to Bob| B
 ```
+
+### Initialization: User Creates MDA
+
+```mermaid
+sequenceDiagram
+    participant U as User (Alice)
+    participant P as Program
+    participant S as SVM
+    participant T as Token Program
+
+    U->>P: initialize_multidelegate(user, mint, user_ata)
+    Note over P: Validate PDA derived from<br/>["multi_delegate", user, mint]
+
+    P->>S: Create MDA account
+    S->>P: Account created
+
+    P->>T: Approve(user_ata, MDA, u64::MAX)
+    T->>P: Delegation approved
+    P->>U: MDA ready for delegations
+```
+
+### Fixed Delegation: User Creates for Bob
+
+```mermaid
+sequenceDiagram
+    participant A as Alice
+    participant P as Program
+    participant B as Bob
+
+    A->>P: create_fixed_delegation(bob, nonce, amount, expiry)
+    Note over P: Validate MDA exists<br/>Alice is delegator
+
+    P->>P: Derive Delegation PDA<br/>["delegation", MDA, alice, bob, nonce]
+    Note over P: Create FixedDelegation PDA
+    P->>A: Delegation created
+
+    Note over A,B: Bob can now spend up to `amount`<br/>until `expiry_s`
+```
+
+### Recurring Delegation: User Creates for Bob
+
+```mermaid
+sequenceDiagram
+    participant A as Alice
+    participant P as Program
+    participant B as Bob
+
+    A->>P: create_recurring_delegation(bob, nonce, amount_per_period, period_length_s, expiry)
+    Note over P: Validate MDA exists<br/>Alice is delegator
+
+    P->>P: Derive Delegation PDA<br/>["delegation", MDA, alice, bob, nonce]
+    Note over P: Create RecurringDelegation PDA
+    P->>A: Delegation created
+
+    Note over A,B: Bob can pull `amount_per_period`<br/>every `period_length_s` seconds until `expiry_s`
+```
+
+### Transfer Execution: Fixed Delegation
+
+```mermaid
+sequenceDiagram
+    participant B as Bob
+    participant P as Program
+    participant MDA as MDA
+    participant T as Token Program
+
+    B->>P: transfer_fixed(delegation_pda, amount)
+    Note over P: Load FixedDelegation
+
+    alt Not expired and amount OK
+        P->>MDA: Delegate authority check
+        P->>T: Transfer from Alice's ATA<br/>to Bob's ATA (amount)
+        T->>B: Tokens transferred
+        P->>P: Deduct from delegation.amount
+    else Expired or too much
+        P->>B: Error (expired or exceeds)
+    end
+```
+
+### Transfer Execution: Recurring Delegation
+
+```mermaid
+sequenceDiagram
+    participant B as Bob
+    participant P as Program
+    participant MDA as MDA
+    participant T as Token Program
+
+    B->>P: transfer_recurring(delegation_pda, amount)
+    Note over P: Load RecurringDelegation
+
+    alt Period elapsed and amount OK
+        Note over P: Check timestamp and tracking
+        P->>MDA: Delegate authority check
+        P->>T: Transfer from Alice's ATA<br/>to Bob's ATA (amount)
+        T->>B: Tokens transferred
+        P->>P: Update last_pull_ts<br/>and amount_pulled_in_period
+    else Too soon or too much
+        P->>B: Error (period not elapsed or exceeds)
+    end
+```
+
+---
+
+### MultiDelegate Authority (MDA)
+
+Each user creates one MDA per token mint with seeds `["multi_delegate", user, mint]`. The MDA:
+
+1. Receives `u64::MAX` delegated approval from the user's ATA
+2. Acts as the delegate for all transfers from that user's account
+3. Cannot transfer on its own - requires active Delegation PDA to authorize
 
 ### Delegate Discovery
 
-Delegates (beneficiaries) discover their delegations via `getProgramAccounts` with `memcmp` filter on the `destination` field. This follows Solana ecosystem conventions (SPL Token, OpenBook, Phoenix).
+Delegates discover their delegations via `getProgramAccounts` with `memcmp` filter on the `delegatee` field:
 
 ```typescript
-// Webapp/SDK discovers Bob's delegations:
+// Delegatee discovers Bob's delegations:
 getProgramAccounts(PROGRAM_ID, {
-  filters: [{ memcmp: { offset: DESTINATION_OFFSET, bytes: bobPubkey } }]
+  filters: [{ memcmp: { offset: DELEGATEE_OFFSET, bytes: bobPubkey } }],
 });
 ```
 
 ## Instructions
 
-### Subscriptions (Delegatee-driven)
+### Initialization
 
-| Instruction | Actor | Purpose |
-|-------------|-------|---------|
-| `create_plan` | Delegatee | Create a public Plan PDA with terms |
-| `update_plan` | Delegatee | Update plan validity, pull whitelist, set sunset |
-| `subscribe` | Delegator | Subscribe to a plan, create Delegation PDA |
+| Instruction                | Actor     | Purpose                                              |
+| -------------------------- | --------- | ---------------------------------------------------- |
+| `initialize_multidelegate` | Delegator | Create MDA and approve `u64::MAX` delegate authority |
 
-### Delegations (Delegator-driven)
+### Delegation Creation
 
-| Instruction | Actor | Purpose |
-|-------------|-------|---------|
-| `create_delegation` | Delegator | Create Delegation PDA with embedded delegation terms |
-
-### Shared
-
-| Instruction | Actor | Purpose |
-|-------------|-------|---------|
-| `revoke` | Delegator | Cancel subscription or revoke delegation |
-| `pull` | Varies | Execute transfer (Subscriptions: anyone or whitelist, Delegations: delegatee only) |
+| Instruction                   | Actor     | Purpose                                                   |
+| ----------------------------- | --------- | --------------------------------------------------------- |
+| `create_fixed_delegation`     | Delegator | Create one-time delegation with nonce, amount, and expiry |
+| `create_recurring_delegation` | Delegator | Create recurring delegation with period limits            |
 
 ---
 
 ## Types
 
-### Zero-Copy Pattern
+```rust
+#[repr(u8)]
+pub enum DelegationKind {
+    Fixed = 0,
+    Recurring = 1,
+}
+```
 
-Pinocchio requires `Pod`/`Zeroable` traits for zero-copy deserialization. Rust enums are incompatible because their discriminants violate `Pod` requirements (must accept any bit pattern).
+### MultiDelegate
 
-**Solution:** Discriminator + Payload pattern:
+The MultiDelegate PDA stores the delegator and mint information:
 
 ```rust
-#[repr(C)]
-#[derive(Pod, Zeroable, Clone, Copy)]
-pub struct PlanTerms {
-    pub kind: u8,              // 0 = Recurring, 1 = OneTime
-    pub _padding: [u8; 7],
-    pub payload: [u8; 96],     // sized to largest variant (RecurringTerms)
+pub struct MultiDelegate {
+    pub user: Pubkey,      // 32 bytes - delegator key
+    pub token_mint: Pubkey, // 32 bytes - mint this MDA controls
+    pub bump: u8,          // 1 byte
 }
 
-pub enum PlanTermsKind<'a> {
-    Recurring(&'a RecurringTerms),
-    OneTime(&'a OneTimeTerms),
-}
+impl MultiDelegate {
+    pub const SEED: &[u8] = b"multi_delegate";
+    pub const LEN: usize = 65;
 
-impl PlanTerms {
-    pub fn try_as_kind(&self) -> Option<PlanTermsKind> {
-        match self.kind {
-            0 => Some(PlanTermsKind::Recurring(bytemuck::from_bytes(&self.payload[..96]))),
-            1 => Some(PlanTermsKind::OneTime(bytemuck::from_bytes(&self.payload[..72]))),
-            _ => None,
-        }
+    pub fn find_pda(user: &Pubkey, token_mint: &Pubkey) -> (Pubkey, u8) {
+        find_program_address(
+            &[Self::SEED, user.as_ref(), token_mint.as_ref()],
+            &crate::ID,
+        )
     }
 }
 ```
 
-### `PlanTerms` Variants
+**PDA seeds**: `["multi_delegate", delegator_key, mint_key]`
 
-Each `kind` maps to a well-typed struct:
+### Header
 
-```rust
-#[repr(C)]
-#[derive(Pod, Zeroable, Clone, Copy)]
-pub struct RecurringTerms {
-    pub mint: Pubkey,           // 32 bytes
-    pub destination: Pubkey,    // 32 bytes
-    pub amount_per_period: u64, // 8 bytes
-    pub period_secs: u64,       // 8 bytes
-    pub start_ts: u64,          // 8 bytes
-    pub end_ts: u64,            // 8 bytes
-}                               // Total: 96 bytes
-
-#[repr(C)]
-#[derive(Pod, Zeroable, Clone, Copy)]
-pub struct OneTimeTerms {
-    pub mint: Pubkey,           // 32 bytes
-    pub destination: Pubkey,    // 32 bytes
-    pub amount: u64,            // 8 bytes
-}                               // Total: 72 bytes
-```
-
-| Kind | Value | Struct |
-|------|-------|--------|
-| Recurring | 0 | `RecurringTerms` |
-| OneTime | 1 | `OneTimeTerms` |
-
-> **Note:** `DelegationTerms` is a type alias for `PlanTerms`. Both use the same structure; the naming reflects usage context (Plan-based subscriptions vs direct delegations).
-
-### Plan PDA
-
-The Plan account stores terms, ownership, and pull permissions:
+Shared header for all delegation types:
 
 ```rust
-#[repr(C)]
-#[derive(Pod, Zeroable, Clone, Copy)]
-pub struct Plan {
-    pub owner: Pubkey,                 // 32 bytes - Plan creator
-    pub plan_id: u64,                  // 8 bytes - Unique identifier
-    pub terms: PlanTerms,              // 104 bytes - Payment terms
-    pub accepting_new_subscribers: u8, // 1 byte - Can new users subscribe?
-    pub use_pull_whitelist: u8,       // 1 byte - Enable whitelist for pull?
-    pub _padding: [u8; 6],             // 6 bytes - Alignment
-    pub sunset_ts: u64,                // 8 bytes - No renewals after this
-    pub pull_whitelist: [Pubkey; 4],  // 128 bytes - Allowed pullers
-    pub metadata_uri: [u8; 128],       // 128 bytes - Optional metadata
-}                                      // Total: ~423 bytes
-```
+#[repr(C, packed)]
+pub struct Header {
+    pub version: u8,      // 1 byte - account format version
+    pub kind: u8,          // 1 byte - DelegationKind discriminator
+    pub bump: u8,          // 1 byte
+    pub delegator: Pubkey, // 32 bytes - user granting delegation
+    pub delegatee: Pubkey, // 32 bytes - beneficiary
+}
 
-**Pull permissions logic:**
-- If `use_pull_whitelist == 0`: anyone can call `pull` (permissionless)
-- If `use_pull_whitelist == 1`: only `owner` or addresses in `pull_whitelist` can call `pull`
-
-### Delegation PDA
-
-The Delegation account represents an active delegation. Used by both tracks with different field usage:
-
-```rust
-#[repr(C)]
-#[derive(Pod, Zeroable, Clone, Copy)]
-pub struct Delegation {
-    pub flags: u8,                        // bit0: is_direct_delegation
-    pub bump: u8,
-    pub _reserved: [u8; 6],
-    pub delegator: Pubkey,                // 32 bytes - The user granting the delegation
-    pub plan_pda: Pubkey,                 // 32 bytes - Subscriptions: valid, Delegations: default
-    pub delegation_terms: DelegationTerms, // 104 bytes - Delegations only (zeroed for Subscriptions)
-    pub state: u8,                        // 1 byte - Active/Cancelled/Revoked
-    pub _padding2: [u8; 7],
-    pub period_pulled: u64,               // 8 bytes - Tracking
-    pub total_pulled: u64,                // 8 bytes - Tracking
-    pub last_pull_ts: u64,                // 8 bytes - Tracking
+impl Header {
+    pub const LEN: usize = 67;
+    pub const CURRENT_VERSION: u8 = 1;
+    pub const KIND_OFFSET: usize = 1;
 }
 ```
 
-**Field usage by track:**
+### FixedDelegation
 
-| Field | Subscriptions | Delegations |
-|-------|---------------|-------------|
-| `plan_pda` | Valid (references Plan) | `Pubkey::default()` |
-| `delegation_terms` | Zeroed (use Plan.terms) | Embedded terms |
+One-time delegation with explicit amount and expiry:
 
-**PDA seeds by track:**
-- **Subscriptions**: `["delegation", plan_pda, delegator]` - keyed by Plan to prevent duplicate subscriptions
-- **Delegations**: `["delegation", delegator, delegatee]` - keyed by parties to prevent duplicate delegations
+```rust
+#[repr(C, packed)]
+pub struct FixedDelegation {
+    pub header: Header,     // 67 bytes
+    pub amount: u64,        // 8 bytes - max pullable amount
+    pub expiry_s: u64,      // 8 bytes - Unix timestamp
+}
+
+impl FixedDelegation {
+    pub const LEN: usize = 83;
+}
+```
+
+**PDA seeds**: `["delegation", multi_delegate, delegator, delegatee, nonce]`
+
+**Use cases**: One-time payments, time-limited allowances, gift delegations
+
+### RecurringDelegation
+
+Recurring delegation with period tracking:
+
+```rust
+#[repr(C, packed)]
+pub struct RecurringDelegation {
+    pub header: Header,              // 67 bytes
+    pub last_pull_ts: i64,           // 8 bytes - last transfer timestamp
+    pub period_length_s: u64,         // 8 bytes - seconds per period
+    pub expiry_s: u64,                // 8 bytes - delegation expiry
+    pub amount_per_period: u64,       // 8 bytes - max per period
+    pub amount_pulled_in_period: u64, // 8 bytes - tracking
+}
+
+impl RecurringDelegation {
+    pub const LEN: usize = 83;
+}
+```
+
+**PDA seeds**: Same as FixedDelegation
+
+**Use cases**: Subscription payments, recurring allowances, salary-style disbursements
 
 ---
 
 ## Instruction Details
 
-### Subscriptions (Delegatee-driven)
+### `initialize_multidelegate` (Discriminator: 0)
 
-- **IX: `create_plan`**
+Creates the MDA and grants it `u64::MAX` delegated approval over the user's ATA.
 
-  Delegatee creates a public plan PDA (reusable by many delegators).
+| Account | Type             | Description                 |
+| ------- | ---------------- | --------------------------- |
+| 0       | signer, writable | The delegator (user)        |
+| 1       | writable         | MultiDelegate PDA to create |
+| 2       | mint             | Token mint for this MDA     |
+| 3       | writable         | User's ATA to approve       |
+| 4       | system_program   | System program              |
+| 5       | token_program    | Token program               |
 
-  | Parameter | Type | Description |
-  |------|------|-------------|
-  | `plan_id` | u64 | Unique identifier for the plan |
-  | `terms` | PlanTerms | Plan terms (see Types section) |
-  | `metadata_uri` | String? | Optional metadata URI |
+**Process:**
 
-- **IX: `update_plan`**
+1. Validate MDA PDA address derived from `["multi_delegate", user, mint]`
+2. Create MDA account with delegator and mint data
+3. Call `Approve { source: user_ata, delegate: multi_delegate, authority: user, amount: u64::MAX }`
 
-  Delegatee updates plan validity and pull permissions.
+### `create_fixed_delegation` (Discriminator: 1)
 
-  | Parameter | Type | Description |
-  |------|------|-------------|
-  | `accepting_new_subscribers` | bool? | Whether new delegators can subscribe |
-  | `sunset_ts` | u64? | No renewals after this timestamp |
-  | `use_pull_whitelist` | bool? | Enable/disable pull whitelist |
-  | `pull_whitelist` | [Pubkey; 4]? | Addresses allowed to pull (in addition to owner) |
+Creates a one-time delegation with nonce-based PDA.
 
-- **IX: `subscribe`**
+| Account | Type             | Description                            |
+| ------- | ---------------- | -------------------------------------- |
+| 0       | signer, writable | The delegator creating this delegation |
+| 1       | writable         | MultiDelegate PDA for this token type  |
+| 2       | writable         | FixedDelegation PDA being created      |
+| 3       |                  | The delegatee (beneficiary)            |
+| 4       | system_program   | System program                         |
 
-  Delegator subscribes to a specific plan PDA; creates a per-user Delegation PDA.
+**Parameters:**
 
-  | Parameter | Type | Description |
-  |------|------|-------------|
-  | `plan_pda` | Pubkey | Plan to subscribe to |
+- `nonce: u64` - Unique identifier to create distinct PDAs for same (delegator, delegatee) pair
+- `amount: u64` - Maximum amount transferable
+- `expiry_s: u64` - Unix timestamp when delegation expires
 
-### Delegations (Delegator-driven)
+**Process:**
 
-- **IX: `create_delegation`**
+1. Validate MultiDelegate exists and belongs to delegator
+2. Derive and validate Delegation PDA from `["delegation", multi_delegate, delegator, delegatee, nonce]`
+3. Create Delegation account with header and terms
 
-  Delegator creates a Delegation PDA with embedded delegation terms.
+### `create_recurring_delegation` (Discriminator: 2)
 
-  | Parameter | Type | Description |
-  |------|------|-------------|
-  | `delegatee` | Pubkey | Destination for pulled funds |
-  | `delegation_terms` | DelegationTerms | Delegation terms (embedded in Delegation) |
+Creates a recurring delegation with period tracking.
 
-### Shared
+| Account | Type             | Description                            |
+| ------- | ---------------- | -------------------------------------- |
+| 0       | signer, writable | The delegator creating this delegation |
+| 1       | writable         | MultiDelegate PDA for this token type  |
+| 2       | writable         | RecurringDelegation PDA being created  |
+| 3       |                  | The delegatee (beneficiary)            |
+| 4       | system_program   | System program                         |
 
-- **IX: `revoke`**
+**Parameters:**
 
-  Delegator cancels subscription or revokes allowance (immediate stop of future pulls).
+- `nonce: u64` - Unique identifier
+- `amount_per_period: u64` - Maximum amount per period
+- `period_length_s: u64` - Seconds in each period
+- `expiry_s: u64` - Delegation expiry timestamp
+- `last_pull_ts: i64` - defaults to 0
+- `amount_pulled_in_period: u64` - defaults to 0
 
-  | Parameter | Type | Description |
-  |------|------|-------------|
-  | `delegation_pda` | Pubkey | Delegation to revoke |
+**Process:**
 
-- **IX: `pull`**
-
-  Unified pull instruction for both tracks. Executes transfer according to Delegation terms.
-
-  | Parameter | Type | Description |
-  |------|------|-------------|
-  | `delegation_pda` | Pubkey | Delegation to pull from |
-  | `amount` | u64? | Amount to pull (optional for recurring terms) |
-  | `claim_max` | bool | If true, pull max available |
-
-  **Authorization logic:**
-  - **Subscriptions**: Check `Plan.use_pull_whitelist`; if true, caller must be in `Plan.pull_whitelist`; if false, anyone can call `pull`
-  - **Delegations**: Only the delegatee can call `pull`
-
----
-
-## Sequence Diagrams
-
-### Subscription: Delegatee Creates Plan, Delegator Subscribes
-
-```mermaid
-sequenceDiagram
-    participant D as Delegatee (Merchant)
-    participant P as Program
-    participant U as Delegator (Alice)
-    participant X as Anyone / Whitelist
-
-    D->>P: create_plan(plan_id, terms, metadata_uri?)
-    Note over P: Create Plan PDA<br/>seeds: ["plan", delegatee, plan_id]
-    Note over D: Publish plan_pda (website/QR)
-
-    U->>P: subscribe(plan_pda)
-    Note over P: Create Delegation PDA<br/>seeds: ["delegation", plan_pda, delegator]
-
-    X->>P: pull(delegation_pda)
-    Note over P: Validate period elapsed
-    Note over P: CPI: spl_token::transfer<br/>from Alice's ATA via MDA
-    P->>D: transfer(plan.terms.amount)
-```
-
-> **Note:** The destination address (recipient of funds) is specified in `terms.destination` and can differ from the Plan owner.
-
-### Delegation: Delegator Creates Delegation for Bob
-
-```mermaid
-sequenceDiagram
-    participant U as Alice (Delegator)
-    participant P as Program
-    participant B as Bob (Delegatee)
-
-    U->>P: create_delegation(delegatee=Bob, delegation_terms)
-    Note over P: Create Delegation PDA<br/>seeds: ["delegation", delegator, delegatee]
-
-    B->>P: pull(delegation_pda, amount, claim_max)
-    Note over P: Verify caller is delegatee<br/>Enforce delegation limits
-    Note over P: CPI: spl_token::transfer<br/>from Alice's ATA via MDA
-    P->>B: transfer(amount)
-```
-
-### Delegator Revokes Delegation
-
-```mermaid
-sequenceDiagram
-    participant U as Delegator
-    participant P as Program
-    participant X as Anyone/Whitelist
-
-    U->>P: revoke(delegation_pda)
-    Note over P: Delegation state -> Revoked
-
-    X->>P: pull(delegation_pda)
-    Note over P: Rejected (not Active)<br/>No transfer
-```
-
-### Subscription: Delegatee Sunsets Plan
-
-```mermaid
-sequenceDiagram
-    participant D as Delegatee
-    participant P as Program
-    participant X as Anyone/Whitelist
-
-    D->>P: update_plan(accepting_new_subscribers, sunset_ts?)
-    Note over P: Plan marked as sunsetting
-
-    X->>P: pull(delegation_pda)
-    Note over P: If past sunset_ts:<br/>Collect final payment if due<br/>Then auto-cancel
-```
+1. Validate MultiDelegate exists and belongs to delegator
+2. Derive and validate Delegation PDA with nonce
+3. Create Delegation account with header and terms
 
 ---
 
-## Delegation Modes handlers
+## Spend/Transfer Design
 
-Both handlers use a shared `init_delegation_helper` to initialize the **Delegation PDA**.
+The transfer mechanism must validate delegation PDA constraints before allowing the MDA to transfer tokens from the delegator's ATA.
 
-```mermaid
-flowchart TB
-    subgraph "Subscriptions (Delegatee-driven)"
-        A1[subscribe_handler]
-    end
+### Single `transfer` Instruction
 
-    subgraph "Delegations (Delegator-driven)"
-        A2[create_delegation_handler]
-    end
+A unified instruction that validates constraints based on delegation kind at runtime.
 
-    subgraph "Shared Helper"
-        A1 --> H[init_delegation_helper]
-        A2 --> H
-        H --> D[Delegation PDA]
-    end
+```rust
+pub fn process((data, accounts): (&[u8], &[AccountInfo])) -> ProgramResult {
+    // Always delegation has to be the first account
 
-    subgraph "Execution"
-        D --> P1[pull]
-    end
+    match accounts.body().first().from_le_bytes() {
+        0 => validate_and_execute_fixed_transfer(
+            delegation, data, accounts, current_ts
+        )?,
+        1 => validate_and_execute_recurring_transfer(
+            delegation, data, accounts, current_ts
+        )?,
+        _ => return Err(MultiDelegatorError::InvalidDelegationKind.into()),
+    }
+
+    Ok(())
+}
+
+fn validate_and_execute_fixed_transfer(
+    delegation: &FixedDelegation,
+    transfer_data: &vec[u8],
+    accounts: &[AccountInfo],
+    current_ts: i64,
+) -> ProgramResult {
+    let accounts = FixedTransferAccounts::try_from(accounts)?;
+    let transfer_data = FixedTransferData::load(data)?;
+
+    if current_ts > delegation.expiry_s {
+        return Err(MultiDelegatorError::DelegationExpired.into());
+    }
+
+    if transfer_data.amount > delegation.amount {
+        return Err(MultiDelegatorError::AmountExceedsLimit.into());
+    }
+
+    let fixed_delegation = FixedDelegation::load_mut(&mut accounts.delegation_pda.try_borrow_mut_data()?);
+    fixed_delegation.amount -= transfer_data.amount;
+
+    let binding = &mut accounts.vault.try_borrow_mut_data()?;
+    let vault = Vault::load_mut(binding)?;
+    vault.total_pulled_from_delegation += transfer_data.amount;
+
+    // Execute transfer...
+    Transfer {
+        source: accounts.user_ata,
+        destination: accounts.delegatee_ata,
+        authority: accounts.multi_delegate,
+        amount: transfer_data.amount,
+    }.invoke()?;
+
+    Ok(())
+}
+
+fn validate_and_execute_recurring_transfer(
+    delegation: &RecurringDelegation,
+    transfer_data: &vec[u8],
+    accounts: &[AccountInfo],
+    current_ts: i64,
+) -> ProgramResult {
+    let accounts = RecurringTransferAccounts::try_from(accounts)?;
+    let transfer_data = RecurringTransferData::load(data)?;
+    if current_ts > delegation.expiry_s {
+        return Err(MultiDelegatorError::DelegationExpired.into());
+    }
+
+    let elapsed = current_ts - delegation.last_pull_ts;
+    if elapsed < 0 {
+        elapsed = 0;
+    }
+
+    if elapsed < delegation.period_length_s {
+        return Err(MultiDelegatorError::PeriodNotElapsed.into());
+    }
+
+    let available = delegation.amount_per_period - delegation.amount_pulled_in_period;
+    if transfer_data.amount > available {
+        return Err(MultiDelegatorError::AmountExceedsPeriodLimit.into());
+    }
+
+    // Update tracking
+    let binding = &mut accounts.delegation_pda.try_borrow_mut_data()?;
+    let recurring = RecurringDelegation::load_mut(binding)?;
+    recurring.last_pull_ts = current_ts;
+    recurring.amount_pulled_in_period += transfer_data.amount;
+
+    // Execute transfer...
+    Transfer {
+        source: accounts.user_ata,
+        destination: accounts.delegatee_ata,
+        authority: accounts.multi_delegate,
+        amount: transfer_data.amount,
+    }.invoke()?;
+
+    Ok(())
+}
 ```
-
-## Security Model
-
-| Attack | Prevention |
-|--------|------------|
-| Delegator modifies subscription terms | Can't, must reference existing Plan PDA |
-| Delegatee changes price mid-subscription | `update_plan` cannot modify terms (only metadata/whitelist) |
-| Delegatee force-cancels delegator | Only delegator can call `revoke` |
-| Delegatee exceeds limits | Delegation tracks period_pulled, total_pulled |
-| Double-pull in same period | Period tracking with reset logic |
-| Pull after expiry | end_ts check |
-| Unauthorized pull | Subscriptions: whitelist check; Delegations: delegatee-only check |
-| Delegation hijacking via `subscribe` | Impossible, Delegations have no Plan PDA |
-| Orphaned MDA delegation | Harmless; transfers require valid Delegation state |
 
 ---
 
-## Consequences
+## Open Questions
 
-### Positive
-- `+` **Unified Delegation PDA** - single account type for both Subscriptions and Delegations
-- `+` **Unified pull instruction** - single `pull` simplifies interface
-- `+` **Immutable terms** - `update_plan` cannot modify terms (amount, period, destination)
-- `+` **Configurable pull permissions** - Subscriptions: permissionless or whitelist; Delegations: delegatee-only
-- `+` **Sunset mechanism** - graceful plan discontinuation
-- `+` **Code reuse** - shared `init_delegation_helper`
-- `+` **Zero-copy performance** - Pinocchio with Pod/Zeroable
-- `+` **Reusable Plans** - one Plan serves many delegators
-- `+` **Immediate cancellation** - delegators can stop anytime
-- `+` **Delegations immune to hijacking** - no Plan PDA to subscribe on
+1. **Delegator-only vs. Anyone Transfers**: Currently the recurring delegation is designed so that only the delegator can pull the funds. We could open up the type so that it can allow for anyone to run the transfer, but it can only go to a single delegator.
 
-### Negative
-- `-` Two instruction paths to maintain (Subscriptions + Delegations)
-- `-` PlanTerms payload sized for largest variant
-- `-` Delegation PDAs larger when using embedded terms
+2. **Whitelist of Authorized Callers**: Could it make sense to also have a whitelist of users who can call the transfer function, this can allow for flexibility as to the function of the recurring_delegation.
 
-### Neutral
-- `~` Plan rent paid by delegatee (Subscriptions only)
-- `~` Delegation rent paid by delegator
-- `~` MDA gets unlimited approval (u64::MAX) - necessary for pattern but requires trust in program
+3. **Whitelist of Authorized Receivers**: Could it make sense to also have a whitelist of users who can receive funds through delegation. For example, to allow for the transfer to only two or three whitelisted addresses? Would we only want to allow for this recurring types, or create a new type of delegation?
