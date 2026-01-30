@@ -8,11 +8,12 @@ use pinocchio::{
 };
 
 use pinocchio_system::instructions::CreateAccount;
-use pinocchio_token::instructions::Approve;
+use pinocchio_token::instructions::Approve as ApproveSpl;
+use pinocchio_token_2022::instructions::Approve as Approve2022;
 
 use crate::{
-    AccountCheck, MintInterface, MultiDelegate, MultiDelegatorError, SignerAccount, SystemAccount,
-    TokenAccountInterface,
+    constants::TOKEN_2022_PROGRAM_ID, AccountCheck, MintInterface, MultiDelegate,
+    MultiDelegatorError, SignerAccount, SystemAccount, TokenAccountInterface,
 };
 
 pub struct InitializeMultiDelegateAccounts<'a> {
@@ -98,13 +99,26 @@ pub fn process((_data, accounts): (&[u8], &[AccountInfo])) -> ProgramResult {
         multi_delegate_state.bump = bump;
     }
 
-    Approve {
-        source: accounts.user_ata,
-        delegate: accounts.multi_delegate,
-        authority: accounts.user,
-        amount: u64::MAX,
+    // Approve delegation on the correct token program (SPL Token vs Token-2022).
+    // The instruction data is the same, but the program id differs.
+    if accounts.token_program.key().as_ref() == TOKEN_2022_PROGRAM_ID {
+        Approve2022 {
+            token_program: accounts.token_program.key(),
+            source: accounts.user_ata,
+            delegate: accounts.multi_delegate,
+            authority: accounts.user,
+            amount: u64::MAX,
+        }
+        .invoke()?;
+    } else {
+        ApproveSpl {
+            source: accounts.user_ata,
+            delegate: accounts.multi_delegate,
+            authority: accounts.user,
+            amount: u64::MAX,
+        }
+        .invoke()?;
     }
-    .invoke()?;
 
     Ok(())
 }
@@ -115,7 +129,7 @@ mod tests {
 
     use crate::{
         tests::{
-            constants::{MINT_DECIMALS, TOKEN_PROGRAM_ID},
+            constants::{MINT_DECIMALS, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID},
             utils::{fetch_account, init_ata, init_mint, initialize_multidelegate_action, setup},
         },
         MultiDelegate,
@@ -128,6 +142,36 @@ mod tests {
         let mint = init_mint(
             litesvm,
             TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(user.pubkey()),
+        );
+        let user_ata = init_ata(litesvm, mint, user.pubkey(), 1_000_000);
+
+        let (res, multi_delegate_pda, bump) = initialize_multidelegate_action(litesvm, user, mint);
+        res.unwrap();
+
+        let account = litesvm.get_account(&multi_delegate_pda).unwrap();
+        let multi_delegate = MultiDelegate::load(&account.data).unwrap();
+
+        assert_eq!(multi_delegate.user, user.pubkey().to_bytes());
+        assert_eq!(multi_delegate.token_mint, mint.to_bytes());
+        assert_eq!(multi_delegate.bump, bump);
+
+        // Verify delegation
+        let ata_account = fetch_account::<spl_token_2022::state::Account>(litesvm, &user_ata);
+        assert!(ata_account.delegate.is_some());
+        assert_eq!(ata_account.delegate.unwrap(), multi_delegate_pda);
+        assert_eq!(ata_account.delegated_amount, u64::MAX);
+    }
+
+    #[test]
+    fn initialize_multidelegate_token_2022() {
+        let (litesvm, user) = &mut setup();
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_2022_PROGRAM_ID,
             MINT_DECIMALS,
             1_000_000_000,
             Some(user.pubkey()),

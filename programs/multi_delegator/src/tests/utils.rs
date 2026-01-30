@@ -23,7 +23,7 @@ use crate::{
         revoke_delegation,
     },
     tests::{
-        constants::{PROGRAM_ID, SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID},
+        constants::{PROGRAM_ID, SYSTEM_PROGRAM_ID},
         pda::{get_delegation_pda, get_multidelegate_pda},
     },
 };
@@ -150,6 +150,7 @@ pub fn initialize_multidelegate_action(
     payer: &Keypair,
     mint: Pubkey,
 ) -> (TransactionResult, Pubkey, u8) {
+    let token_program = litesvm.get_account(&mint).unwrap().owner;
     let user_ata = get_associated_token_address(&payer.pubkey(), &mint);
     let (multi_delegate_pda, bump) = get_multidelegate_pda(&payer.pubkey(), &mint);
 
@@ -161,7 +162,7 @@ pub fn initialize_multidelegate_action(
             AccountMeta::new_readonly(mint, false),
             AccountMeta::new(user_ata, false),
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
-            AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+            AccountMeta::new_readonly(token_program, false),
         ],
         data: vec![*initialize_multidelegate::DISCRIMINATOR],
     };
