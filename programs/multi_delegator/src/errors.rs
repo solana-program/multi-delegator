@@ -20,7 +20,9 @@ pub enum MultiDelegatorError {
     InvalidDelegatePda,
     InvalidDelegationKind,
     InvalidAccountData,
+    InvalidHeaderData,
     InvalidInstructionData,
     NotEnoughAccountKeys,
     InvalidInstruction,
+    Unauthorized,
 }

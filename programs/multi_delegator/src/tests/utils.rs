@@ -20,6 +20,7 @@ use solana_instruction::AccountMeta;
 use crate::{
     instructions::{
         create_fixed_delegation, create_recurring_delegation, initialize_multidelegate,
+        revoke_delegation,
     },
     tests::{
         constants::{PROGRAM_ID, SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID},
@@ -278,6 +279,30 @@ pub fn create_fixed_delegation_action_with_pda(
             expiry_s.to_le_bytes().to_vec(),
         ]
         .concat(),
+    };
+
+    build_and_send_transaction(litesvm, &[payer], &payer.pubkey(), &[ix])
+}
+
+#[allow(clippy::result_large_err)]
+pub fn revoke_delegation_action(
+    litesvm: &mut LiteSVM,
+    payer: &Keypair,
+    mint: Pubkey,
+    delegatee: Pubkey,
+    nonce: u64,
+) -> TransactionResult {
+    let (multi_delegate_pda, _bump) = get_multidelegate_pda(&payer.pubkey(), &mint);
+    let (delegation_pda, _bump) =
+        get_delegation_pda(&multi_delegate_pda, &payer.pubkey(), &delegatee, nonce);
+
+    let ix = Instruction {
+        program_id: PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(payer.pubkey(), true),
+            AccountMeta::new(delegation_pda, false),
+        ],
+        data: vec![*revoke_delegation::DISCRIMINATOR],
     };
 
     build_and_send_transaction(litesvm, &[payer], &payer.pubkey(), &[ix])

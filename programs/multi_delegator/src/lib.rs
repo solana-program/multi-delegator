@@ -28,6 +28,7 @@ fn process_instruction(
         Some((0, data)) => initialize_multidelegate::process((data, accounts)),
         Some((1, data)) => create_fixed_delegation::process((data, accounts)),
         Some((2, data)) => create_recurring_delegation::process((data, accounts)),
+        Some((3, data)) => revoke_delegation::process((data, accounts)),
         _ => Err(MultiDelegatorError::InvalidInstruction.into()),
     }
 }

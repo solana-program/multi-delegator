@@ -2,6 +2,7 @@ pub mod create_fixed_delegation;
 pub mod create_recurring_delegation;
 pub mod helpers;
 pub mod initialize_multidelegate;
+pub mod revoke_delegation;
 
 pub use helpers::*;
 
@@ -86,4 +87,19 @@ pub enum MultiDelegatorInstruction {
     #[account(3, name = "delegatee", desc = "The user receiving delegation rights")]
     #[account(4, name = "system_program", desc = "The system program")]
     CreateRecurringDelegation(CreateRecurringDelegationData) = 2,
+
+    #[account(
+        0,
+        signer,
+        writable,
+        name = "authority",
+        desc = "The delegator revoking the delegation (receives rent)"
+    )]
+    #[account(
+        1,
+        writable,
+        name = "delegation_account",
+        desc = "The delegation PDA to close"
+    )]
+    RevokeDelegation = 3,
 }

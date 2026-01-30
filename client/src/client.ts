@@ -1,24 +1,41 @@
 import type {
   Address,
   GetLatestBlockhashApi,
+  GetProgramAccountsApi,
   Instruction,
   Rpc,
   TransactionSigner,
 } from 'gill';
-import { createTransaction, signTransactionMessageWithSigners } from 'gill';
 import {
+  createTransaction,
+  getBase64Encoder,
+  signTransactionMessageWithSigners,
+} from 'gill';
+import { DELEGATOR_OFFSET } from './constants.js';
+import {
+  DelegationKind,
+  decodeFixedDelegation,
+  decodeRecurringDelegation,
+  type FixedDelegation,
   getCreateFixedDelegationInstruction,
   getCreateRecurringDelegationInstruction,
   getInitMultiDelegateInstruction,
+  getRevokeDelegationInstruction,
+  MULTI_DELEGATOR_PROGRAM_ADDRESS,
+  type RecurringDelegation,
 } from './generated/index.js';
 import { getDelegationPDA, getMultiDelegatePDA } from './pdas.js';
 
 type SolanaClient = {
-  rpc: Rpc<GetLatestBlockhashApi>;
+  rpc: Rpc<GetLatestBlockhashApi & GetProgramAccountsApi>;
   sendAndConfirmTransaction: (
     tx: Awaited<ReturnType<typeof signTransactionMessageWithSigners>>,
   ) => Promise<string>;
 };
+
+export type Delegation =
+  | { kind: 'fixed'; address: Address; data: FixedDelegation }
+  | { kind: 'recurring'; address: Address; data: RecurringDelegation };
 
 export class MultiDelegatorClient {
   constructor(public readonly client: SolanaClient) {}
@@ -124,5 +141,72 @@ export class MultiDelegatorClient {
 
     const sig = await this.buildAndSendTransaction([instruction], [delegator]);
     return { signature: sig };
+  }
+
+  async revokeDelegation(
+    delegator: TransactionSigner,
+    delegationAccount: Address,
+  ): Promise<{ signature: string }> {
+    const instruction = getRevokeDelegationInstruction({
+      authority: delegator,
+      delegationAccount,
+    });
+
+    const sig = await this.buildAndSendTransaction([instruction], [delegator]);
+    return { signature: sig };
+  }
+
+  async getDelegationsForWallet(wallet: Address): Promise<Delegation[]> {
+    const response = await this.client.rpc
+      .getProgramAccounts(MULTI_DELEGATOR_PROGRAM_ADDRESS, {
+        encoding: 'base64',
+        filters: [
+          {
+            memcmp: {
+              offset: BigInt(DELEGATOR_OFFSET),
+              bytes:
+                wallet as unknown as import('@solana/rpc-types').Base58EncodedBytes,
+              encoding: 'base58',
+            },
+          },
+        ],
+      })
+      .send();
+
+    const delegations: Delegation[] = [];
+    const base64Encoder = getBase64Encoder();
+
+    for (const account of response) {
+      const base64Data = account.account.data[0];
+      const data = base64Encoder.encode(base64Data);
+      const kind = data[1];
+
+      const encodedAccount = {
+        address: account.pubkey,
+        data,
+        executable: account.account.executable,
+        lamports: account.account.lamports,
+        programAddress: account.account.owner,
+        space: account.account.space,
+      };
+
+      if (kind === DelegationKind.Fixed) {
+        const decoded = decodeFixedDelegation(encodedAccount);
+        delegations.push({
+          kind: 'fixed',
+          address: account.pubkey,
+          data: decoded.data,
+        });
+      } else if (kind === DelegationKind.Recurring) {
+        const decoded = decodeRecurringDelegation(encodedAccount);
+        delegations.push({
+          kind: 'recurring',
+          address: account.pubkey,
+          data: decoded.data,
+        });
+      }
+    }
+
+    return delegations;
   }
 }

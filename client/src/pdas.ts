@@ -3,7 +3,11 @@ import {
   getAddressEncoder,
   getProgramDerivedAddress,
 } from 'gill';
-import { MULTI_DELEGATOR_PROGRAM_ADDRESS } from './generated/index.js';
+import {
+  DELEGATION_SEED,
+  MULTI_DELEGATE_SEED,
+  PROGRAM_ID,
+} from './constants.js';
 
 const addressEncoder = getAddressEncoder();
 
@@ -12,13 +16,13 @@ export async function getMultiDelegatePDA(
   tokenMint: Address,
 ): Promise<[Address, number]> {
   const seeds = [
-    new TextEncoder().encode('MultiDelegate'),
+    new TextEncoder().encode(MULTI_DELEGATE_SEED),
     addressEncoder.encode(user),
     addressEncoder.encode(tokenMint),
   ];
 
   const [pda, bump] = await getProgramDerivedAddress({
-    programAddress: MULTI_DELEGATOR_PROGRAM_ADDRESS,
+    programAddress: PROGRAM_ID,
     seeds,
   });
   return [pda, bump];
@@ -34,7 +38,7 @@ export async function getDelegationPDA(
   new DataView(nonceBytes.buffer).setBigUint64(0, BigInt(nonce), true);
 
   const seeds = [
-    new TextEncoder().encode('delegation'),
+    new TextEncoder().encode(DELEGATION_SEED),
     addressEncoder.encode(multiDelegate),
     addressEncoder.encode(delegator),
     addressEncoder.encode(delegatee),
@@ -42,7 +46,7 @@ export async function getDelegationPDA(
   ];
 
   const [pda, bump] = await getProgramDerivedAddress({
-    programAddress: MULTI_DELEGATOR_PROGRAM_ADDRESS,
+    programAddress: PROGRAM_ID,
     seeds,
   });
   return [pda, bump];
