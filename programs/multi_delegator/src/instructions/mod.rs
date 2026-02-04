@@ -8,14 +8,18 @@ pub mod transfer_recurring_delegation;
 
 pub use helpers::*;
 
+use core::fmt;
+
+use pinocchio::program_error::ProgramError;
 use shank::ShankInstruction;
 
 use crate::create_fixed_delegation::CreateFixedDelegationData;
 use crate::create_recurring_delegation::CreateRecurringDelegationData;
+use crate::MultiDelegatorError;
 
 #[derive(Debug, ShankInstruction)]
 #[repr(u8)]
-pub enum MultiDelegatorInstruction {
+pub enum MultiDelegatorInstruction<'a> {
     #[account(
         0,
         signer,
@@ -65,7 +69,7 @@ pub enum MultiDelegatorInstruction {
     )]
     #[account(3, name = "delegatee", desc = "The user receiving delegation rights")]
     #[account(4, name = "system_program", desc = "The system program")]
-    CreateFixedDelegation(CreateFixedDelegationData) = 1,
+    CreateFixedDelegation(&'a CreateFixedDelegationData) = 1,
 
     #[account(
         0,
@@ -88,7 +92,7 @@ pub enum MultiDelegatorInstruction {
     )]
     #[account(3, name = "delegatee", desc = "The user receiving delegation rights")]
     #[account(4, name = "system_program", desc = "The system program")]
-    CreateRecurringDelegation(CreateRecurringDelegationData) = 2,
+    CreateRecurringDelegation(&'a CreateRecurringDelegationData) = 2,
 
     #[account(
         0,
@@ -131,7 +135,7 @@ pub enum MultiDelegatorInstruction {
         name = "delegatee",
         desc = "The delegatee signing the transfer"
     )]
-    TransferFixed(TransferData) = 4,
+    TransferFixed(&'a TransferData) = 4,
 
     #[account(
         0,
@@ -159,5 +163,50 @@ pub enum MultiDelegatorInstruction {
         name = "delegatee",
         desc = "The delegatee signing the transfer"
     )]
-    TransferRecurring(TransferData) = 5,
+    TransferRecurring(&'a TransferData) = 5,
+}
+
+impl<'a> MultiDelegatorInstruction<'a> {
+    /// Parse a `MultiDelegatorInstruction` from raw instruction bytes.
+    /// The first byte is the discriminator, followed by instruction-specific data.
+    pub fn from_bytes(data: &'a [u8]) -> Result<Self, ProgramError> {
+        let (discriminator, rest) = data
+            .split_first()
+            .ok_or(MultiDelegatorError::InvalidInstruction)?;
+
+        match discriminator {
+            0 => Ok(Self::InitMultiDelegate),
+            1 => {
+                let inner = CreateFixedDelegationData::load(rest)?;
+                Ok(Self::CreateFixedDelegation(inner))
+            }
+            2 => {
+                let inner = CreateRecurringDelegationData::load(rest)?;
+                Ok(Self::CreateRecurringDelegation(inner))
+            }
+            3 => Ok(Self::RevokeDelegation),
+            4 => {
+                let inner = TransferData::load(rest)?;
+                Ok(Self::TransferFixed(inner))
+            }
+            5 => {
+                let inner = TransferData::load(rest)?;
+                Ok(Self::TransferRecurring(inner))
+            }
+            _ => Err(MultiDelegatorError::InvalidInstruction.into()),
+        }
+    }
+}
+
+impl<'a> fmt::Display for MultiDelegatorInstruction<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InitMultiDelegate => write!(f, "init_multi_delegate"),
+            Self::CreateFixedDelegation(_) => write!(f, "create_fixed_delegation"),
+            Self::CreateRecurringDelegation(_) => write!(f, "create_recurring_delegation"),
+            Self::RevokeDelegation => write!(f, "revoke_delegation"),
+            Self::TransferFixed(_) => write!(f, "transfer_fixed"),
+            Self::TransferRecurring(_) => write!(f, "transfer_recurring"),
+        }
+    }
 }

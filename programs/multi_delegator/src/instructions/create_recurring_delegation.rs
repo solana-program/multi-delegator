@@ -8,7 +8,7 @@ use crate::{
 };
 
 #[repr(C, packed)]
-#[derive(Debug, ShankType)]
+#[derive(Debug, Clone, ShankType)]
 pub struct CreateRecurringDelegationData {
     pub nonce: u64,
     pub amount_per_period: u64,
@@ -24,7 +24,7 @@ impl CreateRecurringDelegationData {
         + size_of::<i64>()
         + size_of::<u64>();
 
-    fn load(data: &[u8]) -> Result<&Self, ProgramError> {
+    pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
         if data.len() != Self::LEN {
             msg!(&format!(
                 "Data.len() = {}. Expected = {}",
@@ -39,9 +39,11 @@ impl CreateRecurringDelegationData {
 
 pub const DISCRIMINATOR: &u8 = &2;
 
-pub fn process((data, accounts): (&[u8], &[AccountInfo])) -> ProgramResult {
+pub fn process(
+    accounts: &[AccountInfo],
+    call_data: &CreateRecurringDelegationData,
+) -> ProgramResult {
     let accounts = CreateDelegationAccounts::try_from(accounts)?;
-    let call_data = CreateRecurringDelegationData::load(data)?;
 
     let bump = create_delegation_account(&accounts, call_data.nonce, RecurringDelegation::LEN)?;
 

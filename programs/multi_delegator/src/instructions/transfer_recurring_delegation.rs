@@ -14,9 +14,8 @@ use crate::{
 
 pub const DISCRIMINATOR: &u8 = &5;
 
-pub fn process((data, accounts): (&[u8], &[AccountInfo])) -> ProgramResult {
+pub fn process(accounts: &[AccountInfo], transfer_data: &TransferData) -> ProgramResult {
     let accounts_struct = RecurringTransferAccounts::try_from(accounts)?;
-    let transfer_data = TransferData::load(data)?;
 
     let current_ts = Clock::get()?.unix_timestamp;
     {

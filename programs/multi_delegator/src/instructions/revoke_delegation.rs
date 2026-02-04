@@ -32,7 +32,7 @@ pub const DISCRIMINATOR: &u8 = &3;
 
 /// Revokes a delegation by closing the delegation PDA.
 /// The rent lamports are always returned to the delegator (authority).
-pub fn process((_data, accounts): (&[u8], &[AccountInfo])) -> ProgramResult {
+pub fn process(accounts: &[AccountInfo]) -> ProgramResult {
     let accounts = RevokeDelegationAccounts::try_from(accounts)?;
 
     {
@@ -251,6 +251,6 @@ mod tests {
             data: vec![*revoke_delegation::DISCRIMINATOR],
         };
 
-        build_and_send_transaction(litesvm, &[signer], &signer.pubkey(), &[ix])
+        build_and_send_transaction(litesvm, &[signer], &signer.pubkey(), &ix)
     }
 }

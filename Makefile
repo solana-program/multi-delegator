@@ -1,4 +1,4 @@
-.PHONY: build build-program build-client test test-program test-client clean clean-program clean-client ensure-surfpool generate-client generate-idl kill-validator setup prepare-deploy-keys fmt-check fmt lint fmt-check lint-check
+.PHONY: build build-program build-client test test-program test-and-benchmark test-client clean clean-program clean-client ensure-surfpool generate-client generate-idl kill-validator setup prepare-deploy-keys fmt-check fmt lint fmt-check lint-check
 
 # Setup target to check prerequisites and install dependencies
 setup: setup-hooks
@@ -65,6 +65,10 @@ test: setup test-program test-client
 
 test-program:
 	cd programs/multi_delegator && cargo test-sbf
+
+# Run tests and generate CU benchmark report (writes to programs/multi_delegator/cu_report.md)
+test-and-benchmark:
+	cd programs/multi_delegator && CU_REPORT=1 cargo test-sbf
 
 # Program ID from keypair (used to verify deployment)
 PROGRAM_ID := 3PuMsYqaLY4Sy1DR8np3aAiHravZXCeyMYDUECLqfswY

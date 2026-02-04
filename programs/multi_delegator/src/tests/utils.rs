@@ -27,6 +27,7 @@ use crate::{
     },
     tests::{
         constants::{PROGRAM_ID, SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID},
+        cu_tracker::record_transaction,
         pda::{get_delegation_pda, get_multidelegate_pda},
     },
 };
@@ -99,15 +100,19 @@ pub fn build_and_send_transaction(
     litesvm: &mut LiteSVM,
     signers: &[&Keypair],
     payer: &Pubkey,
-    ixs: &[Instruction],
+    ix: &Instruction,
 ) -> TransactionResult {
     let tx = Transaction::new(
         signers,
-        Message::new(ixs, Some(payer)),
+        Message::new(std::slice::from_ref(ix), Some(payer)),
         litesvm.latest_blockhash(),
     );
     let result = litesvm.send_transaction(tx);
     litesvm.expire_blockhash();
+
+    // Record CU consumption to global tracker
+    record_transaction(&result, ix);
+
     result
 }
 
@@ -210,7 +215,7 @@ pub fn initialize_multidelegate_action(
     };
 
     (
-        build_and_send_transaction(litesvm, &[payer], &payer.pubkey(), &[ix]),
+        build_and_send_transaction(litesvm, &[payer], &payer.pubkey(), &ix),
         multi_delegate_pda,
         bump,
     )
@@ -248,7 +253,7 @@ pub fn create_fixed_delegation_action(
     };
 
     (
-        build_and_send_transaction(litesvm, &[delegator], &delegator.pubkey(), &[ix]),
+        build_and_send_transaction(litesvm, &[delegator], &delegator.pubkey(), &ix),
         delegation_pda,
     )
 }
@@ -290,7 +295,7 @@ pub fn create_recurring_delegation_action(
     };
 
     (
-        build_and_send_transaction(litesvm, &[delegator], &delegator.pubkey(), &[ix]),
+        build_and_send_transaction(litesvm, &[delegator], &delegator.pubkey(), &ix),
         delegation_pda,
     )
 }
@@ -326,7 +331,7 @@ pub fn create_fixed_delegation_action_with_pda(
         .concat(),
     };
 
-    build_and_send_transaction(litesvm, &[payer], &payer.pubkey(), &[ix])
+    build_and_send_transaction(litesvm, &[payer], &payer.pubkey(), &ix)
 }
 
 #[allow(clippy::result_large_err)]
@@ -350,7 +355,7 @@ pub fn revoke_delegation_action(
         data: vec![*revoke_delegation::DISCRIMINATOR],
     };
 
-    build_and_send_transaction(litesvm, &[payer], &payer.pubkey(), &[ix])
+    build_and_send_transaction(litesvm, &[payer], &payer.pubkey(), &ix)
 }
 
 #[allow(clippy::result_large_err)]
@@ -385,7 +390,7 @@ pub fn transfer_fixed_action_with_signer(
         .concat(),
     };
 
-    build_and_send_transaction(litesvm, &[signer], &signer.pubkey(), &[ix])
+    build_and_send_transaction(litesvm, &[signer], &signer.pubkey(), &ix)
 }
 
 #[allow(clippy::result_large_err)]
@@ -442,7 +447,7 @@ pub fn transfer_recurring_action_with_signer(
         .concat(),
     };
 
-    build_and_send_transaction(litesvm, &[signer], &signer.pubkey(), &[ix])
+    build_and_send_transaction(litesvm, &[signer], &signer.pubkey(), &ix)
 }
 
 #[allow(clippy::result_large_err)]

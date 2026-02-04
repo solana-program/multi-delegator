@@ -14,9 +14,8 @@ use crate::{
 
 pub const DISCRIMINATOR: &u8 = &4;
 
-pub fn process((data, accounts): (&[u8], &[AccountInfo])) -> ProgramResult {
+pub fn process(accounts: &[AccountInfo], transfer: &TransferData) -> ProgramResult {
     let accounts_struct = FixedTransferAccounts::try_from(accounts)?;
-    let transfer = TransferData::load(data)?;
 
     // Validate kind matches Fixed
     {

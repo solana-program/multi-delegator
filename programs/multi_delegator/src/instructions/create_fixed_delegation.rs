@@ -8,7 +8,7 @@ use crate::{
 };
 
 #[repr(C, packed)]
-#[derive(Debug, ShankType)]
+#[derive(Debug, Clone, ShankType)]
 pub struct CreateFixedDelegationData {
     pub nonce: u64,
     pub amount: u64,
@@ -18,7 +18,7 @@ pub struct CreateFixedDelegationData {
 impl CreateFixedDelegationData {
     pub const LEN: usize = size_of::<CreateFixedDelegationData>();
 
-    fn load(data: &[u8]) -> Result<&Self, ProgramError> {
+    pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
         if data.len() != Self::LEN {
             msg!(&format!(
                 "Data.len() = {}. Expected = {}",
@@ -33,9 +33,8 @@ impl CreateFixedDelegationData {
 
 pub const DISCRIMINATOR: &u8 = &1;
 
-pub fn process((data, accounts): (&[u8], &[AccountInfo])) -> ProgramResult {
+pub fn process(accounts: &[AccountInfo], call_data: &CreateFixedDelegationData) -> ProgramResult {
     let accounts = CreateDelegationAccounts::try_from(accounts)?;
-    let call_data = CreateFixedDelegationData::load(data)?;
 
     let bump = create_delegation_account(&accounts, call_data.nonce, FixedDelegation::LEN)?;
 
@@ -214,15 +213,27 @@ mod tests {
 
         let (res0, pda0) =
             create_fixed_delegation_action(litesvm, payer, mint, delegatee, 0, 100, 1000);
-        res0.unwrap();
+        let tx = res0.unwrap();
+        println!(
+            "Create Fixed delegation consumed: {} CUs",
+            tx.compute_units_consumed
+        );
 
         let (res1, pda1) =
             create_fixed_delegation_action(litesvm, payer, mint, delegatee, 1, 200, 2000);
-        res1.unwrap();
+        let tx = res1.unwrap();
+        println!(
+            "Create Fixed delegation consumed: {} CUs",
+            tx.compute_units_consumed
+        );
 
         let (res2, pda2) =
             create_fixed_delegation_action(litesvm, payer, mint, delegatee, 2, 300, 3000);
-        res2.unwrap();
+        let tx = res2.unwrap();
+        println!(
+            "Create Fixed delegation consumed: {} CUs",
+            tx.compute_units_consumed
+        );
 
         assert_ne!(pda0, pda1);
         assert_ne!(pda1, pda2);

@@ -28,6 +28,8 @@ solana-transaction = "^2"
 solana-transaction-error = "^2"
 spl-associated-token-account = "7.0.0"
 spl-token-2022 = "^8"
+tabled = "0.17"
+ctor = "0.2"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

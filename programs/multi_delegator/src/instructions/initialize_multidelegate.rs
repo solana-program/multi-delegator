@@ -59,7 +59,7 @@ impl<'a> TryFrom<&'a [AccountInfo]> for InitializeMultiDelegateAccounts<'a> {
 
 pub const DISCRIMINATOR: &u8 = &0;
 
-pub fn process((_data, accounts): (&[u8], &[AccountInfo])) -> ProgramResult {
+pub fn process(accounts: &[AccountInfo]) -> ProgramResult {
     let accounts = InitializeMultiDelegateAccounts::try_from(accounts)?;
 
     let (expected_pda, bump) =
