@@ -4,7 +4,7 @@ use pinocchio::{
     pubkey::Pubkey,
     ProgramResult,
 };
-use pinocchio_token::instructions::Transfer;
+use pinocchio_token_2022::instructions::Transfer;
 
 use crate::{MultiDelegate, MultiDelegatorError};
 
@@ -14,6 +14,8 @@ pub struct TransferAccounts<'a> {
     pub to_ata: &'a AccountInfo,
     /// Pda that is the delegate to the delegators tokens
     pub multidelegate_pda: &'a AccountInfo,
+    /// The token program (SPL Token or Token-2022)
+    pub token_program: &'a AccountInfo,
 }
 
 pub fn transfer_with_delegate(
@@ -42,6 +44,7 @@ pub fn transfer_with_delegate(
         to: accounts.to_ata,
         authority: accounts.multidelegate_pda,
         amount,
+        token_program: accounts.token_program.key(),
     }
     .invoke_signed(&signer)?;
 

@@ -56,6 +56,7 @@ pub fn process(accounts: &[AccountInfo], transfer: &TransferData) -> ProgramResu
             delegator_ata: accounts_struct.delegator_ata,
             to_ata: accounts_struct.receiver_ata,
             multidelegate_pda: accounts_struct.multi_delegate,
+            token_program: accounts_struct.token_program,
         },
     )?;
 
