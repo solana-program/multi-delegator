@@ -6,6 +6,7 @@ impl From<MultiDelegatorError> for ProgramError {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
 pub enum MultiDelegatorError {
     NotSigner,
     InvalidAddress,
@@ -24,5 +25,14 @@ pub enum MultiDelegatorError {
     InvalidInstructionData,
     NotEnoughAccountKeys,
     InvalidInstruction,
+    DelegationExpired,
+    AmountExceedsLimit,
+    AmountExceedsPeriodLimit,
+    PeriodNotElapsed,
+    TimestampError,
+    InvalidAmount,
+    TransferInvalidKind,
+    TransferInvalidCallData,
     Unauthorized,
+    TransferKindMismatch,
 }

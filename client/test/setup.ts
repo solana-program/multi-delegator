@@ -24,6 +24,9 @@ import { MultiDelegatorClient } from '../src/client.js';
 
 export const SURFPOOL_PORT = 8899;
 export const SURFPOOL_RPC_URL = `http://127.0.0.1:${SURFPOOL_PORT}`;
+export const DEFAULT_TEST_BALANCE = 1_000_000n;
+export const ONE_HOUR_IN_SECONDS = 3600;
+export const ONE_DAY_IN_SECONDS = 86400;
 
 type SolanaClient = ReturnType<typeof createSolanaClient>;
 
@@ -105,6 +108,12 @@ export class IntegrationTest {
       owner,
       amount,
     );
+  }
+
+  async createFundedKeypair(
+    lamportsAmount: bigint = 1_000_000_000n,
+  ): Promise<KeyPairSigner> {
+    return createFundedKeypair(this.solanaClient, lamportsAmount);
   }
 }
 

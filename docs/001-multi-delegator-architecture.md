@@ -51,7 +51,7 @@ sequenceDiagram
     participant T as Token Program
 
     U->>P: initialize_multidelegate(user, mint, user_ata)
-    Note over P: Validate PDA derived from<br/>["multi_delegate", user, mint]
+    Note over P: Validate PDA derived from<br/>["MultiDelegate", user, mint]
 
     P->>S: Create MDA account
     S->>P: Account created
@@ -69,14 +69,14 @@ sequenceDiagram
     participant P as Program
     participant B as Bob
 
-    A->>P: create_fixed_delegation(bob, nonce, amount, expiry)
+    A->>P: create_fixed_delegation(bob, nonce, amount, expiry_ts)
     Note over P: Validate MDA exists<br/>Alice is delegator
 
     P->>P: Derive Delegation PDA<br/>["delegation", MDA, alice, bob, nonce]
     Note over P: Create FixedDelegation PDA
     P->>A: Delegation created
 
-    Note over A,B: Bob can now spend up to `amount`<br/>until `expiry_s`
+    Note over A,B: Bob can now spend up to `amount`<br/>until `expiry_ts`
 ```
 
 ### Recurring Delegation: User Creates for Bob
@@ -87,14 +87,14 @@ sequenceDiagram
     participant P as Program
     participant B as Bob
 
-    A->>P: create_recurring_delegation(bob, nonce, amount_per_period, period_length_s, expiry)
+    A->>P: create_recurring_delegation(bob, nonce, amount_per_period, period_length_s, start_ts, expiry_ts)
     Note over P: Validate MDA exists<br/>Alice is delegator
 
     P->>P: Derive Delegation PDA<br/>["delegation", MDA, alice, bob, nonce]
     Note over P: Create RecurringDelegation PDA
     P->>A: Delegation created
 
-    Note over A,B: Bob can pull `amount_per_period`<br/>every `period_length_s` seconds until `expiry_s`
+    Note over A,B: Bob can pull `amount_per_period`<br/>every `period_length_s` seconds until `expiry_ts`
 ```
 
 ### Transfer Execution: Fixed Delegation
@@ -106,7 +106,7 @@ sequenceDiagram
     participant MDA as MDA
     participant T as Token Program
 
-    B->>P: transfer_fixed(delegation_pda, amount)
+    B->>P: transfer(delegation_pda, amount)
     Note over P: Load FixedDelegation
 
     alt Not expired and amount OK
@@ -128,7 +128,7 @@ sequenceDiagram
     participant MDA as MDA
     participant T as Token Program
 
-    B->>P: transfer_recurring(delegation_pda, amount)
+    B->>P: transfer(delegation_pda, amount)
     Note over P: Load RecurringDelegation
 
     alt Period elapsed and amount OK
@@ -136,7 +136,7 @@ sequenceDiagram
         P->>MDA: Delegate authority check
         P->>T: Transfer from Alice's ATA<br/>to Bob's ATA (amount)
         T->>B: Tokens transferred
-        P->>P: Update last_pull_ts<br/>and amount_pulled_in_period
+        P->>P: Update amount_pulled_in_period
     else Too soon or too much
         P->>B: Error (period not elapsed or exceeds)
     end
@@ -171,12 +171,19 @@ getProgramAccounts(PROGRAM_ID, {
 | -------------------------- | --------- | ---------------------------------------------------- |
 | `initialize_multidelegate` | Delegator | Create MDA and approve `u64::MAX` delegate authority |
 
-### Delegation Creation
+### Delegation Management
 
 | Instruction                   | Actor     | Purpose                                                   |
 | ----------------------------- | --------- | --------------------------------------------------------- |
 | `create_fixed_delegation`     | Delegator | Create one-time delegation with nonce, amount, and expiry |
 | `create_recurring_delegation` | Delegator | Create recurring delegation with period limits            |
+| `revoke_delegation`           | Delegator | Close a delegation account and recover rent               |
+
+### Transfer
+
+| Instruction | Actor     | Purpose                                                                                                                        |
+| ----------- | --------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `transfer`  | Delegatee | Execute token transfer enforcing delegation constraints, verification of constraints is done based on the `kind` of delegation |
 
 ---
 
@@ -202,7 +209,7 @@ pub struct MultiDelegate {
 }
 
 impl MultiDelegate {
-    pub const SEED: &[u8] = b"multi_delegate";
+    pub const SEED: &[u8] = b"MultiDelegate";
     pub const LEN: usize = 65;
 
     pub fn find_pda(user: &Pubkey, token_mint: &Pubkey) -> (Pubkey, u8) {
@@ -214,7 +221,7 @@ impl MultiDelegate {
 }
 ```
 
-**PDA seeds**: `["multi_delegate", delegator_key, mint_key]`
+**PDA seeds**: `["MultiDelegate", delegator_key, mint_key]`
 
 ### Header
 
@@ -246,7 +253,7 @@ One-time delegation with explicit amount and expiry:
 pub struct FixedDelegation {
     pub header: Header,     // 67 bytes
     pub amount: u64,        // 8 bytes - max pullable amount
-    pub expiry_s: u64,      // 8 bytes - Unix timestamp
+    pub expiry_ts: i64,      // 8 bytes - Unix timestamp
 }
 
 impl FixedDelegation {
@@ -266,15 +273,15 @@ Recurring delegation with period tracking:
 #[repr(C, packed)]
 pub struct RecurringDelegation {
     pub header: Header,              // 67 bytes
-    pub last_pull_ts: i64,           // 8 bytes - last transfer timestamp
+    pub current_period_start_ts: i64, // 8 bytes - start of current period
     pub period_length_s: u64,         // 8 bytes - seconds per period
-    pub expiry_s: u64,                // 8 bytes - delegation expiry
+    pub expiry_ts: i64,                // 8 bytes - delegation expiry
     pub amount_per_period: u64,       // 8 bytes - max per period
     pub amount_pulled_in_period: u64, // 8 bytes - tracking
 }
 
 impl RecurringDelegation {
-    pub const LEN: usize = 83;
+    pub const LEN: usize = 107;
 }
 ```
 
@@ -301,7 +308,7 @@ Creates the MDA and grants it `u64::MAX` delegated approval over the user's ATA.
 
 **Process:**
 
-1. Validate MDA PDA address derived from `["multi_delegate", user, mint]`
+1. Validate MDA PDA address derived from `["MultiDelegate", user, mint]`
 2. Create MDA account with delegator and mint data
 3. Call `Approve { source: user_ata, delegate: multi_delegate, authority: user, amount: u64::MAX }`
 
@@ -321,7 +328,7 @@ Creates a one-time delegation with nonce-based PDA.
 
 - `nonce: u64` - Unique identifier to create distinct PDAs for same (delegator, delegatee) pair
 - `amount: u64` - Maximum amount transferable
-- `expiry_s: u64` - Unix timestamp when delegation expires
+- `expiry_ts: i64` - Unix timestamp when delegation expires
 
 **Process:**
 
@@ -346,15 +353,31 @@ Creates a recurring delegation with period tracking.
 - `nonce: u64` - Unique identifier
 - `amount_per_period: u64` - Maximum amount per period
 - `period_length_s: u64` - Seconds in each period
-- `expiry_s: u64` - Delegation expiry timestamp
-- `last_pull_ts: i64` - defaults to 0
-- `amount_pulled_in_period: u64` - defaults to 0
+- `start_ts: i64` - Timestamp when the first period starts
+- `expiry_ts: i64` - Delegation expiry timestamp
 
 **Process:**
 
 1. Validate MultiDelegate exists and belongs to delegator
 2. Derive and validate Delegation PDA with nonce
 3. Create Delegation account with header and terms
+4. Initialize `current_period_start_ts` to `start_ts`
+5. Initialize `amount_pulled_in_period` to 0
+
+### `revoke_delegation` (Discriminator: 3)
+
+Revokes a delegation by closing the delegation PDA and returning rent to the delegator.
+
+| Account | Type     | Description               |
+| ------- | -------- | ------------------------- |
+| 0       | signer   | The delegator (authority) |
+| 1       | writable | Delegation PDA to close   |
+
+**Process:**
+
+1. Validate that the signer matches the `delegator` field in the delegation header
+2. Close the delegation account
+3. Transfer rent lamports back to the delegator
 
 ---
 
@@ -362,7 +385,7 @@ Creates a recurring delegation with period tracking.
 
 The transfer mechanism must validate delegation PDA constraints before allowing the MDA to transfer tokens from the delegator's ATA.
 
-### Single `transfer` Instruction
+### `transfer` (Discriminator: 4)
 
 A unified instruction that validates constraints based on delegation kind at runtime.
 
@@ -392,7 +415,7 @@ fn validate_and_execute_fixed_transfer(
     let accounts = FixedTransferAccounts::try_from(accounts)?;
     let transfer_data = FixedTransferData::load(data)?;
 
-    if current_ts > delegation.expiry_s {
+    if current_ts > delegation.expiry_ts {
         return Err(MultiDelegatorError::DelegationExpired.into());
     }
 
@@ -426,17 +449,17 @@ fn validate_and_execute_recurring_transfer(
 ) -> ProgramResult {
     let accounts = RecurringTransferAccounts::try_from(accounts)?;
     let transfer_data = RecurringTransferData::load(data)?;
-    if current_ts > delegation.expiry_s {
+    if current_ts > delegation.expiry_ts {
         return Err(MultiDelegatorError::DelegationExpired.into());
     }
 
-    let elapsed = current_ts - delegation.last_pull_ts;
-    if elapsed < 0 {
-        elapsed = 0;
-    }
+    // Check if we are in a new period
+    let current_period_end = delegation.current_period_start_ts + delegation.period_length_s as i64;
 
-    if elapsed < delegation.period_length_s {
-        return Err(MultiDelegatorError::PeriodNotElapsed.into());
+    if current_ts >= current_period_end {
+        // Reset tracking for new period
+        delegation.current_period_start_ts = current_period_end;
+        delegation.amount_pulled_in_period = 0;
     }
 
     let available = delegation.amount_per_period - delegation.amount_pulled_in_period;
@@ -447,7 +470,6 @@ fn validate_and_execute_recurring_transfer(
     // Update tracking
     let binding = &mut accounts.delegation_pda.try_borrow_mut_data()?;
     let recurring = RecurringDelegation::load_mut(binding)?;
-    recurring.last_pull_ts = current_ts;
     recurring.amount_pulled_in_period += transfer_data.amount;
 
     // Execute transfer...

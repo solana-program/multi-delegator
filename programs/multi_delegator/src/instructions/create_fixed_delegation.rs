@@ -3,8 +3,8 @@ use pinocchio::{account_info::AccountInfo, msg, program_error::ProgramError, Pro
 use shank::ShankType;
 
 use crate::{
-    create_delegation_account, init_header, CreateDelegationAccounts, DelegationKind,
-    FixedDelegation, MultiDelegatorError,
+    create_delegation_account, init_header, state::FixedDelegation, CreateDelegationAccounts,
+    DelegationKind, MultiDelegatorError,
 };
 
 #[repr(C, packed)]
@@ -12,11 +12,11 @@ use crate::{
 pub struct CreateFixedDelegationData {
     pub nonce: u64,
     pub amount: u64,
-    pub expiry_s: u64,
+    pub expiry_ts: i64,
 }
 
 impl CreateFixedDelegationData {
-    pub const LEN: usize = size_of::<u64>() + size_of::<u64>() + size_of::<u64>();
+    pub const LEN: usize = size_of::<CreateFixedDelegationData>();
 
     fn load(data: &[u8]) -> Result<&Self, ProgramError> {
         if data.len() != Self::LEN {
@@ -50,7 +50,7 @@ pub fn process((data, accounts): (&[u8], &[AccountInfo])) -> ProgramResult {
         accounts.delegatee.key(),
     );
     delegation.amount = call_data.amount;
-    delegation.expiry_s = call_data.expiry_s;
+    delegation.expiry_ts = call_data.expiry_ts;
 
     Ok(())
 }
@@ -65,8 +65,8 @@ mod tests {
             constants::{MINT_DECIMALS, TOKEN_PROGRAM_ID},
             pda::get_delegation_pda,
             utils::{
-                create_fixed_delegation_action, create_fixed_delegation_action_with_pda, init_ata,
-                init_mint, initialize_multidelegate_action, setup,
+                create_fixed_delegation_action, create_fixed_delegation_action_with_pda,
+                current_ts, days, init_ata, init_mint, initialize_multidelegate_action, setup,
             },
         },
         DelegationKind, FixedDelegation,
@@ -77,7 +77,7 @@ mod tests {
         let (litesvm, user) = &mut setup();
         let payer = user;
         let amount: u64 = 100_000_000;
-        let expiry_s: u64 = 1000;
+        let expiry_ts: i64 = current_ts() + days(1) as i64;
         let nonce: u64 = 0;
 
         let mint = init_mint(
@@ -96,7 +96,7 @@ mod tests {
         let delegatee = Pubkey::new_unique();
 
         let (res, delegation_pda) = create_fixed_delegation_action(
-            litesvm, payer, mint, delegatee, nonce, amount, expiry_s,
+            litesvm, payer, mint, delegatee, nonce, amount, expiry_ts,
         );
         res.unwrap();
 
@@ -105,12 +105,12 @@ mod tests {
 
         let header = delegation.header;
         let del_amount = delegation.amount;
-        let del_expiry_s = delegation.expiry_s;
+        let del_expiry_s = delegation.expiry_ts;
         assert_eq!(header.delegator, payer.pubkey().to_bytes());
         assert_eq!(header.delegatee, delegatee.to_bytes());
         assert_eq!(header.kind, DelegationKind::Fixed as u8);
         assert_eq!(del_amount, amount);
-        assert_eq!(del_expiry_s, expiry_s);
+        assert_eq!(del_expiry_s, expiry_ts);
     }
 
     // NOTE: These error tests use FixedDelegation but validate shared code paths.

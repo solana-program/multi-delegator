@@ -6,3 +6,6 @@ pub mod pda;
 
 #[cfg(test)]
 pub mod utils;
+
+#[cfg(test)]
+pub mod asserts;

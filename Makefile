@@ -1,12 +1,16 @@
 .PHONY: build build-program build-client test test-program test-client clean clean-program clean-client ensure-surfpool generate-client generate-idl kill-validator setup prepare-deploy-keys fmt-check fmt lint fmt-check lint-check
 
 # Setup target to check prerequisites and install dependencies
-setup:
+setup: setup-hooks
 	@command -v bun >/dev/null 2>&1 || { echo >&2 "bun is required but not installed. Aborting."; exit 1; }
 	@command -v cargo >/dev/null 2>&1 || { echo >&2 "cargo is required but not installed. Aborting."; exit 1; }
 	@command -v shank >/dev/null 2>&1 || { echo >&2 "shank is required but not installed. Aborting."; exit 1; }
 	@command -v surfpool >/dev/null 2>&1 || { echo >&2 "surfpool is required but not installed. Aborting."; exit 1; }
 	cd client && bun install
+
+setup-hooks:
+	@git config core.hooksPath .githooks
+	@echo "Git hooks configured."
 
 prepare-deploy-keys:
 	@mkdir -p programs/multi_delegator/target/deploy
@@ -70,7 +74,7 @@ ensure-surfpool:
 	@if ! curl -s -X POST http://localhost:8899 -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"getHealth","params":[]}' > /dev/null 2>&1; then \
 		echo "Starting surfpool in background..."; \
 		mkdir -p .surfpool; \
-		nohup surfpool start --watch --no-tui > /tmp/surfpool.log 2>&1  & \
+		nohup surfpool start --watch --no-tui --block-production-mode transaction > /tmp/surfpool.log 2>&1  & \
 		echo $$! > .surfpool/pid.txt; \
 		echo "Waiting for surfpool to start..."; \
 		for i in 1 2 3 4 5 6 7; do \
@@ -110,13 +114,14 @@ kill-validator:
 
 # test-client: builds everything needed, ensures surfpool, then runs tests
 test-client: $(SO_FILE) $(GENERATED_CLIENT) ensure-surfpool
-	cd client && bun test
+	cd client && bun run test
 
 # Clean targets
 clean: clean-program clean-client
 
 clean-program:
 	cd programs/multi_delegator && cargo clean
+	rm programs/multi_delegator/idl/multi_delegator.json
 
 clean-client:
 	cd client && bun run clean
@@ -136,7 +141,7 @@ fmt:
 
 lint:
 	@echo "Linting Rust code..."
-	cd programs/multi_delegator && cargo clippy --all-targets --no-deps -- -D warnings
+	cd programs/multi_delegator && cargo clippy --all-targets --no-deps --fix -- -D warnings
 	@echo "Linting TypeScript code..."
 	cd client && bun run lint
 

@@ -1,0 +1,19 @@
+#!/bin/sh
+
+# Run format check
+echo "Running format check..."
+make fmt-check
+if [ $? -ne 0 ]; then
+    echo "Error: Format check failed. Please run 'make fmt' to fix formatting issues."
+    exit 1
+fi
+
+# Run lint check
+echo "Running lint check..."
+make lint-check
+if [ $? -ne 0 ]; then
+    echo "Error: Lint check failed. Please run 'make lint' to fix linting issues."
+    exit 1
+fi
+
+exit 0

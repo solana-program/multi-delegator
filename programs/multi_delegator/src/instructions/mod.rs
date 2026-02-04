@@ -3,6 +3,8 @@ pub mod create_recurring_delegation;
 pub mod helpers;
 pub mod initialize_multidelegate;
 pub mod revoke_delegation;
+pub mod transfer_fixed_delegation;
+pub mod transfer_recurring_delegation;
 
 pub use helpers::*;
 
@@ -102,4 +104,60 @@ pub enum MultiDelegatorInstruction {
         desc = "The delegation PDA to close"
     )]
     RevokeDelegation = 3,
+
+    #[account(
+        0,
+        writable,
+        name = "delegation_pda",
+        desc = "The fixed delegation PDA to transfer from"
+    )]
+    #[account(1, writable, name = "multi_delegate", desc = "The multi delegate PDA")]
+    #[account(
+        2,
+        writable,
+        name = "delegator_ata",
+        desc = "The delegator's ATA to transfer from"
+    )]
+    #[account(
+        3,
+        writable,
+        name = "receiver_ata",
+        desc = "The receiver's ATA to transfer to"
+    )]
+    #[account(4, name = "token_program", desc = "The token program")]
+    #[account(
+        5,
+        signer,
+        name = "delegatee",
+        desc = "The delegatee signing the transfer"
+    )]
+    TransferFixed(TransferData) = 4,
+
+    #[account(
+        0,
+        writable,
+        name = "delegation_pda",
+        desc = "The recurring delegation PDA to transfer from"
+    )]
+    #[account(1, writable, name = "multi_delegate", desc = "The multi delegate PDA")]
+    #[account(
+        2,
+        writable,
+        name = "delegator_ata",
+        desc = "The delegator's ATA to transfer from"
+    )]
+    #[account(
+        3,
+        writable,
+        name = "receiver_ata",
+        desc = "The receiver's ATA to transfer to"
+    )]
+    #[account(4, name = "token_program", desc = "The token program")]
+    #[account(
+        5,
+        signer,
+        name = "delegatee",
+        desc = "The delegatee signing the transfer"
+    )]
+    TransferRecurring(TransferData) = 5,
 }

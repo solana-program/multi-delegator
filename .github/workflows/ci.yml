@@ -66,8 +66,8 @@ jobs:
       - name: Check formatting
         run: make fmt-check
 
-      - name: Lint
-        run: make lint
+      - name: Check Linting
+        run: make lint-check
 
       - name: Build program
         run: make build-program

@@ -13,12 +13,16 @@ pub struct CreateRecurringDelegationData {
     pub nonce: u64,
     pub amount_per_period: u64,
     pub period_length_s: u64,
-    pub expiry_s: u64,
+    pub start_ts: i64,
+    pub expiry_ts: i64,
 }
 
 impl CreateRecurringDelegationData {
-    pub const LEN: usize =
-        size_of::<u64>() + size_of::<u64>() + size_of::<u64>() + size_of::<u64>();
+    pub const LEN: usize = size_of::<u64>()
+        + size_of::<u64>()
+        + size_of::<u64>()
+        + size_of::<i64>()
+        + size_of::<u64>();
 
     fn load(data: &[u8]) -> Result<&Self, ProgramError> {
         if data.len() != Self::LEN {
@@ -51,9 +55,9 @@ pub fn process((data, accounts): (&[u8], &[AccountInfo])) -> ProgramResult {
         accounts.delegator.key(),
         accounts.delegatee.key(),
     );
-    delegation.last_pull_ts = 0;
+    delegation.current_period_start_ts = call_data.start_ts;
     delegation.period_length_s = call_data.period_length_s;
-    delegation.expiry_s = call_data.expiry_s;
+    delegation.expiry_ts = call_data.expiry_ts;
     delegation.amount_per_period = call_data.amount_per_period;
     delegation.amount_pulled_in_period = 0;
 
@@ -62,6 +66,8 @@ pub fn process((data, accounts): (&[u8], &[AccountInfo])) -> ProgramResult {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use solana_pubkey::Pubkey;
     use solana_signer::Signer;
 
@@ -69,7 +75,7 @@ mod tests {
         tests::{
             constants::{MINT_DECIMALS, TOKEN_PROGRAM_ID},
             utils::{
-                create_recurring_delegation_action, init_ata, init_mint,
+                create_recurring_delegation_action, days, init_ata, init_mint,
                 initialize_multidelegate_action, setup,
             },
         },
@@ -82,7 +88,11 @@ mod tests {
         let payer = user;
         let amount_per_period: u64 = 50_000_000;
         let period_length_s: u64 = 86400;
-        let expiry_s: u64 = 2592000;
+        let start_ts: i64 = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let expiry_ts = start_ts + days(7) as i64;
         let nonce: u64 = 0;
 
         let mint = init_mint(
@@ -108,7 +118,8 @@ mod tests {
             nonce,
             amount_per_period,
             period_length_s,
-            expiry_s,
+            start_ts,
+            expiry_ts,
         );
         res.unwrap();
 
@@ -118,16 +129,17 @@ mod tests {
         let header = delegation.header;
         let del_amount_per_period = delegation.amount_per_period;
         let del_period_length_s = delegation.period_length_s;
-        let del_expiry_s = delegation.expiry_s;
+        let del_expiry_s = delegation.expiry_ts;
         let del_amount_pulled_in_period = delegation.amount_pulled_in_period;
-        let del_last_pull_ts = delegation.last_pull_ts;
+        let del_current_period_start_ts = delegation.current_period_start_ts;
+
         assert_eq!(header.delegator, payer.pubkey().to_bytes());
         assert_eq!(header.delegatee, delegatee.to_bytes());
         assert_eq!(header.kind, DelegationKind::Recurring as u8);
         assert_eq!(del_amount_per_period, amount_per_period);
         assert_eq!(del_period_length_s, period_length_s);
-        assert_eq!(del_expiry_s, expiry_s);
+        assert_eq!(del_expiry_s, expiry_ts);
         assert_eq!(del_amount_pulled_in_period, 0);
-        assert_eq!(del_last_pull_ts, 0);
+        assert_eq!(del_current_period_start_ts, start_ts);
     }
 }

@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use litesvm::{types::TransactionResult, LiteSVM};
 use solana_account::Account;
 use solana_instruction::Instruction;
@@ -9,6 +11,7 @@ use solana_transaction::Transaction;
 use spl_associated_token_account::{
     get_associated_token_address,
     solana_program::{
+        clock::Clock,
         native_token::LAMPORTS_PER_SOL,
         program_pack::{IsInitialized, Pack},
     },
@@ -20,13 +23,46 @@ use solana_instruction::AccountMeta;
 use crate::{
     instructions::{
         create_fixed_delegation, create_recurring_delegation, initialize_multidelegate,
-        revoke_delegation,
+        revoke_delegation, transfer_fixed_delegation, transfer_recurring_delegation,
     },
     tests::{
-        constants::{PROGRAM_ID, SYSTEM_PROGRAM_ID},
+        constants::{PROGRAM_ID, SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID},
         pda::{get_delegation_pda, get_multidelegate_pda},
     },
 };
+
+/// Converts number of minutes into seconds
+pub fn minutes(mins: u64) -> u64 {
+    mins * 60
+}
+
+/// Converts number of hours into seconds
+pub fn hours(hours: u64) -> u64 {
+    hours * minutes(60)
+}
+
+/// Converts number of days into seconds
+pub fn days(days: u64) -> u64 {
+    days * hours(24)
+}
+
+pub fn current_ts() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+}
+
+pub fn move_clock_forward(litesvm: &mut LiteSVM, seconds: u64) {
+    let mut initial_clock = litesvm.get_sysvar::<Clock>();
+    initial_clock.unix_timestamp += seconds as i64;
+    litesvm.set_sysvar::<Clock>(&initial_clock);
+}
+
+pub fn get_ata_balance(litesvm: &LiteSVM, ata: &Pubkey) -> u64 {
+    let account = fetch_account::<spl_token_2022::state::Account>(litesvm, ata);
+    account.amount
+}
 
 pub fn setup() -> (LiteSVM, Keypair) {
     let mut litesvm = LiteSVM::new();
@@ -34,6 +70,10 @@ pub fn setup() -> (LiteSVM, Keypair) {
     litesvm
         .add_program_from_file(PROGRAM_ID.to_bytes(), "target/deploy/multi_delegator.so")
         .unwrap();
+
+    let mut initial_clock = litesvm.get_sysvar::<Clock>();
+    initial_clock.unix_timestamp = current_ts();
+    litesvm.set_sysvar::<Clock>(&initial_clock);
 
     let default_payer = Keypair::new();
     litesvm
@@ -66,7 +106,9 @@ pub fn build_and_send_transaction(
         Message::new(ixs, Some(payer)),
         litesvm.latest_blockhash(),
     );
-    litesvm.send_transaction(tx)
+    let result = litesvm.send_transaction(tx);
+    litesvm.expire_blockhash();
+    result
 }
 
 pub fn init_wallet(litesvm: &mut LiteSVM, lamports: u64) -> Keypair {
@@ -176,21 +218,21 @@ pub fn initialize_multidelegate_action(
 
 pub fn create_fixed_delegation_action(
     litesvm: &mut LiteSVM,
-    payer: &Keypair,
+    delegator: &Keypair,
     mint: Pubkey,
     delegatee: Pubkey,
     nonce: u64,
     amount: u64,
-    expiry_s: u64,
+    expiry_ts: i64,
 ) -> (TransactionResult, Pubkey) {
-    let (multi_delegate_pda, _bump) = get_multidelegate_pda(&payer.pubkey(), &mint);
+    let (multi_delegate_pda, _bump) = get_multidelegate_pda(&delegator.pubkey(), &mint);
     let (delegation_pda, _bump) =
-        get_delegation_pda(&multi_delegate_pda, &payer.pubkey(), &delegatee, nonce);
+        get_delegation_pda(&multi_delegate_pda, &delegator.pubkey(), &delegatee, nonce);
 
     let ix = Instruction {
         program_id: PROGRAM_ID,
         accounts: vec![
-            AccountMeta::new(payer.pubkey(), true),
+            AccountMeta::new(delegator.pubkey(), true),
             AccountMeta::new(multi_delegate_pda, false),
             AccountMeta::new(delegation_pda, false),
             AccountMeta::new_readonly(delegatee, false),
@@ -200,13 +242,13 @@ pub fn create_fixed_delegation_action(
             vec![*create_fixed_delegation::DISCRIMINATOR],
             nonce.to_le_bytes().to_vec(),
             amount.to_le_bytes().to_vec(),
-            expiry_s.to_le_bytes().to_vec(),
+            expiry_ts.to_le_bytes().to_vec(),
         ]
         .concat(),
     };
 
     (
-        build_and_send_transaction(litesvm, &[payer], &payer.pubkey(), &[ix]),
+        build_and_send_transaction(litesvm, &[delegator], &delegator.pubkey(), &[ix]),
         delegation_pda,
     )
 }
@@ -214,22 +256,23 @@ pub fn create_fixed_delegation_action(
 #[allow(clippy::too_many_arguments)]
 pub fn create_recurring_delegation_action(
     litesvm: &mut LiteSVM,
-    payer: &Keypair,
+    delegator: &Keypair,
     mint: Pubkey,
     delegatee: Pubkey,
     nonce: u64,
     amount_per_period: u64,
     period_length_s: u64,
-    expiry_s: u64,
+    start_ts: i64,
+    expiry_ts: i64,
 ) -> (TransactionResult, Pubkey) {
-    let (multi_delegate_pda, _bump) = get_multidelegate_pda(&payer.pubkey(), &mint);
+    let (multi_delegate_pda, _bump) = get_multidelegate_pda(&delegator.pubkey(), &mint);
     let (delegation_pda, _bump) =
-        get_delegation_pda(&multi_delegate_pda, &payer.pubkey(), &delegatee, nonce);
+        get_delegation_pda(&multi_delegate_pda, &delegator.pubkey(), &delegatee, nonce);
 
     let ix = Instruction {
         program_id: PROGRAM_ID,
         accounts: vec![
-            AccountMeta::new(payer.pubkey(), true),
+            AccountMeta::new(delegator.pubkey(), true),
             AccountMeta::new(multi_delegate_pda, false),
             AccountMeta::new(delegation_pda, false),
             AccountMeta::new_readonly(delegatee, false),
@@ -240,13 +283,14 @@ pub fn create_recurring_delegation_action(
             nonce.to_le_bytes().to_vec(),
             amount_per_period.to_le_bytes().to_vec(),
             period_length_s.to_le_bytes().to_vec(),
-            expiry_s.to_le_bytes().to_vec(),
+            start_ts.to_le_bytes().to_vec(),
+            expiry_ts.to_le_bytes().to_vec(),
         ]
         .concat(),
     };
 
     (
-        build_and_send_transaction(litesvm, &[payer], &payer.pubkey(), &[ix]),
+        build_and_send_transaction(litesvm, &[delegator], &delegator.pubkey(), &[ix]),
         delegation_pda,
     )
 }
@@ -307,4 +351,118 @@ pub fn revoke_delegation_action(
     };
 
     build_and_send_transaction(litesvm, &[payer], &payer.pubkey(), &[ix])
+}
+
+#[allow(clippy::result_large_err)]
+pub fn transfer_fixed_action_with_signer(
+    litesvm: &mut LiteSVM,
+    delegator_pubkey: Pubkey,
+    mint: Pubkey,
+    delegation_pda: Pubkey,
+    amount: u64,
+    receiver_ata: Pubkey,
+    signer: &Keypair,
+) -> TransactionResult {
+    let (multi_delegate_pda, _bump) = get_multidelegate_pda(&delegator_pubkey, &mint);
+    let delegator_ata = get_associated_token_address(&delegator_pubkey, &mint);
+
+    let ix = Instruction {
+        program_id: PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(delegation_pda, false),
+            AccountMeta::new(multi_delegate_pda, false),
+            AccountMeta::new(delegator_ata, false),
+            AccountMeta::new(receiver_ata, false),
+            AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+            AccountMeta::new_readonly(signer.pubkey(), true),
+        ],
+        data: [
+            vec![*transfer_fixed_delegation::DISCRIMINATOR],
+            amount.to_le_bytes().to_vec(),
+            delegator_pubkey.to_bytes().to_vec(),
+            mint.to_bytes().to_vec(),
+        ]
+        .concat(),
+    };
+
+    build_and_send_transaction(litesvm, &[signer], &signer.pubkey(), &[ix])
+}
+
+#[allow(clippy::result_large_err)]
+pub fn transfer_fixed_action(
+    litesvm: &mut LiteSVM,
+    delegator: &Keypair,
+    delegatee: &Keypair,
+    mint: Pubkey,
+    delegation_pda: Pubkey,
+    amount: u64,
+) -> TransactionResult {
+    let delegatee_ata = get_associated_token_address(&delegatee.pubkey(), &mint);
+
+    transfer_fixed_action_with_signer(
+        litesvm,
+        delegator.pubkey(),
+        mint,
+        delegation_pda,
+        amount,
+        delegatee_ata,
+        delegatee,
+    )
+}
+
+#[allow(clippy::result_large_err)]
+pub fn transfer_recurring_action_with_signer(
+    litesvm: &mut LiteSVM,
+    delegator_pubkey: Pubkey,
+    mint: Pubkey,
+    delegation_pda: Pubkey,
+    amount: u64,
+    receiver_ata: Pubkey,
+    signer: &Keypair,
+) -> TransactionResult {
+    let (multi_delegate_pda, _bump) = get_multidelegate_pda(&delegator_pubkey, &mint);
+    let delegator_ata = get_associated_token_address(&delegator_pubkey, &mint);
+
+    let ix = Instruction {
+        program_id: PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(delegation_pda, false),
+            AccountMeta::new(multi_delegate_pda, false),
+            AccountMeta::new(delegator_ata, false),
+            AccountMeta::new(receiver_ata, false),
+            AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+            AccountMeta::new_readonly(signer.pubkey(), true),
+        ],
+        data: [
+            vec![*transfer_recurring_delegation::DISCRIMINATOR],
+            amount.to_le_bytes().to_vec(),
+            delegator_pubkey.to_bytes().to_vec(),
+            mint.to_bytes().to_vec(),
+        ]
+        .concat(),
+    };
+
+    build_and_send_transaction(litesvm, &[signer], &signer.pubkey(), &[ix])
+}
+
+#[allow(clippy::result_large_err)]
+pub fn transfer_recurring_action(
+    litesvm: &mut LiteSVM,
+    delegator: &Keypair,
+    delegatee: &Keypair,
+    mint: Pubkey,
+    delegation_pda: Pubkey,
+    amount: u64,
+) -> TransactionResult {
+    let delegatee_ata = get_associated_token_address(&delegatee.pubkey(), &mint);
+
+    transfer_recurring_action_with_signer(
+        litesvm,
+        delegator.pubkey(),
+        mint,
+        delegation_pda,
+        amount,
+        delegatee_ata,
+        delegatee,
+    )
 }

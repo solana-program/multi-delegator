@@ -1,25 +1,28 @@
-use core::mem::transmute;
+use core::mem::{size_of, transmute};
 use pinocchio::program_error::ProgramError;
 use shank::ShankAccount;
 
-use super::header::Header;
-use crate::MultiDelegatorError;
+use crate::{Header, MultiDelegatorError};
 
 #[repr(C, packed)]
 #[derive(Debug, ShankAccount)]
 pub struct RecurringDelegation {
     pub header: Header,
-    pub last_pull_ts: i64,
+    /// Timestamp start of the current period
+    pub current_period_start_ts: i64,
+    /// Length of a period in seconds
     pub period_length_s: u64,
-    pub expiry_s: u64,
+    /// Expirey after which this delegation will no longer be active
+    pub expiry_ts: i64,
+    /// How much can be transfered each period
     pub amount_per_period: u64,
+    /// How much has been transfered so far in this period
     pub amount_pulled_in_period: u64,
 }
 
 impl RecurringDelegation {
-    pub const LEN: usize = core::mem::size_of::<RecurringDelegation>();
+    pub const LEN: usize = size_of::<Self>();
 
-    #[inline(always)]
     pub fn load(bytes: &[u8]) -> Result<&Self, ProgramError> {
         if bytes.len() != Self::LEN {
             return Err(MultiDelegatorError::InvalidAccountData.into());
@@ -27,7 +30,6 @@ impl RecurringDelegation {
         Ok(unsafe { &*transmute::<*const u8, *const Self>(bytes.as_ptr()) })
     }
 
-    #[inline(always)]
     pub fn load_mut(bytes: &mut [u8]) -> Result<&mut Self, ProgramError> {
         if bytes.len() != Self::LEN {
             return Err(MultiDelegatorError::InvalidAccountData.into());

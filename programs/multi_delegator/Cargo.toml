@@ -25,6 +25,7 @@ solana-message = "^2"
 solana-pubkey = "^2"
 solana-signer = "^2"
 solana-transaction = "^2"
+solana-transaction-error = "^2"
 spl-associated-token-account = "7.0.0"
 spl-token-2022 = "^8"
 

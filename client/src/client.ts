@@ -1,9 +1,8 @@
 import type {
   Address,
-  GetLatestBlockhashApi,
-  GetProgramAccountsApi,
   Instruction,
   Rpc,
+  SolanaRpcApiTestnet,
   TransactionSigner,
 } from 'gill';
 import {
@@ -21,13 +20,15 @@ import {
   getCreateRecurringDelegationInstruction,
   getInitMultiDelegateInstruction,
   getRevokeDelegationInstruction,
+  getTransferFixedInstruction,
+  getTransferRecurringInstruction,
   MULTI_DELEGATOR_PROGRAM_ADDRESS,
   type RecurringDelegation,
 } from './generated/index.js';
 import { getDelegationPDA, getMultiDelegatePDA } from './pdas.js';
 
 type SolanaClient = {
-  rpc: Rpc<GetLatestBlockhashApi & GetProgramAccountsApi>;
+  rpc: Rpc<SolanaRpcApiTestnet>;
   sendAndConfirmTransaction: (
     tx: Awaited<ReturnType<typeof signTransactionMessageWithSigners>>,
   ) => Promise<string>;
@@ -85,7 +86,7 @@ export class MultiDelegatorClient {
     delegatee: Address,
     nonce: number | bigint,
     amount: number | bigint,
-    expiryS: number | bigint,
+    expiryTs: number | bigint,
   ): Promise<{ signature: string }> {
     const user = delegator.address;
     const [multiDelegate] = await getMultiDelegatePDA(user, tokenMint);
@@ -103,7 +104,7 @@ export class MultiDelegatorClient {
       delegatee,
       nonce,
       amount,
-      expiryS,
+      expiryTs,
     });
 
     const sig = await this.buildAndSendTransaction([instruction], [delegator]);
@@ -117,7 +118,8 @@ export class MultiDelegatorClient {
     nonce: number | bigint,
     amountPerPeriod: number | bigint,
     periodLengthS: number | bigint,
-    expiryS: number | bigint,
+    startTs: number | bigint,
+    expiryTs: number | bigint,
   ): Promise<{ signature: string }> {
     const user = delegator.address;
     const [multiDelegate] = await getMultiDelegatePDA(user, tokenMint);
@@ -136,7 +138,8 @@ export class MultiDelegatorClient {
       nonce,
       amountPerPeriod,
       periodLengthS,
-      expiryS,
+      startTs,
+      expiryTs,
     });
 
     const sig = await this.buildAndSendTransaction([instruction], [delegator]);
@@ -153,6 +156,62 @@ export class MultiDelegatorClient {
     });
 
     const sig = await this.buildAndSendTransaction([instruction], [delegator]);
+    return { signature: sig };
+  }
+
+  async transferFixed(
+    delegatee: TransactionSigner,
+    delegator: Address,
+    delegatorAta: Address,
+    tokenMint: Address,
+    delegationPda: Address,
+    amount: number | bigint,
+    receiverAta: Address,
+  ): Promise<{ signature: string }> {
+    const [multiDelegate] = await getMultiDelegatePDA(delegator, tokenMint);
+
+    const instruction = getTransferFixedInstruction({
+      delegationPda,
+      multiDelegate,
+      delegatorAta,
+      receiverAta,
+      delegatee,
+      transferData: {
+        amount,
+        delegator,
+        mint: tokenMint,
+      },
+    });
+
+    const sig = await this.buildAndSendTransaction([instruction], [delegatee]);
+    return { signature: sig };
+  }
+
+  async transferRecurring(
+    delegatee: TransactionSigner,
+    delegator: Address,
+    delegatorAta: Address,
+    tokenMint: Address,
+    delegationPda: Address,
+    amount: number | bigint,
+    receiverAta: Address,
+  ): Promise<{ signature: string }> {
+    const [multiDelegate] = await getMultiDelegatePDA(delegator, tokenMint);
+
+    const instruction = getTransferRecurringInstruction({
+      delegationPda,
+      multiDelegate,
+      delegatorAta,
+      receiverAta,
+      delegatee,
+      transferData: {
+        amount,
+        delegator,
+        mint: tokenMint,
+      },
+    });
+
+    const sig = await this.buildAndSendTransaction([instruction], [delegatee]);
     return { signature: sig };
   }
 

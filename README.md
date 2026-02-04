@@ -46,22 +46,26 @@ multidelegator/
 Ensure you have the following installed:
 
 1. **Rust & Solana CLI**:
+
    ```bash
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
    agave-install update
    ```
 
 2. **Bun**:
+
    ```bash
    curl -fsSL https://bun.sh/install | bash
    ```
 
 3. **Shank CLI** (for IDL generation):
+
    ```bash
    cargo install shank-cli
    ```
 
 4. **Surfpool CLI** (for local validator and deployments):
+
    ```bash
    curl -sL https://run.surfpool.run/ | bash
    ```
@@ -116,6 +120,18 @@ The project uses a `Makefile` to simplify common tasks.
   - A `TryFrom<&[AccountInfo]>` implementation for account validation.
   - A `TryFrom<&[u8]>` implementation for data deserialization.
 - **Testing:** Uses `litesvm` for fast, lightweight integration tests in Rust, and `bun test` for client-side integration tests.
+
+## Delegation Architecture
+
+The project adopts a modular architecture for delegation types to ensure extensibility and clean separation of concerns.
+
+- **Modular State & Logic**: Each delegation type (e.g., `Fixed`, `Recurring`) has its own dedicated module under `programs/multi_delegator/src/delegations/`.
+- **Encapsulation**: These modules encapsulate the specific logic for:
+  - State definition
+  - Initialization
+  - Transfer validation
+- **Extensibility**: This structure simplifies adding new delegation types. To add a new type, one simply needs to create a new module implementing the required lifecycle methods and incorporate it into the main instruction dispatch.
+- **Reasoning**: By keeping all methods related to a specific delegation lifecycle (state description, initialization, validation) in a single file/module, we reduce the complexity of the main program logic. This allows developers to write the logic for a new delegation type in isolation and then easily plug it into the program.
 
 ## Code Style & Conventions
 

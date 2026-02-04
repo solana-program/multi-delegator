@@ -62,9 +62,9 @@ mod tests {
         tests::{
             constants::{MINT_DECIMALS, TOKEN_PROGRAM_ID},
             utils::{
-                create_fixed_delegation_action, create_recurring_delegation_action, init_ata,
-                init_mint, init_wallet, initialize_multidelegate_action, revoke_delegation_action,
-                setup,
+                create_fixed_delegation_action, create_recurring_delegation_action, current_ts,
+                days, init_ata, init_mint, init_wallet, initialize_multidelegate_action,
+                revoke_delegation_action, setup,
             },
         },
         DelegationKind, FixedDelegation, RecurringDelegation,
@@ -138,8 +138,18 @@ mod tests {
         let delegatee = Pubkey::new_unique();
         let nonce: u64 = 0;
 
+        let epoch = days(1);
+        let expiry_ts = current_ts() + days(2) as i64;
         let (res, delegation_pda) = create_recurring_delegation_action(
-            litesvm, payer, mint, delegatee, nonce, 100, 86400, 1000000,
+            litesvm,
+            payer,
+            mint,
+            delegatee,
+            nonce,
+            100,
+            epoch,
+            current_ts(),
+            expiry_ts,
         );
         res.unwrap();
 
@@ -186,8 +196,19 @@ mod tests {
         let delegatee = Pubkey::new_unique();
         let nonce: u64 = 0;
 
-        let (res, delegation_pda) =
-            create_fixed_delegation_action(litesvm, payer, mint, delegatee, nonce, 100, 1000);
+        let epoch = days(1);
+        let expiry_ts = current_ts() + days(2) as i64;
+        let (res, delegation_pda) = create_recurring_delegation_action(
+            litesvm,
+            payer,
+            mint,
+            delegatee,
+            nonce,
+            100,
+            epoch,
+            current_ts(),
+            expiry_ts,
+        );
         res.unwrap();
 
         let attacker = init_wallet(litesvm, 1_000_000_000);
