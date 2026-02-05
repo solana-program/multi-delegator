@@ -2,19 +2,20 @@ use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramR
 
 use crate::{
     AccountCheck, AccountClose, Header, MultiDelegatorError, ProgramAccount, SignerAccount,
-    DELEGATEE_OFFSET, DELEGATOR_OFFSET,
+    DELEGATEE_OFFSET, DELEGATOR_OFFSET, PAYER_OFFSET,
 };
 
 pub struct RevokeDelegationAccounts<'a> {
     pub authority: &'a AccountInfo,
     pub delegation_account: &'a AccountInfo,
+    pub receiver: Option<&'a AccountInfo>,
 }
 
 impl<'a> TryFrom<&'a [AccountInfo]> for RevokeDelegationAccounts<'a> {
     type Error = ProgramError;
 
     fn try_from(accounts: &'a [AccountInfo]) -> Result<Self, Self::Error> {
-        let [authority, delegation_account, ..] = accounts else {
+        let [authority, delegation_account, rem @ ..] = accounts else {
             return Err(MultiDelegatorError::NotEnoughAccountKeys.into());
         };
 
@@ -24,6 +25,7 @@ impl<'a> TryFrom<&'a [AccountInfo]> for RevokeDelegationAccounts<'a> {
         Ok(Self {
             authority,
             delegation_account,
+            receiver: rem.first(),
         })
     }
 }
@@ -31,11 +33,11 @@ impl<'a> TryFrom<&'a [AccountInfo]> for RevokeDelegationAccounts<'a> {
 pub const DISCRIMINATOR: &u8 = &3;
 
 /// Revokes a delegation by closing the delegation PDA.
-/// The rent lamports are always returned to the delegator (authority).
+/// The rent lamports are returned to the original payer.
 pub fn process(accounts: &[AccountInfo]) -> ProgramResult {
     let accounts = RevokeDelegationAccounts::try_from(accounts)?;
 
-    {
+    let destination = {
         let data = accounts.delegation_account.try_borrow_data()?;
 
         if data.len() < Header::LEN {
@@ -48,9 +50,25 @@ pub fn process(accounts: &[AccountInfo]) -> ProgramResult {
         if delegator_bytes != accounts.authority.key().as_ref() {
             return Err(MultiDelegatorError::Unauthorized.into());
         }
-    }
 
-    ProgramAccount::close(accounts.delegation_account, accounts.authority)
+        let payer_bytes: &[u8; 32] = data[PAYER_OFFSET..PAYER_OFFSET + 32]
+            .try_into()
+            .map_err(|_| MultiDelegatorError::InvalidPayerData)?;
+
+        if payer_bytes == accounts.authority.key().as_ref() {
+            accounts.authority
+        } else {
+            let receiver = accounts
+                .receiver
+                .ok_or(MultiDelegatorError::NotEnoughAccountKeys)?;
+            if receiver.key().as_ref() != payer_bytes {
+                return Err(MultiDelegatorError::Unauthorized.into());
+            }
+            receiver
+        }
+    };
+
+    ProgramAccount::close(accounts.delegation_account, destination)
 }
 
 #[cfg(test)]
@@ -60,14 +78,14 @@ mod tests {
 
     use crate::{
         tests::{
+            asserts::assert_error,
             constants::{MINT_DECIMALS, TOKEN_PROGRAM_ID},
             utils::{
-                create_fixed_delegation_action, create_recurring_delegation_action, current_ts,
-                days, init_ata, init_mint, init_wallet, initialize_multidelegate_action,
-                revoke_delegation_action, setup,
+                current_ts, days, init_ata, init_mint, init_wallet,
+                initialize_multidelegate_action, setup, CreateDelegation, RevokeDelegation,
             },
         },
-        DelegationKind, FixedDelegation, RecurringDelegation,
+        DelegationKind, FixedDelegation, MultiDelegatorError, RecurringDelegation,
     };
 
     #[test]
@@ -91,8 +109,9 @@ mod tests {
         let delegatee = Pubkey::new_unique();
         let nonce: u64 = 0;
 
-        let (res, delegation_pda) =
-            create_fixed_delegation_action(litesvm, payer, mint, delegatee, nonce, 100, 1000);
+        let (res, delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .nonce(nonce)
+            .fixed(100, 1000);
         res.unwrap();
 
         let account_before = litesvm.get_account(&delegation_pda);
@@ -104,7 +123,7 @@ mod tests {
 
         let delegator_balance_before = litesvm.get_account(&payer.pubkey()).unwrap().lamports;
 
-        let res = revoke_delegation_action(litesvm, payer, mint, delegatee, nonce);
+        let res = RevokeDelegation::new(litesvm, payer, mint, delegatee, nonce).execute();
         res.unwrap();
 
         let account_after = litesvm.get_account(&delegation_pda);
@@ -140,17 +159,9 @@ mod tests {
 
         let epoch = days(1);
         let expiry_ts = current_ts() + days(2) as i64;
-        let (res, delegation_pda) = create_recurring_delegation_action(
-            litesvm,
-            payer,
-            mint,
-            delegatee,
-            nonce,
-            100,
-            epoch,
-            current_ts(),
-            expiry_ts,
-        );
+        let (res, delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .nonce(nonce)
+            .recurring(100, epoch, current_ts(), expiry_ts);
         res.unwrap();
 
         let account_before = litesvm.get_account(&delegation_pda);
@@ -162,7 +173,7 @@ mod tests {
 
         let delegator_balance_before = litesvm.get_account(&payer.pubkey()).unwrap().lamports;
 
-        let res = revoke_delegation_action(litesvm, payer, mint, delegatee, nonce);
+        let res = RevokeDelegation::new(litesvm, payer, mint, delegatee, nonce).execute();
         res.unwrap();
 
         let account_after = litesvm.get_account(&delegation_pda);
@@ -198,17 +209,9 @@ mod tests {
 
         let epoch = days(1);
         let expiry_ts = current_ts() + days(2) as i64;
-        let (res, delegation_pda) = create_recurring_delegation_action(
-            litesvm,
-            payer,
-            mint,
-            delegatee,
-            nonce,
-            100,
-            epoch,
-            current_ts(),
-            expiry_ts,
-        );
+        let (res, delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .nonce(nonce)
+            .recurring(100, epoch, current_ts(), expiry_ts);
         res.unwrap();
 
         let attacker = init_wallet(litesvm, 1_000_000_000);
@@ -225,6 +228,42 @@ mod tests {
         let account_after = litesvm.get_account(&delegation_pda);
         assert!(account_after.is_some());
         assert!(account_after.as_ref().map(|a| a.lamports).unwrap_or(0) > 0);
+    }
+
+    #[test]
+    fn revoke_with_wrong_receiver_returns_unauthorized() {
+        let (litesvm, user) = &mut setup();
+        let delegator = user;
+        let sponsor = init_wallet(litesvm, 10_000_000_000);
+        let wrong_receiver = init_wallet(litesvm, 10_000_000_000);
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(delegator.pubkey()),
+        );
+        let _user_ata = init_ata(litesvm, mint, delegator.pubkey(), 1_000_000);
+
+        initialize_multidelegate_action(litesvm, delegator, mint)
+            .0
+            .unwrap();
+
+        let delegatee = Pubkey::new_unique();
+        let nonce: u64 = 0;
+
+        let (res, _) = CreateDelegation::new(litesvm, delegator, mint, delegatee)
+            .payer(&sponsor)
+            .nonce(nonce)
+            .fixed(100, 1000);
+        res.unwrap();
+
+        let result = RevokeDelegation::new(litesvm, delegator, mint, delegatee, nonce)
+            .receiver(wrong_receiver.pubkey())
+            .execute();
+
+        assert_error(result, MultiDelegatorError::Unauthorized);
     }
 
     #[allow(clippy::result_large_err)]

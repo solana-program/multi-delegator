@@ -65,15 +65,18 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant A as Alice
+    participant A as Alice (Delegator)
     participant P as Program
+    participant S as Sponsor (Optional Payer)
     participant B as Bob
 
-    A->>P: create_fixed_delegation(bob, nonce, amount, expiry_ts)
+    Note over A,S: If sponsor provided, they pay for delegation rent
+
+    A->>P: create_fixed_delegation(bob, nonce, amount, expiry_ts[, sponsor])
     Note over P: Validate MDA exists<br/>Alice is delegator
 
     P->>P: Derive Delegation PDA<br/>["delegation", MDA, alice, bob, nonce]
-    Note over P: Create FixedDelegation PDA
+    Note over P: Create FixedDelegation PDA<br/>Store payer (Alice or sponsor)
     P->>A: Delegation created
 
     Note over A,B: Bob can now spend up to `amount`<br/>until `expiry_ts`
@@ -83,15 +86,18 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant A as Alice
+    participant A as Alice (Delegator)
     participant P as Program
+    participant S as Sponsor (Optional Payer)
     participant B as Bob
 
-    A->>P: create_recurring_delegation(bob, nonce, amount_per_period, period_length_s, start_ts, expiry_ts)
+    Note over A,S: If sponsor provided, they pay for delegation rent
+
+    A->>P: create_recurring_delegation(bob, nonce, amount_per_period, period_length_s, start_ts, expiry_ts[, sponsor])
     Note over P: Validate MDA exists<br/>Alice is delegator
 
     P->>P: Derive Delegation PDA<br/>["delegation", MDA, alice, bob, nonce]
-    Note over P: Create RecurringDelegation PDA
+    Note over P: Create RecurringDelegation PDA<br/>Store payer (Alice or sponsor)
     P->>A: Delegation created
 
     Note over A,B: Bob can pull `amount_per_period`<br/>every `period_length_s` seconds until `expiry_ts`
@@ -119,26 +125,25 @@ sequenceDiagram
     end
 ```
 
-### Transfer Execution: Recurring Delegation
+### Revocation: Alice Closes Delegation
 
 ```mermaid
 sequenceDiagram
-    participant B as Bob
+    participant A as Alice (Delegator)
     participant P as Program
-    participant MDA as MDA
-    participant T as Token Program
+    participant S as Sponsor (if payer != delegator)
 
-    B->>P: transfer(delegation_pda, amount)
-    Note over P: Load RecurringDelegation
+    Note over A,S: Only delegator can revoke,<br/>rent returns to original payer
 
-    alt Period elapsed and amount OK
-        Note over P: Check timestamp and tracking
-        P->>MDA: Delegate authority check
-        P->>T: Transfer from Alice's ATA<br/>to Bob's ATA (amount)
-        T->>B: Tokens transferred
-        P->>P: Update amount_pulled_in_period
-    else Too soon or too much
-        P->>B: Error (period not elapsed or exceeds)
+    A->>P: revoke_delegation(delegation_pda[, sponsor])
+    Note over P: Validate Alice is delegator
+
+    alt Alice is the payer
+        P->>P: Close delegation PDA
+        P->>A: Rent returned to Alice
+    else Sponsor paid for delegation
+        P->>P: Close delegation PDA
+        P->>S: Rent returned to sponsor
     end
 ```
 
@@ -173,11 +178,11 @@ getProgramAccounts(PROGRAM_ID, {
 
 ### Delegation Management
 
-| Instruction                   | Actor     | Purpose                                                   |
-| ----------------------------- | --------- | --------------------------------------------------------- |
-| `create_fixed_delegation`     | Delegator | Create one-time delegation with nonce, amount, and expiry |
-| `create_recurring_delegation` | Delegator | Create recurring delegation with period limits            |
-| `revoke_delegation`           | Delegator | Close a delegation account and recover rent               |
+| Instruction                   | Actor     | Purpose                                                                             |
+| ----------------------------- | --------- | ----------------------------------------------------------------------------------- |
+| `create_fixed_delegation`     | Delegator | Create one-time delegation with nonce, amount, and expiry (payer can be sponsor)     |
+| `create_recurring_delegation` | Delegator | Create recurring delegation with period limits (payer can be sponsor)              |
+| `revoke_delegation`           | Delegator | Close a delegation account and return rent to the original payer (delegator/sponsor) |
 
 ### Transfer
 
@@ -235,6 +240,7 @@ pub struct Header {
     pub bump: u8,          // 1 byte
     pub delegator: Pubkey, // 32 bytes - user granting delegation
     pub delegatee: Pubkey, // 32 bytes - beneficiary
+    pub payer: Pubkey,     // 32 bytes - who paid for the delegation account
 }
 
 impl Header {
@@ -322,7 +328,8 @@ Creates a one-time delegation with nonce-based PDA.
 | 1       | writable         | MultiDelegate PDA for this token type  |
 | 2       | writable         | FixedDelegation PDA being created      |
 | 3       |                  | The delegatee (beneficiary)            |
-| 4       | system_program   | System program                         |
+| 4       | signer, writable | The payer who funds the delegation account (optional, defaults to delegator) |
+| 5       | system_program   | System program                         |
 
 **Parameters:**
 
@@ -346,7 +353,8 @@ Creates a recurring delegation with period tracking.
 | 1       | writable         | MultiDelegate PDA for this token type  |
 | 2       | writable         | RecurringDelegation PDA being created  |
 | 3       |                  | The delegatee (beneficiary)            |
-| 4       | system_program   | System program                         |
+| 4       | signer, writable | The payer who funds the delegation account (optional, defaults to delegator) |
+| 5       | system_program   | System program                         |
 
 **Parameters:**
 
@@ -366,18 +374,20 @@ Creates a recurring delegation with period tracking.
 
 ### `revoke_delegation` (Discriminator: 3)
 
-Revokes a delegation by closing the delegation PDA and returning rent to the delegator.
+Revokes a delegation by closing the delegation PDA and returning rent to the original payer.
 
-| Account | Type     | Description               |
-| ------- | -------- | ------------------------- |
-| 0       | signer   | The delegator (authority) |
-| 1       | writable | Delegation PDA to close   |
+| Account | Type     | Description                                                                 |
+| ------- | -------- | --------------------------------------------------------------------------- |
+| 0       | signer   | The delegator (authority)                                                   |
+| 1       | writable | Delegation PDA to close                                                    |
+| 2       | writable | Receiver account (required only if payer != delegator)                     |
 
 **Process:**
 
 1. Validate that the signer matches the `delegator` field in the delegation header
-2. Close the delegation account
-3. Transfer rent lamports back to the delegator
+2. Determine rent destination: if payer == delegator, use delegator account; otherwise, use provided receiver account
+3. Close the delegation account
+4. Transfer rent lamports back to the original payer (delegator or sponsor)
 
 ---
 

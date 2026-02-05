@@ -47,6 +47,7 @@ pub fn process(accounts: &[AccountInfo], call_data: &CreateFixedDelegationData) 
         bump,
         accounts.delegator.key(),
         accounts.delegatee.key(),
+        accounts.payer.key(),
     );
     delegation.amount = call_data.amount;
     delegation.expiry_ts = call_data.expiry_ts;
@@ -64,12 +65,73 @@ mod tests {
             constants::{MINT_DECIMALS, TOKEN_PROGRAM_ID},
             pda::get_delegation_pda,
             utils::{
-                create_fixed_delegation_action, create_fixed_delegation_action_with_pda,
-                current_ts, days, init_ata, init_mint, initialize_multidelegate_action, setup,
+                current_ts, days, init_ata, init_mint, init_wallet,
+                initialize_multidelegate_action, setup, CreateDelegation, RevokeDelegation,
             },
         },
         DelegationKind, FixedDelegation,
     };
+
+    #[test]
+    fn create_fixed_delegation_with_sponsor() {
+        let (litesvm, user) = &mut setup();
+        let delegator = user;
+        let sponsor = init_wallet(litesvm, 10_000_000_000);
+
+        let amount: u64 = 100_000_000;
+        let expiry_ts: i64 = current_ts() + days(1) as i64;
+        let nonce: u64 = 0;
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(delegator.pubkey()),
+        );
+        let _user_ata = init_ata(litesvm, mint, delegator.pubkey(), 1_000_000);
+
+        initialize_multidelegate_action(litesvm, delegator, mint)
+            .0
+            .unwrap();
+
+        let delegatee = Pubkey::new_unique();
+
+        let delegator_balance_before = litesvm.get_account(&delegator.pubkey()).unwrap().lamports;
+        let sponsor_balance_before = litesvm.get_account(&sponsor.pubkey()).unwrap().lamports;
+
+        let (res, delegation_pda) = CreateDelegation::new(litesvm, delegator, mint, delegatee)
+            .payer(&sponsor)
+            .nonce(nonce)
+            .fixed(amount, expiry_ts);
+        res.unwrap();
+
+        let delegator_balance_after = litesvm.get_account(&delegator.pubkey()).unwrap().lamports;
+        let sponsor_balance_after = litesvm.get_account(&sponsor.pubkey()).unwrap().lamports;
+
+        assert_eq!(delegator_balance_after, delegator_balance_before); // Delegator shouldn't spend anything
+        assert!(sponsor_balance_after < sponsor_balance_before);
+
+        let account = litesvm.get_account(&delegation_pda).unwrap();
+        let delegation_rent = account.lamports;
+        let delegation = FixedDelegation::load(&account.data).unwrap();
+
+        assert_eq!(delegation.header.payer, sponsor.pubkey().to_bytes());
+
+        // Now revoke and check refund
+        let res = RevokeDelegation::new(litesvm, delegator, mint, delegatee, nonce)
+            .receiver(sponsor.pubkey())
+            .execute();
+        res.unwrap();
+
+        let sponsor_balance_final = litesvm.get_account(&sponsor.pubkey()).unwrap().lamports;
+
+        assert!(sponsor_balance_final >= sponsor_balance_after + delegation_rent);
+
+        // Check delegator paid for revoke
+        let delegator_balance_final = litesvm.get_account(&delegator.pubkey()).unwrap().lamports;
+        assert!(delegator_balance_final < delegator_balance_after);
+    }
 
     #[test]
     fn create_fixed_delegation() {
@@ -94,9 +156,9 @@ mod tests {
 
         let delegatee = Pubkey::new_unique();
 
-        let (res, delegation_pda) = create_fixed_delegation_action(
-            litesvm, payer, mint, delegatee, nonce, amount, expiry_ts,
-        );
+        let (res, delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .nonce(nonce)
+            .fixed(amount, expiry_ts);
         res.unwrap();
 
         let account = litesvm.get_account(&delegation_pda).unwrap();
@@ -130,8 +192,9 @@ mod tests {
         let _user_ata = init_ata(litesvm, mint, payer.pubkey(), 1_000_000);
 
         let delegatee = Pubkey::new_unique();
-        let (res, _) =
-            create_fixed_delegation_action(litesvm, payer, mint, delegatee, 0, 100, 1000);
+        let (res, _) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .nonce(0)
+            .fixed(100, 1000);
 
         assert!(res.is_err());
     }
@@ -157,9 +220,10 @@ mod tests {
         let delegatee = Pubkey::new_unique();
         let wrong_pda = Pubkey::new_unique();
 
-        let res = create_fixed_delegation_action_with_pda(
-            litesvm, payer, mint, delegatee, wrong_pda, 0, 100, 1000,
-        );
+        let (res, _) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .pda(wrong_pda)
+            .nonce(0)
+            .fixed(100, 1000);
 
         assert!(res.is_err());
     }
@@ -184,12 +248,14 @@ mod tests {
 
         let delegatee = Pubkey::new_unique();
 
-        let (res, _) =
-            create_fixed_delegation_action(litesvm, payer, mint, delegatee, 0, 100, 1000);
+        let (res, _) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .nonce(0)
+            .fixed(100, 1000);
         res.unwrap();
 
-        let (res2, _) =
-            create_fixed_delegation_action(litesvm, payer, mint, delegatee, 0, 200, 2000);
+        let (res2, _) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .nonce(0)
+            .fixed(200, 2000);
         assert!(res2.is_err());
     }
 
@@ -211,24 +277,27 @@ mod tests {
 
         let delegatee = Pubkey::new_unique();
 
-        let (res0, pda0) =
-            create_fixed_delegation_action(litesvm, payer, mint, delegatee, 0, 100, 1000);
+        let (res0, pda0) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .nonce(0)
+            .fixed(100, 1000);
         let tx = res0.unwrap();
         println!(
             "Create Fixed delegation consumed: {} CUs",
             tx.compute_units_consumed
         );
 
-        let (res1, pda1) =
-            create_fixed_delegation_action(litesvm, payer, mint, delegatee, 1, 200, 2000);
+        let (res1, pda1) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .nonce(1)
+            .fixed(200, 2000);
         let tx = res1.unwrap();
         println!(
             "Create Fixed delegation consumed: {} CUs",
             tx.compute_units_consumed
         );
 
-        let (res2, pda2) =
-            create_fixed_delegation_action(litesvm, payer, mint, delegatee, 2, 300, 3000);
+        let (res2, pda2) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .nonce(2)
+            .fixed(300, 3000);
         let tx = res2.unwrap();
         println!(
             "Create Fixed delegation consumed: {} CUs",

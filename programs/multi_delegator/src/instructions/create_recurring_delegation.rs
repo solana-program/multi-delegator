@@ -56,6 +56,7 @@ pub fn process(
         bump,
         accounts.delegator.key(),
         accounts.delegatee.key(),
+        accounts.payer.key(),
     );
     delegation.current_period_start_ts = call_data.start_ts;
     delegation.period_length_s = call_data.period_length_s;
@@ -77,8 +78,7 @@ mod tests {
         tests::{
             constants::{MINT_DECIMALS, TOKEN_PROGRAM_ID},
             utils::{
-                create_recurring_delegation_action, days, init_ata, init_mint,
-                initialize_multidelegate_action, setup,
+                days, init_ata, init_mint, initialize_multidelegate_action, setup, CreateDelegation,
             },
         },
         DelegationKind, RecurringDelegation,
@@ -112,17 +112,9 @@ mod tests {
 
         let delegatee = Pubkey::new_unique();
 
-        let (res, delegation_pda) = create_recurring_delegation_action(
-            litesvm,
-            payer,
-            mint,
-            delegatee,
-            nonce,
-            amount_per_period,
-            period_length_s,
-            start_ts,
-            expiry_ts,
-        );
+        let (res, delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .nonce(nonce)
+            .recurring(amount_per_period, period_length_s, start_ts, expiry_ts);
         res.unwrap();
 
         let account = litesvm.get_account(&delegation_pda).unwrap();
@@ -137,6 +129,7 @@ mod tests {
 
         assert_eq!(header.delegator, payer.pubkey().to_bytes());
         assert_eq!(header.delegatee, delegatee.to_bytes());
+        assert_eq!(header.payer, payer.pubkey().to_bytes());
         assert_eq!(header.kind, DelegationKind::Recurring as u8);
         assert_eq!(del_amount_per_period, amount_per_period);
         assert_eq!(del_period_length_s, period_length_s);

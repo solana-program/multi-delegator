@@ -35,4 +35,5 @@ pub enum MultiDelegatorError {
     TransferInvalidCallData,
     Unauthorized,
     TransferKindMismatch,
+    InvalidPayerData,
 }

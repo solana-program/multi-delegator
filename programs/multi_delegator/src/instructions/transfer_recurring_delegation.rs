@@ -112,9 +112,9 @@ mod tests {
             asserts::assert_error,
             constants::{MINT_DECIMALS, TOKEN_PROGRAM_ID},
             utils::{
-                create_recurring_delegation_action, current_ts, days, get_ata_balance, hours,
-                init_ata, init_mint, initialize_multidelegate_action, minutes, move_clock_forward,
-                setup, transfer_recurring_action,
+                current_ts, days, get_ata_balance, hours, init_ata, init_mint,
+                initialize_multidelegate_action, minutes, move_clock_forward, setup,
+                CreateDelegation, TransferDelegation,
             },
         },
         MultiDelegatorError,
@@ -149,17 +149,9 @@ mod tests {
             .0
             .unwrap();
 
-        let (res, delegation_pda) = create_recurring_delegation_action(
-            &mut litesvm,
-            &alice,
-            mint,
-            bob.pubkey(),
-            nonce,
-            amount_per_period,
-            period_length_s,
-            start_ts,
-            expiry_ts,
-        );
+        let (res, delegation_pda) = CreateDelegation::new(&mut litesvm, &alice, mint, bob.pubkey())
+            .nonce(nonce)
+            .recurring(amount_per_period, period_length_s, start_ts, expiry_ts);
         res.unwrap();
 
         (
@@ -193,15 +185,10 @@ mod tests {
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
 
         let transfer_amount: u64 = 10_000_000;
-        transfer_recurring_action(
-            &mut litesvm,
-            &alice,
-            &bob,
-            mint,
-            delegation_pda,
-            transfer_amount,
-        )
-        .unwrap();
+        TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+            .amount(transfer_amount)
+            .recurring()
+            .unwrap();
 
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 10_000_000);
 
@@ -216,15 +203,10 @@ mod tests {
 
         move_clock_forward(&mut litesvm, minutes(15));
 
-        transfer_recurring_action(
-            &mut litesvm,
-            &alice,
-            &bob,
-            mint,
-            delegation_pda,
-            transfer_amount,
-        )
-        .unwrap();
+        TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+            .amount(transfer_amount)
+            .recurring()
+            .unwrap();
 
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 20_000_000);
 
@@ -235,15 +217,10 @@ mod tests {
 
         move_clock_forward(&mut litesvm, minutes(15));
 
-        transfer_recurring_action(
-            &mut litesvm,
-            &alice,
-            &bob,
-            mint,
-            delegation_pda,
-            transfer_amount,
-        )
-        .unwrap();
+        TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+            .amount(transfer_amount)
+            .recurring()
+            .unwrap();
 
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 30_000_000);
 
@@ -273,14 +250,10 @@ mod tests {
         move_clock_forward(&mut litesvm, period_length_s + 1);
 
         let transfer_amount: u64 = 60_000_000;
-        let result = transfer_recurring_action(
-            &mut litesvm,
-            &alice,
-            &bob,
-            mint,
-            delegation_pda,
-            transfer_amount,
-        );
+        let result =
+            TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+                .amount(transfer_amount)
+                .recurring();
 
         assert_error(result, MultiDelegatorError::AmountExceedsPeriodLimit);
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
@@ -306,14 +279,10 @@ mod tests {
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
 
         let transfer_amount: u64 = 30_000_000;
-        let result = transfer_recurring_action(
-            &mut litesvm,
-            &alice,
-            &bob,
-            mint,
-            delegation_pda,
-            transfer_amount,
-        );
+        let result =
+            TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+                .amount(transfer_amount)
+                .recurring();
 
         assert_error(result, MultiDelegatorError::DelegationExpired);
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
@@ -338,7 +307,9 @@ mod tests {
 
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
 
-        transfer_recurring_action(&mut litesvm, &alice, &bob, mint, delegation_pda, 30_000_000)
+        TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+            .amount(30_000_000)
+            .recurring()
             .unwrap();
 
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 30_000_000);
@@ -353,7 +324,9 @@ mod tests {
         // Move forward until new time period
         move_clock_forward(&mut litesvm, period_length_s);
 
-        transfer_recurring_action(&mut litesvm, &alice, &bob, mint, delegation_pda, 30_000_000)
+        TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+            .amount(30_000_000)
+            .recurring()
             .unwrap();
 
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 60_000_000);
@@ -386,7 +359,9 @@ mod tests {
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
 
         // Period 0: Transfer 10M
-        transfer_recurring_action(&mut litesvm, &alice, &bob, mint, delegation_pda, 10_000_000)
+        TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+            .amount(10_000_000)
+            .recurring()
             .unwrap();
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 10_000_000);
 
@@ -394,7 +369,9 @@ mod tests {
         move_clock_forward(&mut litesvm, period_length_s * 3);
 
         // Period 3: Transfer 10M
-        transfer_recurring_action(&mut litesvm, &alice, &bob, mint, delegation_pda, 10_000_000)
+        TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+            .amount(10_000_000)
+            .recurring()
             .unwrap();
 
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 20_000_000);

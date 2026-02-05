@@ -111,8 +111,8 @@ mod tests {
             asserts::assert_error,
             constants::{MINT_DECIMALS, TOKEN_PROGRAM_ID},
             utils::{
-                create_fixed_delegation_action, current_ts, days, get_ata_balance, init_ata,
-                init_mint, initialize_multidelegate_action, setup, transfer_fixed_action,
+                current_ts, days, get_ata_balance, init_ata, init_mint,
+                initialize_multidelegate_action, setup, CreateDelegation, TransferDelegation,
             },
         },
         MultiDelegatorError,
@@ -145,15 +145,10 @@ mod tests {
             .0
             .unwrap();
 
-        let (res, delegation_pda) = create_fixed_delegation_action(
-            &mut lite_svm,
-            &alice,
-            mint,
-            bob.pubkey(),
-            nonce,
-            amount,
-            expiry_ts,
-        );
+        let (res, delegation_pda) =
+            CreateDelegation::new(&mut lite_svm, &alice, mint, bob.pubkey())
+                .nonce(nonce)
+                .fixed(amount, expiry_ts);
         res.unwrap();
 
         (
@@ -179,15 +174,10 @@ mod tests {
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
 
         let transfer_amount: u64 = 30_000_000;
-        transfer_fixed_action(
-            &mut litesvm,
-            &alice,
-            &bob,
-            mint,
-            delegation_pda,
-            transfer_amount,
-        )
-        .unwrap();
+        TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+            .amount(transfer_amount)
+            .fixed()
+            .unwrap();
 
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 30_000_000);
 
@@ -211,15 +201,10 @@ mod tests {
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
 
         let transfer_amount: u64 = 30_000_000;
-        transfer_fixed_action(
-            &mut litesvm,
-            &alice,
-            &bob,
-            mint,
-            delegation_pda,
-            transfer_amount,
-        )
-        .unwrap();
+        TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+            .amount(transfer_amount)
+            .fixed()
+            .unwrap();
 
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 30_000_000);
 
@@ -229,14 +214,10 @@ mod tests {
             .amount;
         assert_eq!(del_amount, 20_000_000);
 
-        let result = transfer_fixed_action(
-            &mut litesvm,
-            &alice,
-            &bob,
-            mint,
-            delegation_pda,
-            transfer_amount,
-        );
+        let result =
+            TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+                .amount(transfer_amount)
+                .fixed();
 
         assert_error(result, MultiDelegatorError::AmountExceedsLimit);
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 30_000_000);
@@ -260,14 +241,10 @@ mod tests {
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
 
         let transfer_amount: u64 = 60_000_000;
-        let result = transfer_fixed_action(
-            &mut litesvm,
-            &alice,
-            &bob,
-            mint,
-            delegation_pda,
-            transfer_amount,
-        );
+        let result =
+            TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+                .amount(transfer_amount)
+                .fixed();
 
         // Check that the error matches AmountExceedsLimit
         assert_error(result, MultiDelegatorError::AmountExceedsLimit);
@@ -293,14 +270,10 @@ mod tests {
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
 
         let transfer_amount: u64 = 30_000_000;
-        let result = transfer_fixed_action(
-            &mut litesvm,
-            &alice,
-            &bob,
-            mint,
-            delegation_pda,
-            transfer_amount,
-        );
+        let result =
+            TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+                .amount(transfer_amount)
+                .fixed();
 
         assert_error(result, MultiDelegatorError::DelegationExpired);
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
@@ -328,15 +301,11 @@ mod tests {
         let transfer_amount: u64 = 10_000_000;
 
         // Use the new helper
-        let result = crate::tests::utils::transfer_fixed_action_with_signer(
-            &mut litesvm,
-            alice.pubkey(),
-            mint,
-            delegation_pda,
-            transfer_amount,
-            bob_ata, // receiver is Bob (as per delegation)
-            &eve,    // signer is Eve (attacker)
-        );
+        let result =
+            TransferDelegation::new(&mut litesvm, &eve, alice.pubkey(), mint, delegation_pda)
+                .amount(transfer_amount)
+                .to(bob_ata)
+                .fixed();
 
         // Expect Unauthorized error
         assert_error(result, MultiDelegatorError::Unauthorized);
@@ -359,16 +328,11 @@ mod tests {
         let transfer_amount: u64 = 10_000_000;
 
         // Bob transfers from Alice -> Charlie
-        crate::tests::utils::transfer_fixed_action_with_signer(
-            &mut litesvm,
-            alice.pubkey(),
-            mint,
-            delegation_pda,
-            transfer_amount,
-            charlie_ata, // Destination is Charlie
-            &bob,        // Signer is Bob (valid delegatee)
-        )
-        .unwrap();
+        TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+            .amount(transfer_amount)
+            .to(charlie_ata)
+            .fixed()
+            .unwrap();
 
         // Verify Charlie received funds
         assert_eq!(get_ata_balance(&litesvm, &charlie_ata), 10_000_000);

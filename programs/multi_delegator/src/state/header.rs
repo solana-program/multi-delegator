@@ -6,6 +6,7 @@ pub const KIND_OFFSET: usize = 1;
 pub const BUMP_OFFSET: usize = 2;
 pub const DELEGATOR_OFFSET: usize = 3;
 pub const DELEGATEE_OFFSET: usize = 35;
+pub const PAYER_OFFSET: usize = 67;
 pub const CURRENT_VERSION: u8 = 1;
 
 #[repr(C, packed)]
@@ -16,6 +17,7 @@ pub struct Header {
     pub bump: u8,
     pub delegator: Pubkey,
     pub delegatee: Pubkey,
+    pub payer: Pubkey,
 }
 
 impl Header {

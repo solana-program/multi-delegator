@@ -18,13 +18,14 @@ pub struct CreateDelegationAccounts<'a> {
     pub delegation_account: &'a AccountInfo,
     pub delegatee: &'a AccountInfo,
     pub system_program: &'a AccountInfo,
+    pub payer: &'a AccountInfo,
 }
 
 impl<'a> TryFrom<&'a [AccountInfo]> for CreateDelegationAccounts<'a> {
     type Error = ProgramError;
 
     fn try_from(accounts: &'a [AccountInfo]) -> Result<Self, Self::Error> {
-        let [delegator, multi_delegate, delegation_account, delegatee, system_program, ..] =
+        let [delegator, multi_delegate, delegation_account, delegatee, system_program, rem @ ..] =
             accounts
         else {
             return Err(MultiDelegatorError::NotEnoughAccountKeys.into());
@@ -34,12 +35,20 @@ impl<'a> TryFrom<&'a [AccountInfo]> for CreateDelegationAccounts<'a> {
         SystemAccount::check(system_program)?;
         MultiDelegateAccount::check(multi_delegate)?;
 
+        let payer = if let Some(payer) = rem.first() {
+            SignerAccount::check(payer)?;
+            payer
+        } else {
+            delegator
+        };
+
         Ok(Self {
             delegator,
             multi_delegate,
             delegation_account,
             delegatee,
             system_program,
+            payer,
         })
     }
 }
@@ -74,7 +83,7 @@ pub fn create_delegation_account(
     let signer = [Signer::from(&seeds)];
 
     CreateAccount {
-        from: accounts.delegator,
+        from: accounts.payer,
         to: accounts.delegation_account,
         lamports,
         space: space as u64,
@@ -91,10 +100,12 @@ pub fn init_header(
     bump: u8,
     delegator: &Pubkey,
     delegatee: &Pubkey,
+    payer: &Pubkey,
 ) {
     header.version = CURRENT_VERSION;
     header.kind = kind.into();
     header.bump = bump;
     header.delegator = *delegator;
     header.delegatee = *delegatee;
+    header.payer = *payer;
 }
