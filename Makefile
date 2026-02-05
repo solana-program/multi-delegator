@@ -1,11 +1,11 @@
-.PHONY: build build-program build-client test test-program test-and-benchmark test-client clean clean-program clean-client ensure-surfpool generate-client generate-idl kill-validator setup prepare-deploy-keys fmt-check fmt lint fmt-check lint-check
+.PHONY: build build-program build-client test test-program test-client clean clean-program clean-client clean-webapp ensure-surfpool generate-client generate-idl setup prepare-deploy-keys fmt-check fmt lint lint-check build-webapp webapp kill-validator
 
 # Setup target to check prerequisites and install dependencies
 setup: setup-hooks
 	@command -v bun >/dev/null 2>&1 || { echo >&2 "bun is required but not installed. Aborting."; exit 1; }
 	@command -v cargo >/dev/null 2>&1 || { echo >&2 "cargo is required but not installed. Aborting."; exit 1; }
 	@command -v shank >/dev/null 2>&1 || { echo >&2 "shank is required but not installed. Aborting."; exit 1; }
-	@command -v surfpool >/dev/null 2>&1 || { echo >&2 "surfpool is required but not installed. Aborting."; exit 1; }
+	@command -v solana-keygen >/dev/null 2>&1 || { echo >&2 "solana CLI is required but not installed. Aborting."; exit 1; }
 	cd client && bun install
 
 setup-hooks:
@@ -30,13 +30,16 @@ DEPLOY_KEY_FILE := programs/multi_delegator/target/deploy/multi_delegator-keypai
 IDL_FILE := programs/multi_delegator/idl/multi_delegator.json
 GENERATED_CLIENT := client/src/generated/index.ts
 
+# Dynamic program ID from keypair
+PROGRAM_ID := $(shell solana-keygen pubkey keys/multi_delegator-keypair.json 2>/dev/null || echo "KEYPAIR_NOT_FOUND")
+
 # Deploy key setup - only copies if source is newer than destination (Make timestamp comparison)
 $(DEPLOY_KEY_FILE): keys/multi_delegator-keypair.json
-	@mkdir -p $(@D)  # $(@D) = directory path of the target file ($@), @ silences command output
-	cp $< $@        # $< = first prerequisite (source), $@ = target file (destination)
+	@mkdir -p $(@D)
+	cp $< $@
 
 # Build targets with dependencies
-build: setup $(DEPLOY_KEY_FILE) build-program build-client
+build: setup $(DEPLOY_KEY_FILE) build-program build-client build-webapp
 
 # Program build with file dependencies - rebuilds if ANY .rs file changes
 $(SO_FILE): $(RUST_SOURCES)
@@ -60,7 +63,10 @@ generate-client: $(GENERATED_CLIENT)
 build-client: $(GENERATED_CLIENT)
 	cd client && bun run build
 
+# ============================================
 # Test targets
+# ============================================
+
 test: setup test-program test-client
 
 test-program:
@@ -101,36 +107,40 @@ ensure-surfpool:
 		echo "validator is already running"; \
 	fi
 
-kill-validator:
-	@if [ -f .surfpool/pid.txt ]; then \
-		pid=$$(cat .surfpool/pid.txt); \
-		kill -9 $$pid; \
-		if [ $$? -eq 0 ]; then \
-			echo "Killed surfpool validator with pid $$pid"; \
-			rm -f .surfpool/pid.txt; \
-		else \
-			echo "Failed to kill process $$pid" >&2; \
-			exit 1; \
-		fi \
-	else \
-		echo "No pid file found. Surfpool validator is not running or pid file was not created."; \
-	fi
-
-# test-client: builds everything needed, ensures surfpool, then runs tests
+# test-client uses surfpool for speed (no wallet interaction needed)
 test-client: $(SO_FILE) $(GENERATED_CLIENT) ensure-surfpool
 	cd client && bun run test
 
+# ============================================
 # Clean targets
+# ============================================
+
 clean: clean-program clean-client
 
 clean-program:
 	cd programs/multi_delegator && cargo clean
-	rm programs/multi_delegator/idl/multi_delegator.json
+	rm -f programs/multi_delegator/idl/multi_delegator.json
 
 clean-client:
 	cd client && bun run clean
 
+clean-webapp:
+	@echo "Cleaning webapp and validator files..."
+	@-pkill -f "solana-test-validator" 2>/dev/null || true
+	@-pkill -f "surfpool" 2>/dev/null || true
+	rm -rf webapp/node_modules
+	rm -rf webapp/dist
+	rm -rf webapp/api/node_modules
+	rm -rf webapp/scripts/node_modules
+	rm -rf .validator-ledger
+	rm -rf .surfpool
+	rm -f /tmp/surfpool.log
+	@echo "Done."
+
+# ============================================
 # Format and Lint targets
+# ============================================
+
 fmt-check:
 	@echo "Checking Rust formatting..."
 	cd programs/multi_delegator && cargo fmt --check
@@ -156,6 +166,28 @@ lint-check:
 	cd client && bun run lint:check
 
 check: fmt-check lint-check
+
+# ============================================
+# Webapp targets (uses solana-test-validator)
+# ============================================
+
+# Build webapp
+build-webapp:
+	cd webapp && npm install && npm run build
+
+# Full stack startup: validator + init + api + webapp (MAIN ENTRY POINT)
+# Usage: make webapp [RESET=1] [SKIP_INIT=1]
+webapp: $(SO_FILE)
+	@./scripts/start-webapp.sh $(if $(RESET),--reset) $(if $(SKIP_INIT),--skip-init)
+
+# Kill any running validator (surfpool or solana-test-validator)
+kill-validator:
+	@echo "Killing all validators..."
+	@-pkill -f "solana-test-validator" 2>/dev/null || true
+	@-pkill -f "surfpool" 2>/dev/null || true
+	@-rm -f .surfpool/pid.txt 2>/dev/null || true
+	@-rm -rf .validator-ledger 2>/dev/null || true
+	@echo "All validators stopped."
 
 # Default target
 .DEFAULT_GOAL := build

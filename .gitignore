@@ -12,3 +12,14 @@ client/src/generated
 
 # Surfpool logs and temporary files
 .surfpool/
+
+# Solana test validator ledger data
+test-ledger/
+**/test-ledger/
+.validator-ledger
+
+# Log files
+*.log
+
+# Local config (contains generated mint addresses)
+config.json

@@ -1,0 +1,61 @@
+import { useMemo } from 'react'
+import { useWalletUi } from '@wallet-ui/react'
+import type { Instruction, TransactionSendingSigner } from 'gill'
+import {
+  createSolanaRpc,
+  createTransaction,
+  compileTransaction,
+  getBase64EncodedWireTransaction,
+  signAndSendTransactionMessageWithSigners,
+  getBase58Decoder,
+} from 'gill'
+import type { ClusterWithUrl } from '@/lib/types'
+
+/**
+ * Hook to build, sign via wallet, and send transactions.
+ * Mirrors the working perena pattern:
+ * - build a full gill transaction
+ * - (best-effort) simulate via RPC
+ * - request wallet sign+send
+ */
+export function useWalletTransactionSignAndSend() {
+  const { cluster } = useWalletUi()
+  const clusterConfig = cluster as unknown as ClusterWithUrl
+  const rpc = useMemo(() => createSolanaRpc(clusterConfig.url), [clusterConfig.url])
+
+  return async (ix: Instruction | Instruction[], signer: TransactionSendingSigner): Promise<string> => {
+    const { value: latestBlockhash } = await rpc.getLatestBlockhash().send()
+    const instructions = Array.isArray(ix) ? ix : [ix]
+
+    const transaction = createTransaction({
+      feePayer: signer,
+      version: 0,
+      latestBlockhash,
+      instructions,
+    })
+
+    // Best-effort simulate before asking wallet to sign+send
+    try {
+      const compiledTx = compileTransaction(transaction)
+      const base64Tx = getBase64EncodedWireTransaction(compiledTx)
+      const simulationResult = await rpc.simulateTransaction(base64Tx, { encoding: 'base64' }).send()
+
+      if (simulationResult.value.err) {
+        const errorDetails = simulationResult.value.logs?.join('\n') ?? ''
+        throw new Error(
+          `Transaction simulation failed: ${JSON.stringify(simulationResult.value.err)}\n${errorDetails}`,
+        )
+      }
+    } catch (simulationError) {
+      if (
+        simulationError instanceof Error &&
+        simulationError.message.startsWith('Transaction simulation failed:')
+      ) {
+        throw simulationError
+      }
+    }
+
+    const signatureBytes = await signAndSendTransactionMessageWithSigners(transaction)
+    return getBase58Decoder().decode(signatureBytes)
+  }
+}

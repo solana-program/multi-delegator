@@ -7,16 +7,18 @@ import {
   DELEGATION_SEED,
   MULTI_DELEGATE_SEED,
   PROGRAM_ID,
+  U64_BYTE_SIZE,
 } from './constants.js';
 
 const addressEncoder = getAddressEncoder();
+const textEncoder = new TextEncoder();
 
 export async function getMultiDelegatePDA(
   user: Address,
   tokenMint: Address,
 ): Promise<[Address, number]> {
   const seeds = [
-    new TextEncoder().encode(MULTI_DELEGATE_SEED),
+    textEncoder.encode(MULTI_DELEGATE_SEED),
     addressEncoder.encode(user),
     addressEncoder.encode(tokenMint),
   ];
@@ -34,11 +36,11 @@ export async function getDelegationPDA(
   delegatee: Address,
   nonce: number | bigint,
 ): Promise<[Address, number]> {
-  const nonceBytes = new Uint8Array(8);
+  const nonceBytes = new Uint8Array(U64_BYTE_SIZE);
   new DataView(nonceBytes.buffer).setBigUint64(0, BigInt(nonce), true);
 
   const seeds = [
-    new TextEncoder().encode(DELEGATION_SEED),
+    textEncoder.encode(DELEGATION_SEED),
     addressEncoder.encode(multiDelegate),
     addressEncoder.encode(delegator),
     addressEncoder.encode(delegatee),

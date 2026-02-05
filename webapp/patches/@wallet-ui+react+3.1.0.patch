@@ -1,0 +1,39 @@
+diff --git a/node_modules/@wallet-ui/react/dist/index.browser.mjs b/node_modules/@wallet-ui/react/dist/index.browser.mjs
+index 701b150..d292aa6 100644
+--- a/node_modules/@wallet-ui/react/dist/index.browser.mjs
++++ b/node_modules/@wallet-ui/react/dist/index.browser.mjs
+@@ -323,7 +323,7 @@ function useWalletUiSigner({
+ function useWalletUiWallets() {
+   const readonlyWallets = useWallets();
+   return useMemo(
+-    () => readonlyWallets.filter((wallet) => wallet.chains.some((i) => i.startsWith("solana:"))).sort((a, b) => a.name.localeCompare(b.name)),
++    () => readonlyWallets.filter((wallet) => wallet && wallet.chains.some((i) => i.startsWith("solana:"))).sort((a, b) => a.name.localeCompare(b.name)),
+     [readonlyWallets]
+   );
+ }
+diff --git a/node_modules/@wallet-ui/react/dist/index.native.mjs b/node_modules/@wallet-ui/react/dist/index.native.mjs
+index 5f0e235..c7ebd3a 100644
+--- a/node_modules/@wallet-ui/react/dist/index.native.mjs
++++ b/node_modules/@wallet-ui/react/dist/index.native.mjs
+@@ -323,7 +323,7 @@ function useWalletUiSigner({
+ function useWalletUiWallets() {
+   const readonlyWallets = useWallets();
+   return useMemo(
+-    () => readonlyWallets.filter((wallet) => wallet.chains.some((i) => i.startsWith("solana:"))).sort((a, b) => a.name.localeCompare(b.name)),
++    () => readonlyWallets.filter((wallet) => wallet && wallet.chains.some((i) => i.startsWith("solana:"))).sort((a, b) => a.name.localeCompare(b.name)),
+     [readonlyWallets]
+   );
+ }
+diff --git a/node_modules/@wallet-ui/react/dist/index.node.mjs b/node_modules/@wallet-ui/react/dist/index.node.mjs
+index bd77c19..bbfc75e 100644
+--- a/node_modules/@wallet-ui/react/dist/index.node.mjs
++++ b/node_modules/@wallet-ui/react/dist/index.node.mjs
+@@ -323,7 +323,7 @@ function useWalletUiSigner({
+ function useWalletUiWallets() {
+   const readonlyWallets = useWallets();
+   return useMemo(
+-    () => readonlyWallets.filter((wallet) => wallet.chains.some((i) => i.startsWith("solana:"))).sort((a, b) => a.name.localeCompare(b.name)),
++    () => readonlyWallets.filter((wallet) => wallet && wallet.chains.some((i) => i.startsWith("solana:"))).sort((a, b) => a.name.localeCompare(b.name)),
+     [readonlyWallets]
+   );
+ }

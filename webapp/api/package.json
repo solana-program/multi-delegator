@@ -1,0 +1,12 @@
+{
+  "name": "multi-delegator-api",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun --watch server.ts",
+    "start": "bun server.ts"
+  },
+  "dependencies": {
+    "gill": "^0.14.0"
+  }
+}

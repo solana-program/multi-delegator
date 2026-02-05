@@ -1,0 +1,12 @@
+{
+  "name": "multi-delegator-scripts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "init": "bun init-test-environment.ts",
+    "mint-usdc": "bun mint-usdc.ts"
+  },
+  "dependencies": {
+    "gill": "^0.14.0"
+  }
+}

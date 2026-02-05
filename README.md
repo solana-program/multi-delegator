@@ -85,6 +85,39 @@ cd multi-delegator
 make setup
 ```
 
+## Webapp Demo (Quickstart)
+
+The demo app in `webapp/` is a local UI for interacting with the Multi Delegator program. It can spin up a local `solana-test-validator` with the program deployed, plus a small local API used by the UI for dev-only SOL/USDC faucet actions.
+
+### Run the full demo stack
+
+One-time install for the web UI:
+
+```bash
+cd webapp
+npm install
+cd ..
+```
+
+Start everything (validator + init + API + web UI):
+
+```bash
+make webapp
+```
+
+When it starts successfully you should have:
+
+- **Validator RPC**: `http://localhost:8899`
+- **Local API**: `http://localhost:3001` (UI uses `VITE_API_URL`, defaults to this)
+- **Web UI**: `http://localhost:5173`
+
+
+To stop any running local validator processes:
+
+```bash
+make kill-validator
+```
+
 ## Build & Test Commands
 
 The project uses a `Makefile` to simplify common tasks.

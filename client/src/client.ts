@@ -1,8 +1,10 @@
 import type {
   Address,
+  GetAccountInfoApi,
+  GetLatestBlockhashApi,
+  GetProgramAccountsApi,
   Instruction,
   Rpc,
-  SolanaRpcApiTestnet,
   TransactionSigner,
 } from 'gill';
 import {
@@ -10,12 +12,13 @@ import {
   getBase64Encoder,
   signTransactionMessageWithSigners,
 } from 'gill';
-import { DELEGATOR_OFFSET } from './constants.js';
+import { DELEGATOR_OFFSET, KIND_DISCRIMINATOR_OFFSET } from './constants.js';
 import {
   DelegationKind,
   decodeFixedDelegation,
   decodeRecurringDelegation,
   type FixedDelegation,
+  fetchMaybeMultiDelegate,
   getCreateFixedDelegationInstruction,
   getCreateRecurringDelegationInstruction,
   getInitMultiDelegateInstruction,
@@ -28,7 +31,7 @@ import {
 import { getDelegationPDA, getMultiDelegatePDA } from './pdas.js';
 
 type SolanaClient = {
-  rpc: Rpc<SolanaRpcApiTestnet>;
+  rpc: Rpc<GetAccountInfoApi & GetLatestBlockhashApi & GetProgramAccountsApi>;
   sendAndConfirmTransaction: (
     tx: Awaited<ReturnType<typeof signTransactionMessageWithSigners>>,
   ) => Promise<string>;
@@ -65,6 +68,7 @@ export class MultiDelegatorClient {
     owner: TransactionSigner,
     tokenMint: Address,
     userAta: Address,
+    tokenProgram?: Address,
   ): Promise<{ signature: string }> {
     const user = owner.address;
     const [multiDelegate] = await getMultiDelegatePDA(user, tokenMint);
@@ -74,6 +78,7 @@ export class MultiDelegatorClient {
       multiDelegate,
       tokenMint,
       userAta,
+      tokenProgram,
     });
 
     const sig = await this.buildAndSendTransaction([instruction], [owner]);
@@ -159,7 +164,8 @@ export class MultiDelegatorClient {
     return { signature: sig };
   }
 
-  async transferFixed(
+  private async transfer(
+    kind: 'fixed' | 'recurring',
     delegatee: TransactionSigner,
     delegator: Address,
     delegatorAta: Address,
@@ -170,7 +176,7 @@ export class MultiDelegatorClient {
   ): Promise<{ signature: string }> {
     const [multiDelegate] = await getMultiDelegatePDA(delegator, tokenMint);
 
-    const instruction = getTransferFixedInstruction({
+    const transferParams = {
       delegationPda,
       multiDelegate,
       delegatorAta,
@@ -181,10 +187,36 @@ export class MultiDelegatorClient {
         delegator,
         mint: tokenMint,
       },
-    });
+    };
+
+    const instruction =
+      kind === 'fixed'
+        ? getTransferFixedInstruction(transferParams)
+        : getTransferRecurringInstruction(transferParams);
 
     const sig = await this.buildAndSendTransaction([instruction], [delegatee]);
     return { signature: sig };
+  }
+
+  async transferFixed(
+    delegatee: TransactionSigner,
+    delegator: Address,
+    delegatorAta: Address,
+    tokenMint: Address,
+    delegationPda: Address,
+    amount: number | bigint,
+    receiverAta: Address,
+  ): Promise<{ signature: string }> {
+    return this.transfer(
+      'fixed',
+      delegatee,
+      delegator,
+      delegatorAta,
+      tokenMint,
+      delegationPda,
+      amount,
+      receiverAta,
+    );
   }
 
   async transferRecurring(
@@ -196,23 +228,16 @@ export class MultiDelegatorClient {
     amount: number | bigint,
     receiverAta: Address,
   ): Promise<{ signature: string }> {
-    const [multiDelegate] = await getMultiDelegatePDA(delegator, tokenMint);
-
-    const instruction = getTransferRecurringInstruction({
-      delegationPda,
-      multiDelegate,
-      delegatorAta,
-      receiverAta,
+    return this.transfer(
+      'recurring',
       delegatee,
-      transferData: {
-        amount,
-        delegator,
-        mint: tokenMint,
-      },
-    });
-
-    const sig = await this.buildAndSendTransaction([instruction], [delegatee]);
-    return { signature: sig };
+      delegator,
+      delegatorAta,
+      tokenMint,
+      delegationPda,
+      amount,
+      receiverAta,
+    );
   }
 
   async getDelegationsForWallet(wallet: Address): Promise<Delegation[]> {
@@ -238,7 +263,7 @@ export class MultiDelegatorClient {
     for (const account of response) {
       const base64Data = account.account.data[0];
       const data = base64Encoder.encode(base64Data);
-      const kind = data[1];
+      const kind = data[KIND_DISCRIMINATOR_OFFSET];
 
       const encodedAccount = {
         address: account.pubkey,
@@ -267,5 +292,23 @@ export class MultiDelegatorClient {
     }
 
     return delegations;
+  }
+
+  /**
+   * Check if the MultiDelegate PDA is initialized for a user and token mint.
+   * The MultiDelegate account must be initialized before creating delegations.
+   * Initialization also sets up SPL token delegation to the PDA.
+   *
+   * @param user - User's wallet address
+   * @param tokenMint - Token mint address
+   * @returns Object with initialized status and PDA address
+   */
+  async isMultiDelegateInitialized(
+    user: Address,
+    tokenMint: Address,
+  ): Promise<{ initialized: boolean; pda: Address }> {
+    const [pda] = await getMultiDelegatePDA(user, tokenMint);
+    const account = await fetchMaybeMultiDelegate(this.client.rpc, pda);
+    return { initialized: account !== null, pda };
   }
 }
