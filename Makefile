@@ -172,7 +172,7 @@ check: fmt-check lint-check
 # ============================================
 
 # Build webapp
-build-webapp:
+build-webapp: generate-idl
 	cd webapp && npm install && npm run build
 
 # Full stack startup: validator + init + api + webapp (MAIN ENTRY POINT)

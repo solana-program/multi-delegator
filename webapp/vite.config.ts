@@ -20,6 +20,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "@idl": path.resolve(__dirname, "../programs/multi_delegator/idl/multi_delegator.json"),
     },
   },
   build: {

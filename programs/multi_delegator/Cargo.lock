@@ -1703,6 +1703,7 @@ dependencies = [
  "spl-associated-token-account",
  "spl-token-2022",
  "tabled",
+ "thiserror 2.0.17",
 ]
 
 [[package]]

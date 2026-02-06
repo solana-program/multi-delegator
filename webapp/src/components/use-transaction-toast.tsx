@@ -1,5 +1,6 @@
 import { toast } from 'sonner'
 import { ExplorerLink } from '@/components/cluster/cluster-ui'
+import { parseProgramError } from '@/lib/parse-program-error'
 
 export function useTransactionToast() {
   return {
@@ -10,7 +11,7 @@ export function useTransactionToast() {
     },
     onError: (error: Error) => {
       toast.error('Transaction failed', {
-        description: error.message,
+        description: parseProgramError(error),
       })
     },
   }
