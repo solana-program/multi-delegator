@@ -6,10 +6,10 @@ use pinocchio::{
 };
 
 use crate::{
-    helpers::{transfer_with_delegate, TransferAccounts, TransferData},
+    helpers::{transfer_with_delegate, Delegation, TransferAccounts, TransferData},
     state::{DelegationKind, RecurringDelegation},
     AccountCheck, MultiDelegateAccount, MultiDelegatorError, ProgramAccount, SignerAccount,
-    TokenAccountInterface,
+    TokenAccountInterface, TokenProgramInterface,
 };
 
 pub const DISCRIMINATOR: &u8 = &5;
@@ -27,9 +27,11 @@ pub fn process(accounts: &[AccountInfo], transfer_data: &TransferData) -> Progra
         }
 
         // Fail fast: Check authorization first
-        if delegation_mut.header.delegatee != *accounts_struct.delegatee.key() {
-            return Err(MultiDelegatorError::Unauthorized.into());
-        }
+        Delegation::check(
+            &delegation_mut.header,
+            &transfer_data.delegator,
+            accounts_struct.delegatee.key(),
+        )?;
 
         if current_ts > delegation_mut.expiry_ts {
             return Err(MultiDelegatorError::DelegationExpired.into());
@@ -81,7 +83,7 @@ impl<'a> TryFrom<&'a [AccountInfo]> for RecurringTransferAccounts<'a> {
     type Error = ProgramError;
 
     fn try_from(accounts: &'a [AccountInfo]) -> Result<Self, Self::Error> {
-        let [delegation_pda, multi_delegate, delegator_ata, receiver_ata, token_program, delegatee, ..] =
+        let [delegation_pda, multi_delegate, delegator_ata, receiver_ata, token_program, delegatee] =
             accounts
         else {
             return Err(MultiDelegatorError::NotEnoughAccountKeys.into());
@@ -89,8 +91,11 @@ impl<'a> TryFrom<&'a [AccountInfo]> for RecurringTransferAccounts<'a> {
 
         ProgramAccount::check(delegation_pda)?;
         MultiDelegateAccount::check(multi_delegate)?;
-        TokenAccountInterface::check(delegator_ata)?;
-        TokenAccountInterface::check(receiver_ata)?;
+        TokenProgramInterface::check(token_program)?;
+        TokenAccountInterface::check_accounts_with_program(
+            token_program,
+            &[delegator_ata, receiver_ata],
+        )?;
         SignerAccount::check(delegatee)?;
 
         Ok(Self {
@@ -109,7 +114,7 @@ mod tests {
     use crate::{
         state::RecurringDelegation,
         tests::{
-            asserts::assert_error,
+            asserts::TransactionResultExt,
             constants::{MINT_DECIMALS, TOKEN_PROGRAM_ID},
             utils::{
                 current_ts, days, get_ata_balance, hours, init_ata, init_mint,
@@ -133,7 +138,7 @@ mod tests {
     ) -> (LiteSVM, Keypair, Keypair, Pubkey, Pubkey, Pubkey, Pubkey) {
         let (mut litesvm, alice) = setup();
         let bob = Keypair::new();
-        litesvm.airdrop(&bob.pubkey(), 1_000_000).unwrap();
+        litesvm.airdrop(&bob.pubkey(), 10_000_000).unwrap();
 
         let mint = init_mint(
             &mut litesvm,
@@ -147,12 +152,12 @@ mod tests {
 
         initialize_multidelegate_action(&mut litesvm, &alice, mint)
             .0
-            .unwrap();
+            .assert_ok();
 
         let (res, delegation_pda) = CreateDelegation::new(&mut litesvm, &alice, mint, bob.pubkey())
             .nonce(nonce)
             .recurring(amount_per_period, period_length_s, start_ts, expiry_ts);
-        res.unwrap();
+        res.assert_ok();
 
         (
             litesvm,
@@ -188,7 +193,7 @@ mod tests {
         TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
             .amount(transfer_amount)
             .recurring()
-            .unwrap();
+            .assert_ok();
 
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 10_000_000);
 
@@ -206,7 +211,7 @@ mod tests {
         TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
             .amount(transfer_amount)
             .recurring()
-            .unwrap();
+            .assert_ok();
 
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 20_000_000);
 
@@ -220,7 +225,7 @@ mod tests {
         TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
             .amount(transfer_amount)
             .recurring()
-            .unwrap();
+            .assert_ok();
 
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 30_000_000);
 
@@ -255,7 +260,7 @@ mod tests {
                 .amount(transfer_amount)
                 .recurring();
 
-        assert_error(result, MultiDelegatorError::AmountExceedsPeriodLimit);
+        result.assert_err(MultiDelegatorError::AmountExceedsPeriodLimit);
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
     }
 
@@ -284,7 +289,7 @@ mod tests {
                 .amount(transfer_amount)
                 .recurring();
 
-        assert_error(result, MultiDelegatorError::DelegationExpired);
+        result.assert_err(MultiDelegatorError::DelegationExpired);
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
     }
 
@@ -310,7 +315,7 @@ mod tests {
         TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
             .amount(30_000_000)
             .recurring()
-            .unwrap();
+            .assert_ok();
 
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 30_000_000);
 
@@ -327,7 +332,7 @@ mod tests {
         TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
             .amount(30_000_000)
             .recurring()
-            .unwrap();
+            .assert_ok();
 
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 60_000_000);
 
@@ -362,7 +367,7 @@ mod tests {
         TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
             .amount(10_000_000)
             .recurring()
-            .unwrap();
+            .assert_ok();
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 10_000_000);
 
         // Move forward 3 periods
@@ -372,7 +377,7 @@ mod tests {
         TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
             .amount(10_000_000)
             .recurring()
-            .unwrap();
+            .assert_ok();
 
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 20_000_000);
 
@@ -386,5 +391,56 @@ mod tests {
 
         assert_eq!(actual_start, expected_start);
         assert_eq!(actual_pulled, 10_000_000);
+    }
+
+    #[test]
+    fn test_recurring_transfer_delegator_mismatch_exploit() {
+        // This test demonstrates the access control vulnerability where an attacker
+        // can use their own delegation to transfer funds from another user's account
+
+        let amount_per_period: u64 = 50_000_000;
+        let period_length_s: u64 = hours(1);
+        let start_ts: i64 = current_ts();
+        let expiry_ts: i64 = current_ts() + days(1) as i64;
+        let nonce = 0;
+
+        // Setup: Alice (victim) with funds and Bob (attacker)
+        let (mut litesvm, alice, bob, _alice_delegation_pda, mint, alice_ata, bob_ata) =
+            setup_recurring_delegation(
+                amount_per_period,
+                period_length_s,
+                start_ts,
+                expiry_ts,
+                nonce,
+            );
+
+        initialize_multidelegate_action(&mut litesvm, &bob, mint)
+            .0
+            .assert_ok();
+
+        // Attacker (Bob) creates a self-delegation (Bob -> Bob) with a large allowance
+        let (_res, bob_delegation_pda) =
+            CreateDelegation::new(&mut litesvm, &bob, mint, bob.pubkey())
+                .nonce(nonce)
+                .recurring(1_000_000_000, period_length_s, start_ts, expiry_ts);
+        _res.assert_ok();
+
+        let transfer_amount: u64 = 30_000_000;
+
+        // Exploit: Attacker tries to transfer from Alice's ATA using their own delegation
+        // by passing Alice's delegator_pubkey in the instruction data
+        let result =
+            TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, bob_delegation_pda)
+                .amount(transfer_amount)
+                .to(bob_ata)
+                .recurring();
+
+        // After the fix, this should fail with Unauthorized error
+        result.assert_err(MultiDelegatorError::Unauthorized);
+
+        // Verify Alice's funds are untouched
+        assert_eq!(get_ata_balance(&litesvm, &alice_ata), 100_000_000);
+        // Verify Bob received no funds
+        assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
     }
 }

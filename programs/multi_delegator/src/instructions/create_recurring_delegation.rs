@@ -76,6 +76,7 @@ mod tests {
 
     use crate::{
         tests::{
+            asserts::TransactionResultExt,
             constants::{MINT_DECIMALS, TOKEN_PROGRAM_ID},
             utils::{
                 days, init_ata, init_mint, initialize_multidelegate_action, setup, CreateDelegation,
@@ -108,14 +109,14 @@ mod tests {
 
         initialize_multidelegate_action(litesvm, payer, mint)
             .0
-            .unwrap();
+            .assert_ok();
 
         let delegatee = Pubkey::new_unique();
 
         let (res, delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
             .nonce(nonce)
             .recurring(amount_per_period, period_length_s, start_ts, expiry_ts);
-        res.unwrap();
+        res.assert_ok();
 
         let account = litesvm.get_account(&delegation_pda).unwrap();
         let delegation = RecurringDelegation::load(&account.data).unwrap();

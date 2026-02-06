@@ -62,6 +62,7 @@ mod tests {
 
     use crate::{
         tests::{
+            asserts::TransactionResultExt,
             constants::{MINT_DECIMALS, TOKEN_PROGRAM_ID},
             pda::get_delegation_pda,
             utils::{
@@ -93,7 +94,7 @@ mod tests {
 
         initialize_multidelegate_action(litesvm, delegator, mint)
             .0
-            .unwrap();
+            .assert_ok();
 
         let delegatee = Pubkey::new_unique();
 
@@ -104,7 +105,7 @@ mod tests {
             .payer(&sponsor)
             .nonce(nonce)
             .fixed(amount, expiry_ts);
-        res.unwrap();
+        res.assert_ok();
 
         let delegator_balance_after = litesvm.get_account(&delegator.pubkey()).unwrap().lamports;
         let sponsor_balance_after = litesvm.get_account(&sponsor.pubkey()).unwrap().lamports;
@@ -122,7 +123,7 @@ mod tests {
         let res = RevokeDelegation::new(litesvm, delegator, mint, delegatee, nonce)
             .receiver(sponsor.pubkey())
             .execute();
-        res.unwrap();
+        res.assert_ok();
 
         let sponsor_balance_final = litesvm.get_account(&sponsor.pubkey()).unwrap().lamports;
 
@@ -152,14 +153,14 @@ mod tests {
 
         initialize_multidelegate_action(litesvm, payer, mint)
             .0
-            .unwrap();
+            .assert_ok();
 
         let delegatee = Pubkey::new_unique();
 
         let (res, delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
             .nonce(nonce)
             .fixed(amount, expiry_ts);
-        res.unwrap();
+        res.assert_ok();
 
         let account = litesvm.get_account(&delegation_pda).unwrap();
         let delegation = FixedDelegation::load(&account.data).unwrap();
@@ -215,7 +216,7 @@ mod tests {
 
         initialize_multidelegate_action(litesvm, payer, mint)
             .0
-            .unwrap();
+            .assert_ok();
 
         let delegatee = Pubkey::new_unique();
         let wrong_pda = Pubkey::new_unique();
@@ -244,14 +245,14 @@ mod tests {
 
         initialize_multidelegate_action(litesvm, payer, mint)
             .0
-            .unwrap();
+            .assert_ok();
 
         let delegatee = Pubkey::new_unique();
 
         let (res, _) = CreateDelegation::new(litesvm, payer, mint, delegatee)
             .nonce(0)
             .fixed(100, 1000);
-        res.unwrap();
+        res.assert_ok();
 
         let (res2, _) = CreateDelegation::new(litesvm, payer, mint, delegatee)
             .nonce(0)
@@ -280,7 +281,7 @@ mod tests {
         let (res0, pda0) = CreateDelegation::new(litesvm, payer, mint, delegatee)
             .nonce(0)
             .fixed(100, 1000);
-        let tx = res0.unwrap();
+        let tx = res0.assert_ok();
         println!(
             "Create Fixed delegation consumed: {} CUs",
             tx.compute_units_consumed
@@ -289,7 +290,7 @@ mod tests {
         let (res1, pda1) = CreateDelegation::new(litesvm, payer, mint, delegatee)
             .nonce(1)
             .fixed(200, 2000);
-        let tx = res1.unwrap();
+        let tx = res1.assert_ok();
         println!(
             "Create Fixed delegation consumed: {} CUs",
             tx.compute_units_consumed
@@ -298,7 +299,7 @@ mod tests {
         let (res2, pda2) = CreateDelegation::new(litesvm, payer, mint, delegatee)
             .nonce(2)
             .fixed(300, 3000);
-        let tx = res2.unwrap();
+        let tx = res2.assert_ok();
         println!(
             "Create Fixed delegation consumed: {} CUs",
             tx.compute_units_consumed

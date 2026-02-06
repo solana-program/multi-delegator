@@ -9,7 +9,7 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 use spl_associated_token_account::{
-    get_associated_token_address,
+    get_associated_token_address_with_program_id,
     solana_program::{
         clock::Clock,
         native_token::LAMPORTS_PER_SOL,
@@ -26,7 +26,7 @@ use crate::{
         revoke_delegation, transfer_fixed_delegation, transfer_recurring_delegation,
     },
     tests::{
-        constants::{PROGRAM_ID, SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID},
+        constants::{PROGRAM_ID, SYSTEM_PROGRAM_ID},
         cu_tracker::record_transaction,
         pda::{get_delegation_pda, get_multidelegate_pda},
     },
@@ -160,7 +160,7 @@ pub fn init_mint(
 
 pub fn init_ata(litesvm: &mut LiteSVM, mint: Pubkey, owner: Pubkey, amount: u64) -> Pubkey {
     let token_program = litesvm.get_account(&mint).unwrap().owner;
-    let ata = get_associated_token_address(&owner, &mint);
+    let ata = get_associated_token_address_with_program_id(&owner, &mint, &token_program);
 
     let ata_state = TokenAccount {
         mint,
@@ -198,7 +198,8 @@ pub fn initialize_multidelegate_action(
     mint: Pubkey,
 ) -> (TransactionResult, Pubkey, u8) {
     let token_program = litesvm.get_account(&mint).unwrap().owner;
-    let user_ata = get_associated_token_address(&payer.pubkey(), &mint);
+    let user_ata =
+        get_associated_token_address_with_program_id(&payer.pubkey(), &mint, &token_program);
     let (multi_delegate_pda, bump) = get_multidelegate_pda(&payer.pubkey(), &mint);
 
     let ix = Instruction {
@@ -389,13 +390,22 @@ impl<'a> TransferDelegation<'a> {
 
     #[allow(clippy::result_large_err)]
     fn execute(self, discriminator: u8) -> TransactionResult {
+        let token_program = self.litesvm.get_account(&self.mint).unwrap().owner;
         let (multi_delegate_pda, _) = get_multidelegate_pda(&self.delegator, &self.mint);
-        let delegator_ata = get_associated_token_address(&self.delegator, &self.mint);
+        let delegator_ata = get_associated_token_address_with_program_id(
+            &self.delegator,
+            &self.mint,
+            &token_program,
+        );
 
         // Default receiver is the signer's (delegatee's) ATA
-        let receiver_ata = self
-            .receiver
-            .unwrap_or_else(|| get_associated_token_address(&self.signer.pubkey(), &self.mint));
+        let receiver_ata = self.receiver.unwrap_or_else(|| {
+            get_associated_token_address_with_program_id(
+                &self.signer.pubkey(),
+                &self.mint,
+                &token_program,
+            )
+        });
 
         let ix = Instruction {
             program_id: PROGRAM_ID,
@@ -404,7 +414,7 @@ impl<'a> TransferDelegation<'a> {
                 AccountMeta::new(multi_delegate_pda, false),
                 AccountMeta::new(delegator_ata, false),
                 AccountMeta::new(receiver_ata, false),
-                AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+                AccountMeta::new_readonly(token_program, false),
                 AccountMeta::new_readonly(self.signer.pubkey(), true),
             ],
             data: [

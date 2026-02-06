@@ -1,7 +1,6 @@
 use pinocchio::{
     account_info::AccountInfo,
     instruction::{Seed, Signer},
-    msg,
     program_error::ProgramError,
     sysvars::{rent::Rent, Sysvar},
     ProgramResult,
@@ -14,6 +13,7 @@ use pinocchio_token_2022::instructions::Approve as Approve2022;
 use crate::{
     constants::TOKEN_2022_PROGRAM_ID, AccountCheck, MintInterface, MultiDelegate,
     MultiDelegatorError, SignerAccount, SystemAccount, TokenAccountInterface,
+    TokenProgramInterface,
 };
 
 pub struct InitializeMultiDelegateAccounts<'a> {
@@ -29,22 +29,16 @@ impl<'a> TryFrom<&'a [AccountInfo]> for InitializeMultiDelegateAccounts<'a> {
     type Error = ProgramError;
 
     fn try_from(accounts: &'a [AccountInfo]) -> Result<Self, Self::Error> {
-        // We use .. to allow for extra accounts if any (though usually strict is better, debugging hints at potential issues)
-        let [user, multi_delegate, token_mint, user_ata, system_program, token_program, ..] =
-            accounts
+        let [user, multi_delegate, token_mint, user_ata, system_program, token_program] = accounts
         else {
             return Err(MultiDelegatorError::NotEnoughAccountKeys.into());
         };
 
         SignerAccount::check(user)?;
-        MintInterface::check(token_mint)?;
-        TokenAccountInterface::check(user_ata)?;
-        msg!("Before system check");
+        MintInterface::check_with_program(token_mint, token_program)?;
+        TokenAccountInterface::check_with_program(user_ata, token_program)?;
+        TokenProgramInterface::check(token_program)?;
         SystemAccount::check(system_program)?;
-        msg!("After system check");
-        // TODO produce check that can verify that the user_ata, token_mint are linked too by token_program
-        assert_eq!(user_ata.owner(), token_program.key());
-        assert_eq!(token_mint.owner(), token_program.key());
 
         Ok(Self {
             multi_delegate,
@@ -129,7 +123,10 @@ mod tests {
 
     use crate::{
         tests::{
-            constants::{MINT_DECIMALS, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID},
+            asserts::TransactionResultExt,
+            constants::{
+                MINT_DECIMALS, SYSTEM_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
+            },
             utils::{fetch_account, init_ata, init_mint, initialize_multidelegate_action, setup},
         },
         MultiDelegate,
@@ -149,7 +146,7 @@ mod tests {
         let user_ata = init_ata(litesvm, mint, user.pubkey(), 1_000_000);
 
         let (res, multi_delegate_pda, bump) = initialize_multidelegate_action(litesvm, user, mint);
-        res.unwrap();
+        res.assert_ok();
 
         let account = litesvm.get_account(&multi_delegate_pda).unwrap();
         let multi_delegate = MultiDelegate::load(&account.data).unwrap();
@@ -179,7 +176,7 @@ mod tests {
         let user_ata = init_ata(litesvm, mint, user.pubkey(), 1_000_000);
 
         let (res, multi_delegate_pda, bump) = initialize_multidelegate_action(litesvm, user, mint);
-        res.unwrap();
+        res.assert_ok();
 
         let account = litesvm.get_account(&multi_delegate_pda).unwrap();
         let multi_delegate = MultiDelegate::load(&account.data).unwrap();
@@ -193,5 +190,96 @@ mod tests {
         assert!(ata_account.delegate.is_some());
         assert_eq!(ata_account.delegate.unwrap(), multi_delegate_pda);
         assert_eq!(ata_account.delegated_amount, u64::MAX);
+    }
+
+    #[test]
+    fn wrong_token_program_returns_error() {
+        use solana_instruction::{AccountMeta, Instruction};
+        use solana_signer::Signer;
+
+        use crate::{
+            instructions::initialize_multidelegate,
+            tests::{
+                constants::PROGRAM_ID, constants::SYSTEM_PROGRAM_ID, pda::get_multidelegate_pda,
+                utils::build_and_send_transaction,
+            },
+        };
+
+        let (litesvm, user) = &mut setup();
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(user.pubkey()),
+        );
+        let user_ata = init_ata(litesvm, mint, user.pubkey(), 1_000_000);
+
+        let (multi_delegate_pda, _bump) = get_multidelegate_pda(&user.pubkey(), &mint);
+
+        let fake_token_program = user.pubkey();
+
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: vec![
+                AccountMeta::new(user.pubkey(), true),
+                AccountMeta::new(multi_delegate_pda, false),
+                AccountMeta::new_readonly(mint, false),
+                AccountMeta::new(user_ata, false),
+                AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+                AccountMeta::new_readonly(fake_token_program, false),
+            ],
+            data: vec![*initialize_multidelegate::DISCRIMINATOR],
+        };
+
+        let res = build_and_send_transaction(litesvm, &[user], &user.pubkey(), &ix);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn extra_accounts_rejected() {
+        use solana_instruction::{AccountMeta, Instruction};
+        use solana_signer::Signer;
+
+        use crate::{
+            instructions::initialize_multidelegate,
+            tests::{
+                constants::PROGRAM_ID, constants::TOKEN_PROGRAM_ID, pda::get_multidelegate_pda,
+                utils::build_and_send_transaction,
+            },
+        };
+
+        let (litesvm, user) = &mut setup();
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(user.pubkey()),
+        );
+        let user_ata = init_ata(litesvm, mint, user.pubkey(), 1_000_000);
+
+        let (multi_delegate_pda, _bump) = get_multidelegate_pda(&user.pubkey(), &mint);
+
+        let extra_account = user.pubkey();
+
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: vec![
+                AccountMeta::new(user.pubkey(), true),
+                AccountMeta::new(multi_delegate_pda, false),
+                AccountMeta::new_readonly(mint, false),
+                AccountMeta::new(user_ata, false),
+                AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+                AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+                AccountMeta::new_readonly(extra_account, false),
+            ],
+            data: vec![*initialize_multidelegate::DISCRIMINATOR],
+        };
+
+        let res = build_and_send_transaction(litesvm, &[user], &user.pubkey(), &ix);
+        assert!(res.is_err());
     }
 }

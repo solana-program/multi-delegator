@@ -1,4 +1,4 @@
-.PHONY: build build-program build-client test test-program test-client clean clean-program clean-client clean-webapp ensure-surfpool generate-client generate-idl setup prepare-deploy-keys fmt-check fmt lint lint-check build-webapp webapp kill-validator
+.PHONY: build build-program build-client test test-program test-client clean clean-program clean-client clean-webapp ensure-surfpool generate-client generate-idl setup prepare-deploy-keys fmt-check fmt lint lint-check build-webapp webapp kill-validator kill-surfpool
 
 # Setup target to check prerequisites and install dependencies
 setup: setup-hooks
@@ -6,6 +6,7 @@ setup: setup-hooks
 	@command -v cargo >/dev/null 2>&1 || { echo >&2 "cargo is required but not installed. Aborting."; exit 1; }
 	@command -v shank >/dev/null 2>&1 || { echo >&2 "shank is required but not installed. Aborting."; exit 1; }
 	@command -v solana-keygen >/dev/null 2>&1 || { echo >&2 "solana CLI is required but not installed. Aborting."; exit 1; }
+	@command -v surfpool >/dev/null 2>&1 || { echo >&2 "surfpool is required but not installed. Aborting."; exit 1; }
 	cd client && bun install
 
 setup-hooks:
@@ -180,8 +181,24 @@ build-webapp: generate-idl
 webapp: $(SO_FILE)
 	@./scripts/start-webapp.sh $(if $(RESET),--reset) $(if $(SKIP_INIT),--skip-init)
 
+kill-surfpool:
+	@if [ -f .surfpool/pid.txt ]; then \
+		pid=$$(cat .surfpool/pid.txt); \
+		kill -9 $$pid; \
+		if [ $$? -eq 0 ]; then \
+			echo "Killed surfpool validator with pid $$pid"; \
+			rm -f .surfpool/pid.txt; \
+		else \
+			echo "Failed to kill process $$pid" >&2; \
+			exit 1; \
+		fi \
+	else \
+		echo "No pid file found. Surfpool validator is not running or pid file was not created."; \
+	fi
+
+
 # Kill any running validator (surfpool or solana-test-validator)
-kill-validator:
+kill-validator: kill-surfpool
 	@echo "Killing all validators..."
 	@-pkill -f "solana-test-validator" 2>/dev/null || true
 	@-pkill -f "surfpool" 2>/dev/null || true

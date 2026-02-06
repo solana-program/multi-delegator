@@ -46,13 +46,9 @@ impl ProgramAccountInit for ProgramAccount {
 
 impl AccountClose for ProgramAccount {
     fn close(account: &AccountInfo, destination: &AccountInfo) -> ProgramResult {
-        {
-            let mut data = account.try_borrow_mut_data()?;
-            data[0] = 0xff;
-        }
-
-        *destination.try_borrow_mut_lamports()? += *account.try_borrow_lamports()?;
-        account.resize(1)?;
+        let lamports = *account.try_borrow_lamports()?;
+        *destination.try_borrow_mut_lamports()? += lamports;
+        account.resize(0)?;
         account.close()
     }
 }

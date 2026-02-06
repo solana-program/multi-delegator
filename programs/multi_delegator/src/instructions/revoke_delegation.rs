@@ -78,7 +78,7 @@ mod tests {
 
     use crate::{
         tests::{
-            asserts::assert_error,
+            asserts::TransactionResultExt,
             constants::{MINT_DECIMALS, TOKEN_PROGRAM_ID},
             utils::{
                 current_ts, days, init_ata, init_mint, init_wallet,
@@ -104,7 +104,7 @@ mod tests {
 
         initialize_multidelegate_action(litesvm, payer, mint)
             .0
-            .unwrap();
+            .assert_ok();
 
         let delegatee = Pubkey::new_unique();
         let nonce: u64 = 0;
@@ -112,7 +112,7 @@ mod tests {
         let (res, delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
             .nonce(nonce)
             .fixed(100, 1000);
-        res.unwrap();
+        res.assert_ok();
 
         let account_before = litesvm.get_account(&delegation_pda);
         assert!(account_before.is_some());
@@ -124,7 +124,7 @@ mod tests {
         let delegator_balance_before = litesvm.get_account(&payer.pubkey()).unwrap().lamports;
 
         let res = RevokeDelegation::new(litesvm, payer, mint, delegatee, nonce).execute();
-        res.unwrap();
+        res.assert_ok();
 
         let account_after = litesvm.get_account(&delegation_pda);
         assert!(
@@ -152,7 +152,7 @@ mod tests {
 
         initialize_multidelegate_action(litesvm, payer, mint)
             .0
-            .unwrap();
+            .assert_ok();
 
         let delegatee = Pubkey::new_unique();
         let nonce: u64 = 0;
@@ -162,7 +162,7 @@ mod tests {
         let (res, delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
             .nonce(nonce)
             .recurring(100, epoch, current_ts(), expiry_ts);
-        res.unwrap();
+        res.assert_ok();
 
         let account_before = litesvm.get_account(&delegation_pda);
         assert!(account_before.is_some());
@@ -174,7 +174,7 @@ mod tests {
         let delegator_balance_before = litesvm.get_account(&payer.pubkey()).unwrap().lamports;
 
         let res = RevokeDelegation::new(litesvm, payer, mint, delegatee, nonce).execute();
-        res.unwrap();
+        res.assert_ok();
 
         let account_after = litesvm.get_account(&delegation_pda);
         assert!(
@@ -202,7 +202,7 @@ mod tests {
 
         initialize_multidelegate_action(litesvm, payer, mint)
             .0
-            .unwrap();
+            .assert_ok();
 
         let delegatee = Pubkey::new_unique();
         let nonce: u64 = 0;
@@ -212,7 +212,7 @@ mod tests {
         let (res, delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
             .nonce(nonce)
             .recurring(100, epoch, current_ts(), expiry_ts);
-        res.unwrap();
+        res.assert_ok();
 
         let attacker = init_wallet(litesvm, 1_000_000_000);
         let (multi_delegate_pda, _) =
@@ -228,6 +228,48 @@ mod tests {
         let account_after = litesvm.get_account(&delegation_pda);
         assert!(account_after.is_some());
         assert!(account_after.as_ref().map(|a| a.lamports).unwrap_or(0) > 0);
+    }
+
+    #[test]
+    fn closed_account_is_zeroed() {
+        let (litesvm, user) = &mut setup();
+        let payer = user;
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(payer.pubkey()),
+        );
+        let _user_ata = init_ata(litesvm, mint, payer.pubkey(), 1_000_000);
+
+        initialize_multidelegate_action(litesvm, payer, mint)
+            .0
+            .assert_ok();
+
+        let delegatee = Pubkey::new_unique();
+        let nonce: u64 = 0;
+
+        let (res, delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .nonce(nonce)
+            .fixed(100, 1000);
+        res.assert_ok();
+
+        let account_before = litesvm.get_account(&delegation_pda);
+        let _before_data = account_before.as_ref().unwrap().data.clone();
+
+        let res = RevokeDelegation::new(litesvm, payer, mint, delegatee, nonce).execute();
+        res.assert_ok();
+
+        let account_after = litesvm.get_account(&delegation_pda);
+
+        if let Some(account) = account_after {
+            assert!(
+                account.data.iter().all(|&byte| byte == 0),
+                "All data should be zeroed after close"
+            );
+        }
     }
 
     #[test]
@@ -248,7 +290,7 @@ mod tests {
 
         initialize_multidelegate_action(litesvm, delegator, mint)
             .0
-            .unwrap();
+            .assert_ok();
 
         let delegatee = Pubkey::new_unique();
         let nonce: u64 = 0;
@@ -257,13 +299,13 @@ mod tests {
             .payer(&sponsor)
             .nonce(nonce)
             .fixed(100, 1000);
-        res.unwrap();
+        res.assert_ok();
 
         let result = RevokeDelegation::new(litesvm, delegator, mint, delegatee, nonce)
             .receiver(wrong_receiver.pubkey())
             .execute();
 
-        assert_error(result, MultiDelegatorError::Unauthorized);
+        result.assert_err(MultiDelegatorError::Unauthorized);
     }
 
     #[allow(clippy::result_large_err)]

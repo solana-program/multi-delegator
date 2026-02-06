@@ -109,3 +109,29 @@ pub fn init_header(
     header.delegatee = *delegatee;
     header.payer = *payer;
 }
+
+/// Authorization checker for delegation transfers.
+///
+/// Verifies that the delegation belongs to the claimed delegator and that
+/// the caller is the authorized delegatee. This prevents an attacker from
+/// using their own delegation to transfer funds from another user's account.
+pub struct Delegation;
+
+impl Delegation {
+    /// Checks that:
+    /// 1. The delegation belongs to the claimed delegator
+    /// 2. The caller is the authorized delegatee for this delegation
+    pub fn check(
+        header: &Header,
+        expected_delegator: &Pubkey,
+        caller_delegatee: &Pubkey,
+    ) -> Result<(), ProgramError> {
+        if header.delegator != *expected_delegator {
+            return Err(MultiDelegatorError::Unauthorized.into());
+        }
+        if header.delegatee != *caller_delegatee {
+            return Err(MultiDelegatorError::Unauthorized.into());
+        }
+        Ok(())
+    }
+}

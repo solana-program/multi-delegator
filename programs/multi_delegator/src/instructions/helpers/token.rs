@@ -10,6 +10,7 @@ use pinocchio_system::instructions::CreateAccount;
 use pinocchio_token::{
     instructions::{InitializeAccount3, InitializeMint2},
     state::{Mint, TokenAccount as TokenAccountState},
+    ID as SPL_TOKEN_PROGRAM_ID,
 };
 
 use super::traits::{
@@ -278,6 +279,17 @@ impl TokenInit for TokenAccount2022Account {
 
 // Interfaces
 
+pub struct TokenProgramInterface;
+
+impl TokenProgramInterface {
+    pub fn check(account: &AccountInfo) -> Result<(), ProgramError> {
+        if account.key().ne(&SPL_TOKEN_PROGRAM_ID) && account.key().ne(&TOKEN_2022_PROGRAM_ID) {
+            return Err(MultiDelegatorError::InvalidTokenProgram.into());
+        }
+        Ok(())
+    }
+}
+
 pub struct MintInterface;
 
 impl AccountCheck for MintInterface {
@@ -290,6 +302,21 @@ impl AccountCheck for MintInterface {
     }
 }
 
+impl MintInterface {
+    pub fn check_with_program(
+        account: &AccountInfo,
+        token_program: &AccountInfo,
+    ) -> Result<(), ProgramError> {
+        Self::check(account)?;
+
+        if account.owner().ne(token_program.key()) {
+            return Err(MultiDelegatorError::InvalidTokenProgram.into());
+        }
+
+        Ok(())
+    }
+}
+
 pub struct TokenAccountInterface;
 
 impl AccountCheck for TokenAccountInterface {
@@ -299,6 +326,35 @@ impl AccountCheck for TokenAccountInterface {
         } else {
             TokenAccount::check(account)
         }
+    }
+}
+
+impl TokenAccountInterface {
+    pub fn check_with_program(
+        account: &AccountInfo,
+        token_program: &AccountInfo,
+    ) -> Result<(), ProgramError> {
+        Self::check(account)?;
+
+        if account.owner().ne(token_program.key()) {
+            return Err(MultiDelegatorError::InvalidTokenProgram.into());
+        }
+
+        Ok(())
+    }
+
+    pub fn check_accounts_with_program(
+        token_program: &AccountInfo,
+        accounts: &[&AccountInfo],
+    ) -> Result<(), ProgramError> {
+        for account in accounts {
+            Self::check(account)?;
+
+            if account.owner().ne(token_program.key()) {
+                return Err(MultiDelegatorError::InvalidTokenProgram.into());
+            }
+        }
+        Ok(())
     }
 }
 
