@@ -7,7 +7,7 @@ setup: setup-hooks
 	@command -v shank >/dev/null 2>&1 || { echo >&2 "shank is required but not installed. Aborting."; exit 1; }
 	@command -v solana-keygen >/dev/null 2>&1 || { echo >&2 "solana CLI is required but not installed. Aborting."; exit 1; }
 	@command -v surfpool >/dev/null 2>&1 || { echo >&2 "surfpool is required but not installed. Aborting."; exit 1; }
-	cd client && bun install
+	bun install
 
 setup-hooks:
 	@git config core.hooksPath .githooks
@@ -29,7 +29,7 @@ RUST_SOURCES := $(shell find programs/multi_delegator/src -name '*.rs')
 SO_FILE := programs/multi_delegator/target/deploy/multi_delegator.so
 DEPLOY_KEY_FILE := programs/multi_delegator/target/deploy/multi_delegator-keypair.json
 IDL_FILE := programs/multi_delegator/idl/multi_delegator.json
-GENERATED_CLIENT := client/src/generated/index.ts
+GENERATED_CLIENTS := clients/typescript/src/generated/index.ts clients/rust/src/generated/mod.rs
 
 # Dynamic program ID from keypair
 PROGRAM_ID := $(shell solana-keygen pubkey keys/multi_delegator-keypair.json 2>/dev/null || echo "KEYPAIR_NOT_FOUND")
@@ -55,14 +55,14 @@ $(IDL_FILE): $(RUST_SOURCES)
 generate-idl: $(IDL_FILE)
 
 # Client code generation depends on IDL
-$(GENERATED_CLIENT): $(IDL_FILE)
-	cd client && bun run generate
+$(GENERATED_CLIENTS): $(IDL_FILE)
+	bun run generate
 
-generate-client: $(GENERATED_CLIENT)
+generate-client: $(GENERATED_CLIENTS)
 
 # Build client with all dependencies
-build-client: $(GENERATED_CLIENT)
-	cd client && bun run build
+build-client: $(GENERATED_CLIENTS)
+	cd clients/typescript && bun run build
 
 # ============================================
 # Test targets
@@ -110,7 +110,7 @@ ensure-surfpool:
 
 # test-client uses surfpool for speed (no wallet interaction needed)
 test-client: $(SO_FILE) $(GENERATED_CLIENT) ensure-surfpool
-	cd client && bun run test
+	cd clients/typescript && bun run test
 
 # ============================================
 # Clean targets
@@ -123,7 +123,7 @@ clean-program:
 	rm -f programs/multi_delegator/idl/multi_delegator.json
 
 clean-client:
-	cd client && bun run clean
+	cd clients/typescript && bun run clean
 
 clean-webapp:
 	@echo "Cleaning webapp and validator files..."
@@ -146,25 +146,25 @@ fmt-check:
 	@echo "Checking Rust formatting..."
 	cd programs/multi_delegator && cargo fmt --check
 	@echo "Checking TypeScript formatting..."
-	cd client && bun run format:check
+	cd clients/typescript && bun run format:check
 
 fmt:
 	@echo "Formatting Rust code..."
 	cd programs/multi_delegator && cargo fmt
 	@echo "Formatting TypeScript code..."
-	cd client && bun run format
+	cd clients/typescript && bun run format
 
 lint:
 	@echo "Linting Rust code..."
 	cd programs/multi_delegator && cargo clippy --all-targets --no-deps --fix -- -D warnings
 	@echo "Linting TypeScript code..."
-	cd client && bun run lint
+	cd clients/typescript && bun run lint
 
 lint-check:
 	@echo "Linting Rust code..."
 	cd programs/multi_delegator && cargo clippy --all-targets --no-deps -- -D warnings
 	@echo "Linting TypeScript code..."
-	cd client && bun run lint:check
+	cd clients/typescript && bun run lint:check
 
 check: fmt-check lint-check
 

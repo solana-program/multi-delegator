@@ -1,0 +1,22 @@
+{
+  "name": "multidelegator-monorepo",
+  "type": "module",
+  "private": true,
+  "workspaces": [
+    "clients/*"
+  ],
+  "scripts": {
+    "generate": "codama run js rust"
+  },
+  "devDependencies": {
+    "@codama/cli": "latest",
+    "@codama/nodes-from-anchor": "latest",
+    "@codama/renderers-js": "latest",
+    "@codama/renderers-rust": "latest",
+    "@types/node": "^25.0.10",
+    "typescript": "latest"
+  },
+  "dependencies": {
+    "gill": "^0.14.0"
+  }
+}
