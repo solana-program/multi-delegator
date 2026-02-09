@@ -18,11 +18,7 @@ pub struct CreateRecurringDelegationData {
 }
 
 impl CreateRecurringDelegationData {
-    pub const LEN: usize = size_of::<u64>()
-        + size_of::<u64>()
-        + size_of::<u64>()
-        + size_of::<i64>()
-        + size_of::<u64>();
+    pub const LEN: usize = size_of::<CreateRecurringDelegationData>();
 
     pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
         if data.len() != Self::LEN {

@@ -71,7 +71,7 @@ pub fn process(accounts: &[AccountInfo]) -> ProgramResult {
         Seed::from(&bump_binding),
     ];
 
-    // Initialize the account
+    // Initialize the account if it doesn't exist
     if accounts.multi_delegate.data_len() == 0 {
         let lamports = Rent::get()?.minimum_balance(MultiDelegate::LEN);
         let signer = [Signer::from(&seeds)];

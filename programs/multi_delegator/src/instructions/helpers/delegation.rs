@@ -8,7 +8,7 @@ use pinocchio::{
 use pinocchio_system::instructions::CreateAccount;
 
 use crate::{
-    find_delegation_pda, AccountCheck, DelegationKind, Header, MultiDelegateAccount,
+    state::common::find_delegation_pda, AccountCheck, DelegationKind, Header, MultiDelegateAccount,
     MultiDelegatorError, SignerAccount, SystemAccount, CURRENT_VERSION, DELEGATE_BASE_SEED,
 };
 
@@ -59,6 +59,7 @@ pub fn create_delegation_account(
     space: usize,
 ) -> Result<u8, ProgramError> {
     let nonce_bytes = nonce.to_le_bytes();
+
     let (expected_pda, bump) = find_delegation_pda(
         accounts.multi_delegate.key(),
         accounts.delegator.key(),

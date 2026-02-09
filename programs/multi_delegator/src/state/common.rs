@@ -1,10 +1,31 @@
 use pinocchio::program_error::ProgramError;
-use pinocchio::pubkey::{find_program_address, Pubkey};
+use pinocchio::pubkey::{create_program_address, find_program_address, Pubkey};
 use shank::ShankType;
 
 use crate::MultiDelegatorError;
 
 pub const DELEGATE_BASE_SEED: &[u8] = b"delegation";
+
+pub fn verify_delegation_pda(
+    multi_delegate: &Pubkey,
+    delegator: &Pubkey,
+    delegatee: &Pubkey,
+    nonce: u64,
+    bump: u8,
+) -> Result<Pubkey, ProgramError> {
+    create_program_address(
+        &[
+            DELEGATE_BASE_SEED,
+            multi_delegate.as_ref(),
+            delegator.as_ref(),
+            delegatee.as_ref(),
+            &nonce.to_le_bytes(),
+            &[bump],
+        ],
+        &crate::ID,
+    )
+    .map_err(|_| MultiDelegatorError::InvalidDelegatePda.into())
+}
 
 pub fn find_delegation_pda(
     multi_delegate: &Pubkey,

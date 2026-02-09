@@ -17,9 +17,9 @@ pub const DISCRIMINATOR: &u8 = &4;
 pub fn process(accounts: &[AccountInfo], transfer: &TransferData) -> ProgramResult {
     let accounts_struct = FixedTransferAccounts::try_from(accounts)?;
 
-    // Validate kind matches Fixed
+    // Validate kind matches Fixed and update state
     {
-        let binding = accounts_struct.delegation_pda.try_borrow_data()?;
+        let mut binding = accounts_struct.delegation_pda.try_borrow_mut_data()?;
 
         if binding.len() <= KIND_OFFSET {
             return Err(MultiDelegatorError::InvalidAccountData.into());
@@ -30,7 +30,7 @@ pub fn process(accounts: &[AccountInfo], transfer: &TransferData) -> ProgramResu
             return Err(MultiDelegatorError::TransferKindMismatch.into());
         }
 
-        let delegation = FixedDelegation::load(&binding)?;
+        let delegation = FixedDelegation::load_mut(&mut binding)?;
 
         // Fail fast: Check authorization first
         Delegation::check(
@@ -48,6 +48,8 @@ pub fn process(accounts: &[AccountInfo], transfer: &TransferData) -> ProgramResu
         if transfer.amount > delegation.amount {
             return Err(MultiDelegatorError::AmountExceedsLimit.into());
         }
+
+        delegation.amount -= transfer.amount;
     }
 
     transfer_with_delegate(
@@ -61,10 +63,6 @@ pub fn process(accounts: &[AccountInfo], transfer: &TransferData) -> ProgramResu
             token_program: accounts_struct.token_program,
         },
     )?;
-
-    let mut binding = accounts_struct.delegation_pda.try_borrow_mut_data()?;
-    let delegation_mut = FixedDelegation::load_mut(&mut binding)?;
-    delegation_mut.amount -= transfer.amount;
 
     Ok(())
 }

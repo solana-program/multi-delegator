@@ -326,6 +326,7 @@ impl<'a> CreateDelegation<'a> {
             fee_payer = p.pubkey();
         }
 
+        // Instruction data now includes the bump at the end
         let ix = Instruction {
             program_id: PROGRAM_ID,
             accounts,

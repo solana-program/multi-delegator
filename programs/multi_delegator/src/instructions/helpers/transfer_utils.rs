@@ -24,11 +24,19 @@ pub fn transfer_with_delegate(
     mint: &Pubkey,
     accounts: &TransferAccounts,
 ) -> ProgramResult {
-    let (expected_pda, bump) = MultiDelegate::find_pda(delegator, mint);
+    let bump = {
+        // Read the bump from the MultiDelegate account data (cheaper than find_program_address)
+        let multidelegate_data = accounts.multidelegate_pda.try_borrow_data()?;
+        let multidelegate = MultiDelegate::load(&multidelegate_data)?;
 
-    if expected_pda != *accounts.multidelegate_pda.key() {
-        return Err(MultiDelegatorError::InvalidDelegatePda.into());
-    }
+        // Verify that the MultiDelegate account matches the provided delegator and mint.
+        // Since the account is owned by the program (checked in instruction processor),
+        // we can trust its data. If the data matches, it is the correct PDA.
+        if multidelegate.user != *delegator || multidelegate.token_mint != *mint {
+            return Err(MultiDelegatorError::InvalidDelegatePda.into());
+        }
+        multidelegate.bump
+    };
 
     let bump_bytes = [bump];
     let seeds = [

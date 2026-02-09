@@ -1,7 +1,7 @@
 use pinocchio::{
     account_info::AccountInfo,
     program_error::ProgramError,
-    pubkey::{find_program_address, Pubkey},
+    pubkey::{create_program_address, find_program_address, Pubkey},
     sysvars::{rent::Rent, Sysvar},
     ProgramResult,
 };
@@ -181,11 +181,13 @@ impl AccountCheck for Mint2022Account {
             return Err(MultiDelegatorError::InvalidToken2022MintAccountData.into());
         }
 
+        if account.data_len() == Mint::LEN {
+            return Ok(());
+        }
+
         let data = account.try_borrow_data()?;
 
-        if data.len().ne(&Mint::LEN)
-            && data[TOKEN_2022_ACCOUNT_DISCRIMINATOR_OFFSET].ne(&TOKEN_2022_MINT_DISCRIMINATOR)
-        {
+        if data[TOKEN_2022_ACCOUNT_DISCRIMINATOR_OFFSET].ne(&TOKEN_2022_MINT_DISCRIMINATOR) {
             return Err(MultiDelegatorError::InvalidToken2022MintAccountData.into());
         }
 
@@ -235,11 +237,13 @@ impl AccountCheck for TokenAccount2022Account {
             return Err(MultiDelegatorError::InvalidToken2022TokenAccountData.into());
         }
 
+        if account.data_len() == TokenAccountState::LEN {
+            return Ok(());
+        }
+
         let data = account.try_borrow_data()?;
 
-        if data.len().ne(&TokenAccountState::LEN)
-            && data[TOKEN_2022_ACCOUNT_DISCRIMINATOR_OFFSET]
-                .ne(&TOKEN_2022_TOKEN_ACCOUNT_DISCRIMINATOR)
+        if data[TOKEN_2022_ACCOUNT_DISCRIMINATOR_OFFSET].ne(&TOKEN_2022_TOKEN_ACCOUNT_DISCRIMINATOR)
         {
             return Err(MultiDelegatorError::InvalidToken2022TokenAccountData.into());
         }
@@ -359,6 +363,32 @@ impl TokenAccountInterface {
 }
 
 pub struct AssociatedTokenAccount;
+
+impl AssociatedTokenAccount {
+    /// Verifies that the given account is a valid ATA using the provided bump.
+    /// This is cheaper than the trait method as it doesn't derive the bump.
+    pub fn check_with_bump(
+        account: &AccountInfo,
+        authority: &AccountInfo,
+        mint: &AccountInfo,
+        token_program: &AccountInfo,
+        bump: u8,
+    ) -> Result<(), ProgramError> {
+        TokenAccountInterface::check(account)?;
+
+        let expected_pda = create_program_address(
+            &[authority.key(), token_program.key(), mint.key(), &[bump]],
+            &pinocchio_associated_token_account::ID,
+        )
+        .map_err(|_| MultiDelegatorError::InvalidAssociatedTokenAccountDerivedAddress)?;
+
+        if expected_pda.ne(account.key()) {
+            return Err(MultiDelegatorError::InvalidAssociatedTokenAccountDerivedAddress.into());
+        }
+
+        Ok(())
+    }
+}
 
 impl AssociatedTokenAccountCheck for AssociatedTokenAccount {
     fn check(

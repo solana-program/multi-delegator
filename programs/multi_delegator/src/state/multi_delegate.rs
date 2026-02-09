@@ -1,5 +1,8 @@
 use core::mem::{size_of, transmute};
-use pinocchio::{program_error::ProgramError, pubkey::find_program_address, pubkey::Pubkey};
+use pinocchio::{
+    program_error::ProgramError,
+    pubkey::{create_program_address, find_program_address, Pubkey},
+};
 use shank::ShankAccount;
 
 use crate::MultiDelegatorError;
@@ -32,6 +35,23 @@ impl MultiDelegate {
         Ok(unsafe { &*transmute::<*const u8, *const Self>(bytes.as_ptr()) })
     }
 
+    /// Verifies that the given seeds and bump produce a valid PDA.
+    /// This is cheaper than find_pda as it doesn't iterate through bumps.
+    /// Returns the computed PDA if valid, or an error if the bump is invalid.
+    pub fn verify_pda(
+        user: &Pubkey,
+        token_mint: &Pubkey,
+        bump: u8,
+    ) -> Result<Pubkey, ProgramError> {
+        create_program_address(
+            &[Self::SEED, user.as_ref(), token_mint.as_ref(), &[bump]],
+            &crate::ID,
+        )
+        .map_err(|_| MultiDelegatorError::InvalidMultiDelegatePda.into())
+    }
+
+    /// Finds the canonical PDA and bump for the multi-delegate account.
+    /// Used when creating the multi-delegate to ensure the canonical bump is used.
     pub fn find_pda(user: &Pubkey, token_mint: &Pubkey) -> (Pubkey, u8) {
         find_program_address(
             &[Self::SEED, user.as_ref(), token_mint.as_ref()],
