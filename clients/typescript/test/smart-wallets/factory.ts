@@ -4,7 +4,7 @@ import type { SmartWallet } from './SmartWallet.ts';
 import { createSquadsWallet } from './squadsWallet.ts';
 import { createSwigWallet } from './swigWallet.ts';
 
-export type SmartWalletChoice = 'swig' | 'squads' | 'both';
+export type SmartWalletChoice = 'swig' | 'squads' | 'all';
 
 type CreateSmartWalletsConfig = {
   rpcUrl: string;
@@ -22,7 +22,7 @@ export async function createSmartWallets(
   const connection = new Connection(config.rpcUrl, 'confirmed');
   const wallets: SmartWallet[] = [];
 
-  if (config.choice === 'swig' || config.choice === 'both') {
+  if (config.choice === 'swig' || config.choice === 'all') {
     const swigFeePayer = Keypair.generate();
     const swigAuthority = Keypair.generate();
     await config.airdrop(
@@ -42,7 +42,7 @@ export async function createSmartWallets(
     wallets.push(swigWallet);
   }
 
-  if (config.choice === 'squads' || config.choice === 'both') {
+  if (config.choice === 'squads' || config.choice === 'all') {
     const squadsMembers = [
       Keypair.generate(),
       Keypair.generate(),

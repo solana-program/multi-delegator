@@ -12,9 +12,12 @@ import {
 import { getDelegationPDA, getMultiDelegatePDA } from '../src/pdas.ts';
 import {
   DEFAULT_TEST_BALANCE,
+  getSmartWallet,
+  getSmartWalletList,
   initTestSuite,
   ONE_DAY_IN_SECONDS,
   ONE_HOUR_IN_SECONDS,
+  type SmartWalletName,
 } from './setup.ts';
 import type { SmartWallet } from './smart-wallets/index.ts';
 
@@ -108,290 +111,238 @@ async function revokeDelegationWithWallet(
   await wallet.sendInstructions([instruction]);
 }
 
-describe('MultiDelegator Smart Wallet Delegation Tests', () => {
-  test('create fixed delegation via smart wallets', async () => {
-    const testSuite = await initTestSuite();
-    const wallets = await testSuite.createSmartWallets();
+async function initWalletContext(walletName: SmartWalletName) {
+  const testSuite = await initTestSuite();
+  const wallet = await getSmartWallet(testSuite, walletName);
+  const userAta = await testSuite.createAtaWithBalance(
+    testSuite.tokenMint,
+    wallet.address,
+    DEFAULT_TEST_BALANCE,
+  );
+  await initMultiDelegateWithWallet(wallet, testSuite.tokenMint, userAta);
+  return { testSuite, wallet, userAta };
+}
 
-    for (const wallet of wallets) {
-      const userAta = await testSuite.createAtaWithBalance(
-        testSuite.tokenMint,
-        wallet.address,
-        DEFAULT_TEST_BALANCE,
-      );
+const wallets = getSmartWalletList().map((name) => ({ name }));
 
-      await initMultiDelegateWithWallet(wallet, testSuite.tokenMint, userAta);
+describe.each(wallets)('wallet $name tests', ({ name }) => {
+  test('create fixed delegation', async () => {
+    const { testSuite, wallet } = await initWalletContext(name);
 
-      const delegatee = await generateKeyPairSigner();
-      const nonce = 0n;
-      const amount = 500_000n;
-      const expiryTs = BigInt(
-        Math.floor(Date.now() / 1000) + ONE_HOUR_IN_SECONDS,
-      );
+    const delegatee = await generateKeyPairSigner();
+    const nonce = 0n;
+    const amount = 500_000n;
+    const expiryTs = BigInt(
+      Math.floor(Date.now() / 1000) + ONE_HOUR_IN_SECONDS,
+    );
 
-      const { delegationAccount } = await createFixedDelegationWithWallet(
-        wallet,
-        testSuite.tokenMint,
-        delegatee.address,
-        nonce,
-        amount,
-        expiryTs,
-      );
+    const { delegationAccount } = await createFixedDelegationWithWallet(
+      wallet,
+      testSuite.tokenMint,
+      delegatee.address,
+      nonce,
+      amount,
+      expiryTs,
+    );
 
-      const delegation = await fetchFixedDelegation(
-        testSuite.rpc,
-        delegationAccount,
-      );
-      expect(delegation.data.amount).toBe(amount);
-      expect(delegation.data.expiryTs).toBe(expiryTs);
-    }
+    const delegation = await fetchFixedDelegation(
+      testSuite.rpc,
+      delegationAccount,
+    );
+    expect(delegation.data.amount).toBe(amount);
+    expect(delegation.data.expiryTs).toBe(expiryTs);
   }, 15000);
 
-  test('revoke fixed delegation via smart wallets', async () => {
-    const testSuite = await initTestSuite();
-    const wallets = await testSuite.createSmartWallets();
+  test('revoke fixed delegation', async () => {
+    const { testSuite, wallet } = await initWalletContext(name);
 
-    for (const wallet of wallets) {
-      const userAta = await testSuite.createAtaWithBalance(
-        testSuite.tokenMint,
-        wallet.address,
-        DEFAULT_TEST_BALANCE,
-      );
+    const delegatee = await generateKeyPairSigner();
+    const { delegationAccount } = await createFixedDelegationWithWallet(
+      wallet,
+      testSuite.tokenMint,
+      delegatee.address,
+      0n,
+      500_000n,
+      BigInt(Math.floor(Date.now() / 1000) + ONE_HOUR_IN_SECONDS),
+    );
 
-      await initMultiDelegateWithWallet(wallet, testSuite.tokenMint, userAta);
+    const delegatorBalanceBefore = await testSuite.rpc
+      .getBalance(wallet.address)
+      .send();
 
-      const delegatee = await generateKeyPairSigner();
-      const { delegationAccount } = await createFixedDelegationWithWallet(
-        wallet,
-        testSuite.tokenMint,
-        delegatee.address,
-        0n,
-        500_000n,
-        BigInt(Math.floor(Date.now() / 1000) + ONE_HOUR_IN_SECONDS),
-      );
+    await revokeDelegationWithWallet(wallet, delegationAccount);
 
-      const delegatorBalanceBefore = await testSuite.rpc
-        .getBalance(wallet.address)
-        .send();
+    expect(
+      fetchFixedDelegation(testSuite.rpc, delegationAccount),
+    ).rejects.toThrow();
 
-      await revokeDelegationWithWallet(wallet, delegationAccount);
-
-      expect(
-        fetchFixedDelegation(testSuite.rpc, delegationAccount),
-      ).rejects.toThrow();
-
-      const delegatorBalanceAfter = await testSuite.rpc
-        .getBalance(wallet.address)
-        .send();
-      expect(delegatorBalanceAfter.value).toBeGreaterThan(
-        delegatorBalanceBefore.value,
-      );
-    }
+    const delegatorBalanceAfter = await testSuite.rpc
+      .getBalance(wallet.address)
+      .send();
+    expect(delegatorBalanceAfter.value).toBeGreaterThan(
+      delegatorBalanceBefore.value,
+    );
   }, 15000);
 
-  test('transfer fixed delegation via smart wallets', async () => {
-    const testSuite = await initTestSuite();
-    const wallets = await testSuite.createSmartWallets();
+  test('transfer fixed delegation', async () => {
+    const { testSuite, wallet, userAta } = await initWalletContext(name);
 
-    for (const wallet of wallets) {
-      const userAta = await testSuite.createAtaWithBalance(
-        testSuite.tokenMint,
-        wallet.address,
-        DEFAULT_TEST_BALANCE,
-      );
+    const delegatee = await testSuite.createFundedKeypair();
+    const nonce = 0n;
+    const amount = 500_000n;
+    const expiryTs = BigInt(
+      Math.floor(Date.now() / 1000) + ONE_HOUR_IN_SECONDS,
+    );
 
-      await initMultiDelegateWithWallet(wallet, testSuite.tokenMint, userAta);
+    const { delegationAccount } = await createFixedDelegationWithWallet(
+      wallet,
+      testSuite.tokenMint,
+      delegatee.address,
+      nonce,
+      amount,
+      expiryTs,
+    );
 
-      const delegatee = await testSuite.createFundedKeypair();
-      const nonce = 0n;
-      const amount = 500_000n;
-      const expiryTs = BigInt(
-        Math.floor(Date.now() / 1000) + ONE_HOUR_IN_SECONDS,
-      );
+    const delegateeAta = await testSuite.createAtaWithBalance(
+      testSuite.tokenMint,
+      delegatee.address,
+      0n,
+    );
 
-      const { delegationAccount } = await createFixedDelegationWithWallet(
-        wallet,
-        testSuite.tokenMint,
-        delegatee.address,
-        nonce,
-        amount,
-        expiryTs,
-      );
+    const transferAmount = 100_000n;
+    const result = await testSuite.client.transferFixed(
+      delegatee,
+      wallet.address,
+      userAta,
+      testSuite.tokenMint,
+      delegationAccount,
+      transferAmount,
+      delegateeAta,
+    );
 
-      const delegateeAta = await testSuite.createAtaWithBalance(
-        testSuite.tokenMint,
-        delegatee.address,
-        0n,
-      );
+    expect(result.signature).toBeDefined();
 
-      const transferAmount = 100_000n;
-      const result = await testSuite.client.transferFixed(
-        delegatee,
-        wallet.address,
-        userAta,
-        testSuite.tokenMint,
-        delegationAccount,
-        transferAmount,
-        delegateeAta,
-      );
+    const balance = await testSuite.rpc
+      .getTokenAccountBalance(delegateeAta)
+      .send();
+    expect(balance.value.amount).toBe(transferAmount.toString());
 
-      expect(result.signature).toBeDefined();
-
-      const balance = await testSuite.rpc
-        .getTokenAccountBalance(delegateeAta)
-        .send();
-      expect(balance.value.amount).toBe(transferAmount.toString());
-
-      const delegationAccountInfo = await fetchFixedDelegation(
-        testSuite.rpc,
-        delegationAccount,
-      );
-      expect(delegationAccountInfo.data.amount).toBe(amount - transferAmount);
-    }
+    const delegationAccountInfo = await fetchFixedDelegation(
+      testSuite.rpc,
+      delegationAccount,
+    );
+    expect(delegationAccountInfo.data.amount).toBe(amount - transferAmount);
   }, 15000);
 
-  test('create recurring delegation via smart wallets', async () => {
-    const testSuite = await initTestSuite();
-    const wallets = await testSuite.createSmartWallets();
+  test('create recurring delegation', async () => {
+    const { testSuite, wallet } = await initWalletContext(name);
 
-    for (const wallet of wallets) {
-      const userAta = await testSuite.createAtaWithBalance(
-        testSuite.tokenMint,
-        wallet.address,
-        DEFAULT_TEST_BALANCE,
-      );
+    const delegatee = await generateKeyPairSigner();
+    const nonce = 0n;
+    const amountPerPeriod = 100_000n;
+    const periodLengthS = BigInt(ONE_DAY_IN_SECONDS);
+    const startTs = BigInt(Math.floor(Date.now() / 1000));
+    const expiryTs = BigInt(
+      Math.floor(Date.now() / 1000) + ONE_DAY_IN_SECONDS * 30,
+    );
 
-      await initMultiDelegateWithWallet(wallet, testSuite.tokenMint, userAta);
+    const { delegationAccount } = await createRecurringDelegationWithWallet(
+      wallet,
+      testSuite.tokenMint,
+      delegatee.address,
+      nonce,
+      amountPerPeriod,
+      periodLengthS,
+      startTs,
+      expiryTs,
+    );
 
-      const delegatee = await generateKeyPairSigner();
-      const nonce = 0n;
-      const amountPerPeriod = 100_000n;
-      const periodLengthS = BigInt(ONE_DAY_IN_SECONDS);
-      const startTs = BigInt(Math.floor(Date.now() / 1000));
-      const expiryTs = BigInt(
-        Math.floor(Date.now() / 1000) + ONE_DAY_IN_SECONDS * 30,
-      );
-
-      const { delegationAccount } = await createRecurringDelegationWithWallet(
-        wallet,
-        testSuite.tokenMint,
-        delegatee.address,
-        nonce,
-        amountPerPeriod,
-        periodLengthS,
-        startTs,
-        expiryTs,
-      );
-
-      const delegation = await fetchRecurringDelegation(
-        testSuite.rpc,
-        delegationAccount,
-      );
-      expect(delegation.data.expiryTs).toBe(expiryTs);
-      expect(delegation.data.periodLengthS).toBe(periodLengthS);
-      expect(delegation.data.currentPeriodStartTs).toBe(startTs);
-      expect(delegation.data.amountPerPeriod).toBe(amountPerPeriod);
-      expect(delegation.data.amountPulledInPeriod).toBe(0n);
-    }
+    const delegation = await fetchRecurringDelegation(
+      testSuite.rpc,
+      delegationAccount,
+    );
+    expect(delegation.data.expiryTs).toBe(expiryTs);
+    expect(delegation.data.periodLengthS).toBe(periodLengthS);
+    expect(delegation.data.currentPeriodStartTs).toBe(startTs);
+    expect(delegation.data.amountPerPeriod).toBe(amountPerPeriod);
+    expect(delegation.data.amountPulledInPeriod).toBe(0n);
   }, 15000);
 
-  test('revoke recurring delegation via smart wallets', async () => {
-    const testSuite = await initTestSuite();
-    const wallets = await testSuite.createSmartWallets();
+  test('revoke recurring delegation', async () => {
+    const { testSuite, wallet } = await initWalletContext(name);
 
-    for (const wallet of wallets) {
-      const userAta = await testSuite.createAtaWithBalance(
-        testSuite.tokenMint,
-        wallet.address,
-        DEFAULT_TEST_BALANCE,
-      );
+    const delegatee = await generateKeyPairSigner();
+    const { delegationAccount } = await createRecurringDelegationWithWallet(
+      wallet,
+      testSuite.tokenMint,
+      delegatee.address,
+      0n,
+      100_000n,
+      BigInt(ONE_DAY_IN_SECONDS),
+      BigInt(Math.floor(Date.now() / 1000)),
+      BigInt(Math.floor(Date.now() / 1000) + ONE_DAY_IN_SECONDS * 30),
+    );
 
-      await initMultiDelegateWithWallet(wallet, testSuite.tokenMint, userAta);
+    await revokeDelegationWithWallet(wallet, delegationAccount);
 
-      const delegatee = await generateKeyPairSigner();
-      const { delegationAccount } = await createRecurringDelegationWithWallet(
-        wallet,
-        testSuite.tokenMint,
-        delegatee.address,
-        0n,
-        100_000n,
-        BigInt(ONE_DAY_IN_SECONDS),
-        BigInt(Math.floor(Date.now() / 1000)),
-        BigInt(Math.floor(Date.now() / 1000) + ONE_DAY_IN_SECONDS * 30),
-      );
-
-      await revokeDelegationWithWallet(wallet, delegationAccount);
-
-      expect(
-        fetchRecurringDelegation(testSuite.rpc, delegationAccount),
-      ).rejects.toThrow();
-    }
+    expect(
+      fetchRecurringDelegation(testSuite.rpc, delegationAccount),
+    ).rejects.toThrow();
   }, 15000);
 
-  test('transfer recurring delegation via smart wallets', async () => {
-    const testSuite = await initTestSuite();
-    const wallets = await testSuite.createSmartWallets();
+  test('transfer recurring delegation', async () => {
+    const { testSuite, wallet, userAta } = await initWalletContext(name);
 
-    for (const wallet of wallets) {
-      const userAta = await testSuite.createAtaWithBalance(
-        testSuite.tokenMint,
-        wallet.address,
-        DEFAULT_TEST_BALANCE,
-      );
+    const delegatee = await testSuite.createFundedKeypair();
+    const nonce = 0n;
+    const amountPerPeriod = 100_000n;
+    const periodLengthS = BigInt(ONE_DAY_IN_SECONDS);
+    const startTs = BigInt(Math.floor(Date.now() / 1000));
+    const expiryTs = BigInt(
+      Math.floor(Date.now() / 1000) + ONE_DAY_IN_SECONDS * 30,
+    );
 
-      await initMultiDelegateWithWallet(wallet, testSuite.tokenMint, userAta);
+    const { delegationAccount } = await createRecurringDelegationWithWallet(
+      wallet,
+      testSuite.tokenMint,
+      delegatee.address,
+      nonce,
+      amountPerPeriod,
+      periodLengthS,
+      startTs,
+      expiryTs,
+    );
 
-      const delegatee = await testSuite.createFundedKeypair();
-      const nonce = 0n;
-      const amountPerPeriod = 100_000n;
-      const periodLengthS = BigInt(ONE_DAY_IN_SECONDS);
-      const startTs = BigInt(Math.floor(Date.now() / 1000));
-      const expiryTs = BigInt(
-        Math.floor(Date.now() / 1000) + ONE_DAY_IN_SECONDS * 30,
-      );
+    const delegateeAta = await testSuite.createAtaWithBalance(
+      testSuite.tokenMint,
+      delegatee.address,
+      0n,
+    );
 
-      const { delegationAccount } = await createRecurringDelegationWithWallet(
-        wallet,
-        testSuite.tokenMint,
-        delegatee.address,
-        nonce,
-        amountPerPeriod,
-        periodLengthS,
-        startTs,
-        expiryTs,
-      );
+    const transferAmount = 50_000n;
+    const result = await testSuite.client.transferRecurring(
+      delegatee,
+      wallet.address,
+      userAta,
+      testSuite.tokenMint,
+      delegationAccount,
+      transferAmount,
+      delegateeAta,
+    );
 
-      const delegateeAta = await testSuite.createAtaWithBalance(
-        testSuite.tokenMint,
-        delegatee.address,
-        0n,
-      );
+    expect(result.signature).toBeDefined();
 
-      const transferAmount = 50_000n;
-      const result = await testSuite.client.transferRecurring(
-        delegatee,
-        wallet.address,
-        userAta,
-        testSuite.tokenMint,
-        delegationAccount,
-        transferAmount,
-        delegateeAta,
-      );
+    const balance = await testSuite.rpc
+      .getTokenAccountBalance(delegateeAta)
+      .send();
+    expect(balance.value.amount).toBe(transferAmount.toString());
 
-      expect(result.signature).toBeDefined();
-
-      const balance = await testSuite.rpc
-        .getTokenAccountBalance(delegateeAta)
-        .send();
-      expect(balance.value.amount).toBe(transferAmount.toString());
-
-      const delegationAccountInfo = await fetchRecurringDelegation(
-        testSuite.rpc,
-        delegationAccount,
-      );
-      expect(delegationAccountInfo.data.amountPulledInPeriod).toBe(
-        transferAmount,
-      );
-    }
+    const delegationAccountInfo = await fetchRecurringDelegation(
+      testSuite.rpc,
+      delegationAccount,
+    );
+    expect(delegationAccountInfo.data.amountPulledInPeriod).toBe(
+      transferAmount,
+    );
   }, 15000);
 });

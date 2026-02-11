@@ -21,7 +21,11 @@ import {
   signTransactionMessageWithSigners,
 } from 'gill';
 import { MultiDelegatorClient } from '../src/client.js';
-import { createSmartWallets, type SmartWallet } from './smart-wallets/index.ts';
+import {
+  createSmartWallets as createAdapterSmartWallets,
+  type SmartWallet,
+  type SmartWalletChoice,
+} from './smart-wallets/index.ts';
 
 export const SURFPOOL_PORT = 8899;
 export const SURFPOOL_RPC_URL = `http://127.0.0.1:${SURFPOOL_PORT}`;
@@ -30,6 +34,39 @@ export const ONE_HOUR_IN_SECONDS = 3600;
 export const ONE_DAY_IN_SECONDS = 86400;
 
 type SolanaClient = ReturnType<typeof createSolanaClient>;
+export type SmartWalletName = 'swig' | 'squads';
+
+function normalizeSmartWalletChoice(rawChoice: string): SmartWalletChoice {
+  const normalized = rawChoice.toLowerCase();
+  if (
+    normalized === 'swig' ||
+    normalized === 'squads' ||
+    normalized === 'all'
+  ) {
+    return normalized;
+  }
+  throw new Error(
+    `Invalid SMART_WALLET value: ${rawChoice}. Use swig, squads, or all.`,
+  );
+}
+
+export function getSmartWalletList(): SmartWalletName[] {
+  const choice = normalizeSmartWalletChoice(process.env.SMART_WALLET ?? 'all');
+  if (choice === 'all') {
+    return ['squads', 'swig'];
+  }
+  return [choice];
+}
+
+// Backward-compatible alias for requested naming.
+export const getSmartWalletlist = getSmartWalletList;
+
+export async function getSmartWallet(
+  testSuite: IntegrationTest,
+  name: SmartWalletName | 'squad',
+): Promise<SmartWallet> {
+  return testSuite.getSmartWallet(name);
+}
 
 /**
  * IntegrationTest class that provides test fixtures and helper methods
@@ -49,6 +86,7 @@ export class IntegrationTest {
   public readonly tokenMint: Address;
 
   private solanaClient: SolanaClient;
+  private readonly smartWalletsByName = new Map<SmartWalletName, SmartWallet>();
 
   private constructor(
     solanaClient: SolanaClient,
@@ -124,18 +162,50 @@ export class IntegrationTest {
     await airdropToAddress(this.solanaClient, address, lamportsAmount);
   }
 
-  async createSmartWallets(): Promise<SmartWallet[]> {
-    const rawChoice = (process.env.SMART_WALLET ?? 'both').toLowerCase();
-    if (!['swig', 'squads', 'both'].includes(rawChoice)) {
-      throw new Error(
-        `Invalid SMART_WALLET value: ${rawChoice}. Use swig, squads, or both.`,
-      );
+  private async ensureSmartWalletsInitialized(): Promise<void> {
+    if (this.smartWalletsByName.size > 0) {
+      return;
     }
-    return createSmartWallets({
+
+    const wallets = await createAdapterSmartWallets({
       rpcUrl: SURFPOOL_RPC_URL,
-      choice: rawChoice as 'swig' | 'squads' | 'both',
+      choice: normalizeSmartWalletChoice(process.env.SMART_WALLET ?? 'all'),
       airdrop: (address, lamportsAmount) =>
         this.airdropToAddress(address, lamportsAmount),
+    });
+
+    wallets.forEach((wallet) => {
+      if (wallet.name === 'swig' || wallet.name === 'squads') {
+        this.smartWalletsByName.set(wallet.name, wallet);
+      }
+    });
+  }
+
+  async getSmartWallet(name: SmartWalletName | 'squad'): Promise<SmartWallet> {
+    const normalizedName: SmartWalletName = name === 'squad' ? 'squads' : name;
+    const requestedWallets = getSmartWalletList();
+    if (!requestedWallets.includes(normalizedName)) {
+      throw new Error(
+        `Wallet "${normalizedName}" is not enabled. Selected wallets: ${requestedWallets.join(', ')}`,
+      );
+    }
+
+    await this.ensureSmartWalletsInitialized();
+    const wallet = this.smartWalletsByName.get(normalizedName);
+    if (!wallet) {
+      throw new Error(`Smart wallet "${normalizedName}" was not created.`);
+    }
+    return wallet;
+  }
+
+  async createSmartWallets(): Promise<SmartWallet[]> {
+    await this.ensureSmartWalletsInitialized();
+    return getSmartWalletList().map((name) => {
+      const wallet = this.smartWalletsByName.get(name);
+      if (!wallet) {
+        throw new Error(`Smart wallet "${name}" was not created.`);
+      }
+      return wallet;
     });
   }
 }
