@@ -23,11 +23,7 @@
   },
   "dependencies": {
     "@solana/kit": "latest",
-    "@solana/web3.js": "^1.98.4",
-    "@sqds/multisig": "^2.1.4",
-    "@swig-wallet/kit": "^1.5.0",
-    "gill": "^0.14.0",
-    "tweetnacl": "^1.0.3"
+    "gill": "^0.14.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.13",
@@ -36,6 +32,9 @@
     "typescript": "^5.7.0",
     "@types/node": "^25.0.10",
     "@solana-program/system": "latest",
-    "@solana-program/token": "latest"
+    "@solana-program/token": "latest",
+    "@sqds/multisig": "^2.1.4",
+    "@swig-wallet/kit": "^1.5.0",
+    "tweetnacl": "^1.0.3"
   }
 }

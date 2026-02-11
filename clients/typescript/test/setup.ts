@@ -1,4 +1,3 @@
-import { Connection, Keypair as Web3Keypair } from '@solana/web3.js';
 import { getCreateAccountInstruction } from '@solana-program/system';
 import {
   findAssociatedTokenPda,
@@ -22,11 +21,7 @@ import {
   signTransactionMessageWithSigners,
 } from 'gill';
 import { MultiDelegatorClient } from '../src/client.js';
-import {
-  createSquadsWallet,
-  createSwigWallet,
-  type SmartWallet,
-} from './smart-wallets/index.ts';
+import { createSmartWallets, type SmartWallet } from './smart-wallets/index.ts';
 
 export const SURFPOOL_PORT = 8899;
 export const SURFPOOL_RPC_URL = `http://127.0.0.1:${SURFPOOL_PORT}`;
@@ -136,63 +131,12 @@ export class IntegrationTest {
         `Invalid SMART_WALLET value: ${rawChoice}. Use swig, squads, or both.`,
       );
     }
-    const choice = rawChoice as 'swig' | 'squads' | 'both';
-
-    const connection = new Connection(SURFPOOL_RPC_URL, 'confirmed');
-    const wallets: SmartWallet[] = [];
-
-    if (choice === 'swig' || choice === 'both') {
-      const swigFeePayer = Web3Keypair.generate();
-      const swigAuthority = Web3Keypair.generate();
-      await this.airdropToAddress(
-        swigFeePayer.publicKey.toBase58() as Address,
-        2_000_000_000n,
-      );
-      await this.airdropToAddress(
-        swigAuthority.publicKey.toBase58() as Address,
-        2_000_000_000n,
-      );
-      const swigWallet = await createSwigWallet({
-        connection,
-        feePayer: swigFeePayer,
-        authority: swigAuthority,
-      });
-      await this.airdropToAddress(swigWallet.address, 5_000_000_000n);
-      wallets.push(swigWallet);
-    }
-
-    if (choice === 'squads' || choice === 'both') {
-      const squadsMembers = [
-        Web3Keypair.generate(),
-        Web3Keypair.generate(),
-        Web3Keypair.generate(),
-      ];
-      const squadsFeePayer = squadsMembers[0];
-      await this.airdropToAddress(
-        squadsFeePayer.publicKey.toBase58() as Address,
-        2_000_000_000n,
-      );
-      for (const member of squadsMembers.slice(1)) {
-        await this.airdropToAddress(
-          member.publicKey.toBase58() as Address,
-          1_000_000_000n,
-        );
-      }
-      const squadsWallet = await createSquadsWallet({
-        connection,
-        feePayer: squadsFeePayer,
-        members: squadsMembers,
-        approvalsRequired: 2,
-      });
-      await this.airdropToAddress(squadsWallet.address, 5_000_000_000n);
-      wallets.push(squadsWallet);
-    }
-
-    if (wallets.length === 0) {
-      throw new Error('No smart wallets were created.');
-    }
-
-    return wallets;
+    return createSmartWallets({
+      rpcUrl: SURFPOOL_RPC_URL,
+      choice: rawChoice as 'swig' | 'squads' | 'both',
+      airdrop: (address, lamportsAmount) =>
+        this.airdropToAddress(address, lamportsAmount),
+    });
   }
 }
 
