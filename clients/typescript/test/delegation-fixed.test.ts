@@ -1,5 +1,5 @@
-import { describe, expect, test } from 'bun:test';
 import { generateKeyPairSigner } from 'gill';
+import { describe, expect, test } from 'vitest';
 import { fetchFixedDelegation } from '../src/generated/index.ts';
 import { getDelegationPDA, getMultiDelegatePDA } from '../src/pdas.ts';
 import {
@@ -22,6 +22,7 @@ describe('MultiDelegator Fixed Delegation Tests', () => {
       testSuite.payer,
       testSuite.tokenMint,
       userAta,
+      testSuite.tokenProgram,
     );
 
     const delegatee = await generateKeyPairSigner();
@@ -76,6 +77,7 @@ describe('MultiDelegator Fixed Delegation Tests', () => {
       testSuite.payer,
       testSuite.tokenMint,
       userAta,
+      testSuite.tokenProgram,
     );
 
     const delegatee = await generateKeyPairSigner();
@@ -119,7 +121,7 @@ describe('MultiDelegator Fixed Delegation Tests', () => {
 
     expect(result.signature).toBeDefined();
 
-    expect(
+    await expect(
       fetchFixedDelegation(testSuite.rpc, delegationPda),
     ).rejects.toThrow();
 
@@ -147,6 +149,7 @@ describe('MultiDelegator Fixed Delegation Tests', () => {
       testSuite.payer,
       testSuite.tokenMint,
       userAta,
+      testSuite.tokenProgram,
     );
 
     const delegatee = await testSuite.createFundedKeypair();
@@ -191,6 +194,7 @@ describe('MultiDelegator Fixed Delegation Tests', () => {
       delegationPda,
       transferAmount,
       delegateeAta,
+      testSuite.tokenProgram,
     );
 
     expect(result.signature).toBeDefined();

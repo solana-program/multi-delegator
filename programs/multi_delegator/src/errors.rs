@@ -44,6 +44,7 @@ impl TryFrom<u32> for MultiDelegatorError {
             28 => Ok(Self::ArithmeticOverflow),
             29 => Ok(Self::InvalidPeriodLength),
             30 => Ok(Self::InvalidPayerData),
+            31 => Ok(Self::ArithmeticUnderflow),
             _ => Err(code),
         }
     }
@@ -113,4 +114,6 @@ pub enum MultiDelegatorError {
     InvalidPeriodLength,
     #[error("Payer provided does not match delegation")]
     InvalidPayerData,
+    #[error("Arithmetic Underflow")]
+    ArithmeticUnderflow,
 }

@@ -49,7 +49,10 @@ pub fn process(accounts: &[AccountInfo], transfer: &TransferData) -> ProgramResu
             return Err(MultiDelegatorError::AmountExceedsLimit.into());
         }
 
-        delegation.amount -= transfer.amount;
+        delegation.amount = delegation
+            .amount
+            .checked_sub(transfer.amount)
+            .ok_or(MultiDelegatorError::ArithmeticUnderflow)?;
     }
 
     transfer_with_delegate(

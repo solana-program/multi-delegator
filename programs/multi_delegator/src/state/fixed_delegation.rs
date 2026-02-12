@@ -1,11 +1,11 @@
+use codama::CodamaAccount;
 use core::mem::{size_of, transmute};
 use pinocchio::program_error::ProgramError;
-use shank::ShankAccount;
 
 use crate::{Header, MultiDelegatorError};
 
 #[repr(C, packed)]
-#[derive(Debug, ShankAccount)]
+#[derive(Debug, CodamaAccount)]
 pub struct FixedDelegation {
     pub header: Header,
     pub amount: u64,

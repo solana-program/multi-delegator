@@ -202,7 +202,7 @@ Generated bindings are produced by Codama and are gitignored in this repository 
 To regenerate from the repo root:
 
 ```bash
-make generate-client
+just generate-client
 ```
 
 Or directly:

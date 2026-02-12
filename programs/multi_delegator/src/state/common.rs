@@ -1,6 +1,6 @@
+use codama::CodamaType;
 use pinocchio::program_error::ProgramError;
 use pinocchio::pubkey::{create_program_address, find_program_address, Pubkey};
-use shank::ShankType;
 
 use crate::MultiDelegatorError;
 
@@ -46,7 +46,7 @@ pub fn find_delegation_pda(
 }
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Debug, ShankType)]
+#[derive(Clone, Copy, PartialEq, Debug, CodamaType)]
 pub enum DelegationKind {
     Fixed = 0,
     Recurring = 1,

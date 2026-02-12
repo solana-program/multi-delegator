@@ -1,6 +1,6 @@
+use codama::CodamaType;
 use core::mem::{size_of, transmute};
-use pinocchio::{account_info::AccountInfo, msg, program_error::ProgramError, ProgramResult};
-use shank::ShankType;
+use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramResult};
 
 use crate::{
     create_delegation_account, init_header, state::FixedDelegation, CreateDelegationAccounts,
@@ -8,7 +8,7 @@ use crate::{
 };
 
 #[repr(C, packed)]
-#[derive(Debug, Clone, ShankType)]
+#[derive(Debug, Clone, CodamaType)]
 pub struct CreateFixedDelegationData {
     pub nonce: u64,
     pub amount: u64,
@@ -20,11 +20,6 @@ impl CreateFixedDelegationData {
 
     pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
         if data.len() != Self::LEN {
-            msg!(&format!(
-                "Data.len() = {}. Expected = {}",
-                data.len(),
-                Self::LEN
-            ));
             return Err(MultiDelegatorError::InvalidInstructionData.into());
         }
         Ok(unsafe { &*transmute::<*const u8, *const Self>(data.as_ptr()) })

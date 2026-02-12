@@ -47,7 +47,11 @@ impl ProgramAccountInit for ProgramAccount {
 impl AccountClose for ProgramAccount {
     fn close(account: &AccountInfo, destination: &AccountInfo) -> ProgramResult {
         let lamports = *account.try_borrow_lamports()?;
-        *destination.try_borrow_mut_lamports()? += lamports;
+        let destination_lamports = *destination.try_borrow_lamports()?;
+        let new_balance = destination_lamports
+            .checked_add(lamports)
+            .ok_or(crate::MultiDelegatorError::ArithmeticOverflow)?;
+        *destination.try_borrow_mut_lamports()? = new_balance;
         account.resize(0)?;
         account.close()
     }

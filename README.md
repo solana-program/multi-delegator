@@ -39,7 +39,7 @@ multi-delegator/
 ├── scripts/                       # Validator / full-stack launcher scripts
 ├── docs/                          # Architecture docs
 ├── runbooks/                      # Deployment runbooks
-├── Makefile                       # Build/test/dev task entrypoint
+├── justfile                       # Build/test/dev task entrypoint
 └── codama.js                      # Codama generation config
 ```
 
@@ -48,25 +48,25 @@ multi-delegator/
 ```bash
 git clone git@github.com:Moonsong-Labs/multi-delegator.git
 cd multi-delegator
-make setup
+just setup
 
-# If missing, create the local development keypair expected by the Makefile
+# If missing, create the local development keypair expected by the justfile
 mkdir -p keys
 [ -f keys/multi_delegator-keypair.json ] || solana-keygen new --no-bip39-passphrase -o keys/multi_delegator-keypair.json
 
-make build
-make test-program
+just build
+just test-program
 ```
 
 For the full suite (program + client tests):
 
 ```bash
-make test
+just test
 ```
 
 ## Prerequisites
 
-`make setup` checks for these tools: `bun`, `cargo`, `shank`, `solana-keygen`, and `surfpool`.
+`just setup` checks for these tools: `bun`, `cargo`, `pnpm`, `solana-keygen`, and `surfpool`.
 
 Install the toolchain:
 
@@ -78,13 +78,13 @@ Install the toolchain:
    ```bash
    sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
    ```
-3. Bun
+3. Pnpm
    ```bash
-   curl -fsSL https://bun.sh/install | bash
+   curl -fsSL https://get.pnpm.io/install.sh | sh -
    ```
-4. Shank CLI
+4. Just
    ```bash
-   cargo install shank-cli
+   curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to ~/.local/bin
    ```
 5. Surfpool CLI
    ```bash
@@ -94,9 +94,9 @@ Install the toolchain:
 
 ## Keypair and Program ID
 
-Local workflows use `keys/multi_delegator-keypair.json` as the source keypair for deployment artifacts and program ID derivation in the `Makefile`.
+Local workflows use `keys/multi_delegator-keypair.json` as the source keypair for deployment artifacts and program ID derivation in the `justfile`.
 
-- If the file exists, `make build` and validator scripts reuse it.
+- If the file exists, `just build` and validator scripts reuse it.
 - If the file is missing, generate it before build/test commands:
 
 ```bash
@@ -104,28 +104,28 @@ mkdir -p keys
 solana-keygen new --no-bip39-passphrase -o keys/multi_delegator-keypair.json
 ```
 
-The keypair is automatically copied into the deploy directory when you run `make build` or `make build-program`.
+The keypair is automatically copied into the deploy directory when you run `just build` or `just build-program`.
 
 ## Build and Test
 
-The `Makefile` is the main entrypoint for day-to-day development.
+The `justfile` is the main entrypoint for day-to-day development.
 
-- `make build` builds program, clients, and webapp
-- `make build-program` compiles the SBF program
-- `make generate-idl` regenerates `programs/multi_delegator/idl/multi_delegator.json`
-- `make generate-client` regenerates clients from IDL via Codama
-- `make build-client` builds `clients/typescript` into `clients/typescript/dist`
-- `make test-program` runs Rust SBF tests (`cargo test-sbf`)
-- `make test-client` runs TypeScript integration tests (`bun test`)
-- `make test` runs setup + program + client tests
-- `make fmt-check` and `make lint-check` run formatting/lint checks
+- `just build` builds program, clients, and webapp
+- `just build-program` compiles the SBF program
+- `just generate-idl` regenerates `programs/multi_delegator/idl/multi_delegator.json`
+- `just generate-client` regenerates clients from IDL via Codama
+- `just build-client` builds `clients/typescript` into `clients/typescript/dist`
+- `just test-program` runs Rust SBF tests (`cargo test-sbf`)
+- `just test-client` runs TypeScript integration tests (`bun test`)
+- `just test` runs setup + program + client tests
+- `just fmt-check` and `just lint-check` run formatting/lint checks
 
 ### Validator Modes
 
 Two local validator flows are used in this repo:
 
-- `make test-client` uses `surfpool` (auto-start via `ensure-surfpool` in `Makefile`)
-- `make webapp` uses `solana-test-validator` (via `scripts/start-webapp.sh`)
+- `just test-client` uses `surfpool` (auto-start via `ensure-surfpool` in `justfile`)
+- `just webapp` uses `solana-test-validator` (via `scripts/start-webapp.sh`)
 
 Both default to `http://localhost:8899`, but they are started by different tooling.
 
@@ -134,8 +134,8 @@ Both default to `http://localhost:8899`, but they are started by different tooli
 The demo app in `webapp/` provides a local UI + local API for development flows (including faucet utilities).
 
 ```bash
-make build          # builds program, clients, and webapp (includes npm install)
-make webapp         # starts validator + init + API + web UI
+just build          # builds program, clients, and webapp (includes npm install)
+just webapp         # starts validator + init + API + web UI
 ```
 
 Expected local endpoints:
@@ -147,5 +147,5 @@ Expected local endpoints:
 Stop local validators:
 
 ```bash
-make kill-validator
+just kill-validator
 ```

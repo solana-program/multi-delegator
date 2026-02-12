@@ -42,17 +42,32 @@ pub fn process(accounts: &[AccountInfo], transfer_data: &TransferData) -> Progra
         let period_length = delegation_mut.period_length_s as i64;
 
         if time_since_start >= period_length {
+            if period_length == 0 {
+                return Err(MultiDelegatorError::InvalidPeriodLength.into());
+            }
             let periods_passed = time_since_start / period_length;
-            delegation_mut.current_period_start_ts += periods_passed * period_length;
+            let increment = periods_passed
+                .checked_mul(period_length)
+                .ok_or(MultiDelegatorError::ArithmeticOverflow)?;
+            delegation_mut.current_period_start_ts = delegation_mut
+                .current_period_start_ts
+                .checked_add(increment)
+                .ok_or(MultiDelegatorError::ArithmeticOverflow)?;
             delegation_mut.amount_pulled_in_period = 0;
         }
 
-        let available = delegation_mut.amount_per_period - delegation_mut.amount_pulled_in_period;
+        let available = delegation_mut
+            .amount_per_period
+            .checked_sub(delegation_mut.amount_pulled_in_period)
+            .ok_or(MultiDelegatorError::ArithmeticUnderflow)?;
         if transfer_data.amount > available {
             return Err(MultiDelegatorError::AmountExceedsPeriodLimit.into());
         }
 
-        delegation_mut.amount_pulled_in_period += transfer_data.amount;
+        delegation_mut.amount_pulled_in_period = delegation_mut
+            .amount_pulled_in_period
+            .checked_add(transfer_data.amount)
+            .ok_or(MultiDelegatorError::ArithmeticOverflow)?;
     }
 
     transfer_with_delegate(

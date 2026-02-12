@@ -24,7 +24,7 @@ Web interface for managing Solana token delegations (USDC). Connects to the Mult
 | `npm run lint` | Run ESLint across the project |
 | `npm run preview` | Preview the production build locally |
 
-From the project root, `make webapp` builds the program and clients, starts a local validator + API, and launches the webapp.
+From the project root, `just webapp` builds the program and clients, starts a local validator + API, and launches the webapp.
 
 ## Tech Stack
 

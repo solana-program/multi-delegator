@@ -26,10 +26,10 @@ check_program_so() {
   if [ ! -f "$PROGRAM_SO" ]; then
     if [ "$build_if_missing" = true ]; then
       echo -e "${YELLOW}Program SO file not found. Building...${NC}"
-      make build-program
+      just build-program
     else
       echo -e "${YELLOW}Warning: Program SO file not found: $PROGRAM_SO${NC}"
-      echo -e "${YELLOW}Run 'make build-program' first to build the program.${NC}"
+      echo -e "${YELLOW}Run 'just build-program' first to build the program.${NC}"
       exit 1
     fi
   fi

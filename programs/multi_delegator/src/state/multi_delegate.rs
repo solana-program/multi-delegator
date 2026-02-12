@@ -1,14 +1,14 @@
+use codama::CodamaAccount;
 use core::mem::{size_of, transmute};
 use pinocchio::{
     program_error::ProgramError,
     pubkey::{create_program_address, find_program_address, Pubkey},
 };
-use shank::ShankAccount;
 
 use crate::MultiDelegatorError;
 
 #[repr(C)]
-#[derive(ShankAccount)]
+#[derive(CodamaAccount)]
 pub struct MultiDelegate {
     pub user: Pubkey,
     pub token_mint: Pubkey,

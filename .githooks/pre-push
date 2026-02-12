@@ -2,17 +2,17 @@
 
 # Run format check
 echo "Running format check..."
-make fmt-check
+just fmt-check
 if [ $? -ne 0 ]; then
-    echo "Error: Format check failed. Please run 'make fmt' to fix formatting issues."
+    echo "Error: Format check failed. Please run 'just fmt' to fix formatting issues."
     exit 1
 fi
 
 # Run lint check
 echo "Running lint check..."
-make lint-check
+just lint-check
 if [ $? -ne 0 ]; then
-    echo "Error: Lint check failed. Please run 'make lint' to fix linting issues."
+    echo "Error: Lint check failed. Please run 'just lint' to fix linting issues."
     exit 1
 fi
 

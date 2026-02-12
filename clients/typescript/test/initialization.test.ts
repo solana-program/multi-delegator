@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { fetchMultiDelegate } from '../src/generated/index.ts';
 import { getMultiDelegatePDA } from '../src/pdas.ts';
 import { DEFAULT_TEST_BALANCE, initTestSuite } from './setup.ts';
@@ -17,6 +17,7 @@ describe('MultiDelegator Initialization Tests', () => {
       testSuite.payer,
       testSuite.tokenMint,
       userAta,
+      testSuite.tokenProgram,
     );
 
     expect(result.signature).toBeDefined();

@@ -39,47 +39,53 @@ jobs:
           mkdir -p ~/.config/solana
           solana-keygen new --no-bip39-passphrase -o ~/.config/solana/id.json
 
-      - name: Install shank-cli
-        run: command -v shank || cargo install shank-cli
-
-      - name: Install Bun
-        uses: oven-sh/setup-bun@v1
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
         with:
-          bun-version: latest
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
 
       - name: Install surfpool
         run: curl -sL https://run.surfpool.run/ | bash
 
-      - name: Restore Bun cache
-        id: restore-bun
+      - name: Install Just
+        run: curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to ~/.local/bin
+
+      - name: Restore pnpm cache
+        id: restore-pnpm
         uses: actions/cache/restore@v4
         with:
           path: |
-            client/node_modules
-            ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('client/package.json') }}
-          restore-keys: ${{ runner.os }}-bun-
+            clients/typescript/node_modules
+            ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
 
       - name: Install dependencies
-        run: make setup
+        run: just setup
 
       - name: Check formatting
-        run: make fmt-check
+        run: just fmt-check
 
       - name: Check Linting
-        run: make lint-check
+        run: just lint-check
 
       - name: Build program
-        run: make build-program
+        run: just build-program
 
       - name: Build client
-        run: make build-client
+        run: just build-client
 
       - name: Test program
-        run: make test-program
+        run: just test-program
 
       - name: Test client
-        run: make test-client
+        run: just test-client
 
       - name: Save Cargo cache
         uses: actions/cache/save@v4
@@ -92,15 +98,15 @@ jobs:
             programs/multi_delegator/target
           key: ${{ runner.os }}-cargo-${{ hashFiles('programs/multi_delegator/Cargo.toml') }}
 
-      - name: Save Bun cache
+      - name: Save pnpm cache
         uses: actions/cache/save@v4
-        if: always() && steps.restore-bun.outputs.cache-hit != 'true'
+        if: always() && steps.restore-pnpm.outputs.cache-hit != 'true'
         with:
           path: |
-            client/node_modules
-            ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('client/package.json') }}
+            clients/typescript/node_modules
+            ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Kill surfpool validator
         if: always()
-        run: make kill-validator
+        run: just kill-validator

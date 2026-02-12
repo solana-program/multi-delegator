@@ -1,5 +1,6 @@
 import type {
   Address,
+  Base58EncodedBytes,
   GetAccountInfoApi,
   GetLatestBlockhashApi,
   GetProgramAccountsApi,
@@ -68,7 +69,7 @@ export class MultiDelegatorClient {
     owner: TransactionSigner,
     tokenMint: Address,
     userAta: Address,
-    tokenProgram?: Address,
+    tokenProgram: Address,
   ): Promise<{ signature: string }> {
     const user = owner.address;
     const [multiDelegate] = await getMultiDelegatePDA(user, tokenMint);
@@ -107,9 +108,11 @@ export class MultiDelegatorClient {
       multiDelegate,
       delegationAccount,
       delegatee,
-      nonce,
-      amount,
-      expiryTs,
+      fixedDelegation: {
+        nonce,
+        amount,
+        expiryTs,
+      },
     });
 
     const sig = await this.buildAndSendTransaction([instruction], [delegator]);
@@ -140,11 +143,13 @@ export class MultiDelegatorClient {
       multiDelegate,
       delegationAccount,
       delegatee,
-      nonce,
-      amountPerPeriod,
-      periodLengthS,
-      startTs,
-      expiryTs,
+      recurringDelegation: {
+        nonce,
+        amountPerPeriod,
+        periodLengthS,
+        startTs,
+        expiryTs,
+      },
     });
 
     const sig = await this.buildAndSendTransaction([instruction], [delegator]);
@@ -173,6 +178,7 @@ export class MultiDelegatorClient {
     delegationPda: Address,
     amount: number | bigint,
     receiverAta: Address,
+    tokenProgram: Address,
   ): Promise<{ signature: string }> {
     const [multiDelegate] = await getMultiDelegatePDA(delegator, tokenMint);
 
@@ -181,6 +187,7 @@ export class MultiDelegatorClient {
       multiDelegate,
       delegatorAta,
       receiverAta,
+      tokenProgram,
       delegatee,
       transferData: {
         amount,
@@ -206,6 +213,7 @@ export class MultiDelegatorClient {
     delegationPda: Address,
     amount: number | bigint,
     receiverAta: Address,
+    tokenProgram: Address,
   ): Promise<{ signature: string }> {
     return this.transfer(
       'fixed',
@@ -216,6 +224,7 @@ export class MultiDelegatorClient {
       delegationPda,
       amount,
       receiverAta,
+      tokenProgram,
     );
   }
 
@@ -227,6 +236,7 @@ export class MultiDelegatorClient {
     delegationPda: Address,
     amount: number | bigint,
     receiverAta: Address,
+    tokenProgram: Address,
   ): Promise<{ signature: string }> {
     return this.transfer(
       'recurring',
@@ -237,6 +247,7 @@ export class MultiDelegatorClient {
       delegationPda,
       amount,
       receiverAta,
+      tokenProgram,
     );
   }
 
@@ -248,8 +259,7 @@ export class MultiDelegatorClient {
           {
             memcmp: {
               offset: BigInt(DELEGATOR_OFFSET),
-              bytes:
-                wallet as unknown as import('@solana/rpc-types').Base58EncodedBytes,
+              bytes: wallet as string as Base58EncodedBytes,
               encoding: 'base58',
             },
           },

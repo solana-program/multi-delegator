@@ -1,6 +1,6 @@
-import { describe, expect, test } from 'bun:test';
 import type { Address, TransactionSigner } from 'gill';
 import { generateKeyPairSigner } from 'gill';
+import { describe, expect, test } from 'vitest';
 import {
   fetchFixedDelegation,
   fetchRecurringDelegation,
@@ -27,6 +27,7 @@ const asSigner = (address: Address) =>
 async function initMultiDelegateWithWallet(
   wallet: SmartWallet,
   tokenMint: Address,
+  tokenProgram: Address,
   userAta: Address,
 ) {
   const [multiDelegate] = await getMultiDelegatePDA(wallet.address, tokenMint);
@@ -34,6 +35,7 @@ async function initMultiDelegateWithWallet(
     owner: asSigner(wallet.address),
     multiDelegate,
     tokenMint,
+    tokenProgram,
     userAta,
   });
   await wallet.sendInstructions([instruction]);
@@ -60,9 +62,11 @@ async function createFixedDelegationWithWallet(
     multiDelegate,
     delegationAccount,
     delegatee,
-    nonce,
-    amount,
-    expiryTs,
+    fixedDelegation: {
+      nonce,
+      amount,
+      expiryTs,
+    },
   });
   await wallet.sendInstructions([instruction]);
   return { multiDelegate, delegationAccount };
@@ -90,11 +94,13 @@ async function createRecurringDelegationWithWallet(
     multiDelegate,
     delegationAccount,
     delegatee,
-    nonce,
-    amountPerPeriod,
-    periodLengthS,
-    startTs,
-    expiryTs,
+    recurringDelegation: {
+      nonce,
+      amountPerPeriod,
+      periodLengthS,
+      startTs,
+      expiryTs,
+    },
   });
   await wallet.sendInstructions([instruction]);
   return { multiDelegate, delegationAccount };
@@ -119,7 +125,12 @@ async function initWalletContext(walletName: SmartWalletName) {
     wallet.address,
     DEFAULT_TEST_BALANCE,
   );
-  await initMultiDelegateWithWallet(wallet, testSuite.tokenMint, userAta);
+  await initMultiDelegateWithWallet(
+    wallet,
+    testSuite.tokenMint,
+    testSuite.tokenProgram,
+    userAta,
+  );
   return { testSuite, wallet, userAta };
 }
 
@@ -151,7 +162,7 @@ describe.each(wallets)('wallet $name tests', ({ name }) => {
     );
     expect(delegation.data.amount).toBe(amount);
     expect(delegation.data.expiryTs).toBe(expiryTs);
-  }, 15000);
+  });
 
   test('revoke fixed delegation', async () => {
     const { testSuite, wallet } = await initWalletContext(name);
@@ -172,7 +183,7 @@ describe.each(wallets)('wallet $name tests', ({ name }) => {
 
     await revokeDelegationWithWallet(wallet, delegationAccount);
 
-    expect(
+    await expect(
       fetchFixedDelegation(testSuite.rpc, delegationAccount),
     ).rejects.toThrow();
 
@@ -182,7 +193,7 @@ describe.each(wallets)('wallet $name tests', ({ name }) => {
     expect(delegatorBalanceAfter.value).toBeGreaterThan(
       delegatorBalanceBefore.value,
     );
-  }, 15000);
+  });
 
   test('transfer fixed delegation', async () => {
     const { testSuite, wallet, userAta } = await initWalletContext(name);
@@ -218,6 +229,7 @@ describe.each(wallets)('wallet $name tests', ({ name }) => {
       delegationAccount,
       transferAmount,
       delegateeAta,
+      testSuite.tokenProgram,
     );
 
     expect(result.signature).toBeDefined();
@@ -232,7 +244,7 @@ describe.each(wallets)('wallet $name tests', ({ name }) => {
       delegationAccount,
     );
     expect(delegationAccountInfo.data.amount).toBe(amount - transferAmount);
-  }, 15000);
+  });
 
   test('create recurring delegation', async () => {
     const { testSuite, wallet } = await initWalletContext(name);
@@ -266,7 +278,7 @@ describe.each(wallets)('wallet $name tests', ({ name }) => {
     expect(delegation.data.currentPeriodStartTs).toBe(startTs);
     expect(delegation.data.amountPerPeriod).toBe(amountPerPeriod);
     expect(delegation.data.amountPulledInPeriod).toBe(0n);
-  }, 15000);
+  });
 
   test('revoke recurring delegation', async () => {
     const { testSuite, wallet } = await initWalletContext(name);
@@ -285,10 +297,10 @@ describe.each(wallets)('wallet $name tests', ({ name }) => {
 
     await revokeDelegationWithWallet(wallet, delegationAccount);
 
-    expect(
+    await expect(
       fetchRecurringDelegation(testSuite.rpc, delegationAccount),
     ).rejects.toThrow();
-  }, 15000);
+  });
 
   test('transfer recurring delegation', async () => {
     const { testSuite, wallet, userAta } = await initWalletContext(name);
@@ -328,6 +340,7 @@ describe.each(wallets)('wallet $name tests', ({ name }) => {
       delegationAccount,
       transferAmount,
       delegateeAta,
+      testSuite.tokenProgram,
     );
 
     expect(result.signature).toBeDefined();
@@ -344,5 +357,5 @@ describe.each(wallets)('wallet $name tests', ({ name }) => {
     expect(delegationAccountInfo.data.amountPulledInPeriod).toBe(
       transferAmount,
     );
-  }, 15000);
+  });
 });

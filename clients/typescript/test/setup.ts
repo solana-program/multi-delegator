@@ -85,6 +85,9 @@ export class IntegrationTest {
   /** Pre-created SPL token mint (6 decimals, payer is mint authority) */
   public readonly tokenMint: Address;
 
+  /** Token program address used for the default tokenMint */
+  public readonly tokenProgram: Address;
+
   private solanaClient: SolanaClient;
   private readonly smartWalletsByName = new Map<SmartWalletName, SmartWallet>();
 
@@ -93,12 +96,14 @@ export class IntegrationTest {
     client: MultiDelegatorClient,
     payer: KeyPairSigner,
     tokenMint: Address,
+    tokenProgram: Address,
   ) {
     this.solanaClient = solanaClient;
     this.client = client;
     this.rpc = solanaClient.rpc;
     this.payer = payer;
     this.tokenMint = tokenMint;
+    this.tokenProgram = tokenProgram;
   }
 
   /**
@@ -113,10 +118,16 @@ export class IntegrationTest {
     // Create and fund payer with 10 SOL
     const payer = await createFundedKeypair(solanaClient, 10_000_000_000n);
 
-    // Create default token mint (payer is mint authority)
+    // Create default token mint (payer is mint authority) using TOKEN_PROGRAM_ADDRESS
     const tokenMint = await createMint(solanaClient, payer, 6);
 
-    return new IntegrationTest(solanaClient, client, payer, tokenMint);
+    return new IntegrationTest(
+      solanaClient,
+      client,
+      payer,
+      tokenMint,
+      TOKEN_PROGRAM_ADDRESS,
+    );
   }
 
   /**

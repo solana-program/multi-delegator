@@ -1,5 +1,5 @@
-import { describe, expect, test } from 'bun:test';
 import { generateKeyPairSigner } from 'gill';
+import { describe, expect, test } from 'vitest';
 import type { Delegation } from '../src/client.ts';
 import {
   DEFAULT_TEST_BALANCE,
@@ -22,6 +22,7 @@ describe('MultiDelegator Query Tests', () => {
       testSuite.payer,
       testSuite.tokenMint,
       userAta,
+      testSuite.tokenProgram,
     );
 
     const delegatee1 = await generateKeyPairSigner();

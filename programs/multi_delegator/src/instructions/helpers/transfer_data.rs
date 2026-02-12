@@ -1,11 +1,11 @@
+use codama::CodamaType;
 use core::mem::{size_of, transmute};
 use pinocchio::{program_error::ProgramError, pubkey::Pubkey};
-use shank::ShankType;
 
 use crate::MultiDelegatorError;
 
 #[repr(C, packed)]
-#[derive(ShankType, Debug, Clone)]
+#[derive(CodamaType, Debug, Clone)]
 pub struct TransferData {
     pub amount: u64,
     pub delegator: Pubkey,

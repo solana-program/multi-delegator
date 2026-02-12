@@ -29,17 +29,17 @@ fn process_instruction(
     match instruction {
         MultiDelegatorInstruction::InitMultiDelegate => initialize_multidelegate::process(accounts),
         MultiDelegatorInstruction::CreateFixedDelegation(data) => {
-            create_fixed_delegation::process(accounts, data)
+            create_fixed_delegation::process(accounts, &data)
         }
         MultiDelegatorInstruction::CreateRecurringDelegation(data) => {
-            create_recurring_delegation::process(accounts, data)
+            create_recurring_delegation::process(accounts, &data)
         }
         MultiDelegatorInstruction::RevokeDelegation => revoke_delegation::process(accounts),
         MultiDelegatorInstruction::TransferFixed(data) => {
-            transfer_fixed_delegation::process(accounts, data)
+            transfer_fixed_delegation::process(accounts, &data)
         }
         MultiDelegatorInstruction::TransferRecurring(data) => {
-            transfer_recurring_delegation::process(accounts, data)
+            transfer_recurring_delegation::process(accounts, &data)
         }
     }
 }

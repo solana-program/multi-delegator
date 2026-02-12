@@ -138,12 +138,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "anyhow"
-version = "1.0.100"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
-
-[[package]]
 name = "ark-bn254"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -526,6 +520,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
 
 [[package]]
+name = "cargo_toml"
+version = "0.20.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88da5a13c620b4ca0078845707ea9c3faf11edbc3ffd8497d11d686211cd1ac0"
+dependencies = [
+ "serde",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -564,6 +568,160 @@ checksum = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
 dependencies = [
  "crypto-common",
  "inout",
+]
+
+[[package]]
+name = "codama"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53738b35eeaeb4239b5852536d6837be0518632e5105f002703aa8ad51a735ba"
+dependencies = [
+ "codama-errors",
+ "codama-korok-plugins",
+ "codama-korok-visitors",
+ "codama-koroks",
+ "codama-macros",
+ "codama-nodes",
+ "codama-stores",
+ "proc-macro2",
+]
+
+[[package]]
+name = "codama-attributes"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0abb25f3e25f822417c9e4d16f1d5c2c9c9749cc44d8b4f1d1f85cd9091a25a"
+dependencies = [
+ "codama-errors",
+ "codama-nodes",
+ "codama-syn-helpers",
+ "derive_more",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.108",
+]
+
+[[package]]
+name = "codama-errors"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a56050a49f8ad48246bc997f31b8b4f7fbd68a72ee4a278160b2472e7a16c118"
+dependencies = [
+ "cargo_toml",
+ "proc-macro2",
+ "serde_json",
+ "syn 2.0.108",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "codama-korok-plugins"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "419d9533478cff62eef8dd05eba016d96adaa12c0092650818b2da2277449221"
+dependencies = [
+ "codama-errors",
+ "codama-korok-visitors",
+ "codama-koroks",
+]
+
+[[package]]
+name = "codama-korok-visitors"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "971a61ff57237d9dfb77f5ee0c731634eb9da84a6be7f11c45f4e76932346308"
+dependencies = [
+ "cargo_toml",
+ "codama-attributes",
+ "codama-errors",
+ "codama-koroks",
+ "codama-nodes",
+ "codama-syn-helpers",
+ "serde_json",
+ "syn 2.0.108",
+]
+
+[[package]]
+name = "codama-koroks"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "778a5dae966a256739e700770724e46d52f9a0276d4296edb8341bd824168370"
+dependencies = [
+ "codama-attributes",
+ "codama-errors",
+ "codama-nodes",
+ "codama-stores",
+ "codama-syn-helpers",
+ "derive_more",
+ "proc-macro2",
+ "syn 2.0.108",
+]
+
+[[package]]
+name = "codama-macros"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73e227382a6b9153521b5b986ea0606a8ec47fc315d7db15d7948ea47b0e5fae"
+dependencies = [
+ "codama-attributes",
+ "codama-errors",
+ "codama-koroks",
+ "codama-stores",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.108",
+]
+
+[[package]]
+name = "codama-nodes"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b6ed3ef44346c0dfde0ec15eca42a1a6ae6fcb2d4d05cf0e10345fdb0bee32f"
+dependencies = [
+ "codama-errors",
+ "codama-nodes-derive",
+ "derive_more",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "codama-nodes-derive"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32526738a3362fb89985f159c51a61ea44e4f76e5cc832977526aa017fbe1bea"
+dependencies = [
+ "codama-errors",
+ "codama-syn-helpers",
+ "derive_more",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.108",
+]
+
+[[package]]
+name = "codama-stores"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b16856faaceb13d9f01462aa7c1df6d8437a27ac7dd3b1ccd4beeba46a24f56"
+dependencies = [
+ "cargo_toml",
+ "codama-errors",
+ "proc-macro2",
+ "syn 2.0.108",
+]
+
+[[package]]
+name = "codama-syn-helpers"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a623ab0e21a54d14031724ca819e3df539f4948c12514b72bd49a5bc5b03f500"
+dependencies = [
+ "codama-errors",
+ "derive_more",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.108",
 ]
 
 [[package]]
@@ -759,6 +917,26 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "derive_more"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a9b99b9cbbe49445b21764dc0625032a89b145a2642e67603e1c936f5458d05"
+dependencies = [
+ "derive_more-impl",
+]
+
+[[package]]
+name = "derive_more-impl"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb7330aeadfbe296029522e6c40f315320aba36fc43a5b3632f3795348f3bd22"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.108",
 ]
 
 [[package]]
@@ -1682,6 +1860,7 @@ dependencies = [
 name = "multi-delegator"
 version = "0.1.0"
 dependencies = [
+ "codama",
  "ctor",
  "litesvm",
  "litesvm-token",
@@ -1691,7 +1870,7 @@ dependencies = [
  "pinocchio-system",
  "pinocchio-token",
  "pinocchio-token-2022",
- "shank",
+ "serde_json",
  "solana-account",
  "solana-instruction",
  "solana-keypair",
@@ -2060,7 +2239,7 @@ version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d6ea3c4595b96363c13943497db34af4460fb474a95c43f4446ad341b8c9785"
 dependencies = [
- "toml",
+ "toml 0.5.11",
 ]
 
 [[package]]
@@ -2069,7 +2248,7 @@ version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "219cb19e96be00ab2e37d6e299658a0cfa83e52429179969b0f0121b4ac46983"
 dependencies = [
- "toml_edit",
+ "toml_edit 0.23.7",
 ]
 
 [[package]]
@@ -2530,6 +2709,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_spanned"
+version = "0.6.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_urlencoded"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2579,52 +2767,6 @@ checksum = "75872d278a8f37ef87fa0ddbda7802605cb18344497949862c0d4dcb291eba60"
 dependencies = [
  "digest 0.10.7",
  "keccak",
-]
-
-[[package]]
-name = "shank"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae936f51a1ab23dd7f8a81b0b13ab4af3fc71f1c56438a07cb54a0f7eb5436fd"
-dependencies = [
- "shank_macro",
-]
-
-[[package]]
-name = "shank_macro"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db4463f65133e69fe6c69d5c30e9cc6d2bde50e0fac61db1c2fb6a43fc499b67"
-dependencies = [
- "proc-macro2",
- "quote",
- "shank_macro_impl",
- "shank_render",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "shank_macro_impl"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7c08958b4ba24f8289481c0d8b377c63a8205fc037b59fc80643c491ec1f487"
-dependencies = [
- "anyhow",
- "proc-macro2",
- "quote",
- "serde",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "shank_render"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ed873b8e62792442e944dc94c4ebbfab63e5c46eac09b7dcf3a2e274dde1524"
-dependencies = [
- "proc-macro2",
- "quote",
- "shank_macro_impl",
 ]
 
 [[package]]
@@ -4946,6 +5088,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "toml"
+version = "0.8.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362"
+dependencies = [
+ "serde",
+ "serde_spanned",
+ "toml_datetime 0.6.11",
+ "toml_edit 0.22.27",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "0.6.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "toml_datetime"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4956,12 +5119,26 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
+version = "0.22.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a"
+dependencies = [
+ "indexmap",
+ "serde",
+ "serde_spanned",
+ "toml_datetime 0.6.11",
+ "toml_write",
+ "winnow",
+]
+
+[[package]]
+name = "toml_edit"
 version = "0.23.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6485ef6d0d9b5d0ec17244ff7eb05310113c3f316f2d14200d4de56b3cb98f8d"
 dependencies = [
  "indexmap",
- "toml_datetime",
+ "toml_datetime 0.7.3",
  "toml_parser",
  "winnow",
 ]
@@ -4974,6 +5151,12 @@ checksum = "c0cbe268d35bdb4bb5a56a2de88d0ad0eb70af5384a99d648cd4b3d04039800e"
 dependencies = [
  "winnow",
 ]
+
+[[package]]
+name = "toml_write"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
 name = "tower"
