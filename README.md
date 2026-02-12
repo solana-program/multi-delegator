@@ -1,246 +1,151 @@
 # Multi Delegator
 
-Solana program for third party assets delegations.
+Solana program and clients for managed delegations on both SPL Token and Token-2022.
 
 ## Overview
 
-This repository hosts a Solana program built using Rust and the [Pinocchio](https://github.com/febo/pinocchio) library. It does **not** use the Anchor framework. It also includes a TypeScript client generated using [Codama](https://github.com/codama-js/codama).
+For each `(user, mint)` pair, the program creates a Multi Delegate PDA and sets it as the single delegate authority on the user's token account. This works for both token programs: SPL Token and Token-2022.
+
+The program then routes transfer requests through delegation accounts and enforces delegation rules before any token movement.
+
+Currently supported delegation kinds:
+
+- **Fixed delegation**: authorize a delegatee to spend up to a total amount until an expiry time.
+- **Recurring delegation**: authorize a delegatee to spend up to a per-period amount that resets each period until expiry.
+
+This repository contains:
+
+- A Rust Solana program built with [Pinocchio](https://github.com/febo/pinocchio)
+- IDL generation via [Shank](https://github.com/metaplex-foundation/shank)
+- Generated clients via [Codama](https://github.com/codama-js/codama):
+  - TypeScript client in `clients/typescript`
+  - Rust client in `clients/rust`
+- A local demo webapp in `webapp/`
 
 ## Project Structure
 
-```
-multidelegator/
-├── client/                     # TypeScript client
-│   ├── src/                    # Client source code
-│   │   └── generated/          # Generated client code (from Codama)
-│   ├── test/                   # Client integration tests
-│   └── package.json            # Client dependencies and scripts
-├── programs/
-│   └── multi_delegator/        # Solana program (Rust)
-│       ├── idl/                # Generated IDL (using Shank)
-│       ├── src/                # Program source code
-│       │   ├── instructions/   # Instruction handlers
-│       │   ├── state/          # Program state structures
-│       │   ├── tests/          # Program unit/integration tests (using LiteSVM)
-│       │   └── lib.rs          # Program entry point
-│       └── Cargo.toml          # Program configuration
-├── Makefile                    # Build and test orchestration
-├── README.md                   # This file
-└── txtx.yml                    # txtx configuration used for deployments by surfpool
+```text
+multi-delegator/
+├── programs/multi_delegator/     # Rust Solana program
+│   ├── src/
+│   │   ├── instructions/          # Instruction handlers + helpers
+│   │   ├── state/                 # Account/state types (fixed, recurring, header, MDA)
+│   │   └── tests/                 # Rust tests (litesvm)
+│   └── idl/                       # Shank-generated IDL
+├── clients/
+│   ├── typescript/                # TypeScript SDK + tests
+│   └── rust/                      # Rust generated client
+├── webapp/                        # Local demo UI + local API
+├── scripts/                       # Validator / full-stack launcher scripts
+├── docs/                          # Architecture docs
+├── runbooks/                      # Deployment runbooks
+├── Makefile                       # Build/test/dev task entrypoint
+└── codama.js                      # Codama generation config
 ```
 
-### Folder Descriptions
-
-- **programs/multi_delegator/src/**: Contains all the source code for the Solana smart contract
-  - **instructions/**: Handles different program instructions (actions the program can perform)
-  - **instructions/helpers/**: Helper modules for program, system, and token operations
-  - **state/**: Data structures representing program state (delegations, multi-delegates)
-  - **tests/**: Comprehensive test suite including unit tests and integration tests
-- **client/**: TypeScript client for interacting with the program
-- **docs/**: Additional documentation including architecture details
-
-## Getting Started
-
-### Prerequisites
-
-Ensure you have the following installed:
-
-1. **Rust & Solana CLI**:
-
-   ```bash
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-   agave-install update
-   ```
-
-2. **Bun**:
-
-   ```bash
-   curl -fsSL https://bun.sh/install | bash
-   ```
-
-3. **Shank CLI** (for IDL generation):
-
-   ```bash
-   cargo install shank-cli
-   ```
-
-4. **Surfpool CLI** (for local validator and deployments):
-
-   ```bash
-   curl -sL https://run.surfpool.run/ | bash
-   ```
-
-5. **Codama CLI** (for TypeScript client generation):
-   ```bash
-   bun add -g @codama/cli
-   ```
-
-### Setup
-
-Clone the repository and run the setup command:
+## Quick Start
 
 ```bash
 git clone git@github.com:Moonsong-Labs/multi-delegator.git
 cd multi-delegator
 make setup
+
+# If missing, create the local development keypair expected by the Makefile
+mkdir -p keys
+[ -f keys/multi_delegator-keypair.json ] || solana-keygen new --no-bip39-passphrase -o keys/multi_delegator-keypair.json
+
+make build
+make test-program
 ```
+
+For the full suite (program + client tests):
+
+```bash
+make test
+```
+
+## Prerequisites
+
+`make setup` checks for these tools: `bun`, `cargo`, `shank`, `solana-keygen`, and `surfpool`.
+
+Install the toolchain:
+
+1. Rust
+   ```bash
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   ```
+2. Solana CLI (includes `solana-keygen` and `solana-test-validator`)
+   ```bash
+   sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+   ```
+3. Bun
+   ```bash
+   curl -fsSL https://bun.sh/install | bash
+   ```
+4. Shank CLI
+   ```bash
+   cargo install shank-cli
+   ```
+5. Surfpool CLI
+   ```bash
+   curl -sL https://run.surfpool.run/ | bash
+   ```
+6. Node.js + npm (required by `webapp/` scripts)
+
+## Keypair and Program ID
+
+Local workflows use `keys/multi_delegator-keypair.json` as the source keypair for deployment artifacts and program ID derivation in the `Makefile`.
+
+- If the file exists, `make build` and validator scripts reuse it.
+- If the file is missing, generate it before build/test commands:
+
+```bash
+mkdir -p keys
+solana-keygen new --no-bip39-passphrase -o keys/multi_delegator-keypair.json
+```
+
+The keypair is automatically copied into the deploy directory when you run `make build` or `make build-program`.
+
+## Build and Test
+
+The `Makefile` is the main entrypoint for day-to-day development.
+
+- `make build` builds program, clients, and webapp
+- `make build-program` compiles the SBF program
+- `make generate-idl` regenerates `programs/multi_delegator/idl/multi_delegator.json`
+- `make generate-client` regenerates clients from IDL via Codama
+- `make build-client` builds `clients/typescript` into `clients/typescript/dist`
+- `make test-program` runs Rust SBF tests (`cargo test-sbf`)
+- `make test-client` runs TypeScript integration tests (`bun test`)
+- `make test` runs setup + program + client tests
+- `make fmt-check` and `make lint-check` run formatting/lint checks
+
+### Validator Modes
+
+Two local validator flows are used in this repo:
+
+- `make test-client` uses `surfpool` (auto-start via `ensure-surfpool` in `Makefile`)
+- `make webapp` uses `solana-test-validator` (via `scripts/start-webapp.sh`)
+
+Both default to `http://localhost:8899`, but they are started by different tooling.
 
 ## Webapp Demo (Quickstart)
 
-The demo app in `webapp/` is a local UI for interacting with the Multi Delegator program. It can spin up a local `solana-test-validator` with the program deployed, plus a small local API used by the UI for dev-only SOL/USDC faucet actions.
-
-### Run the full demo stack
-
-One-time install for the web UI:
+The demo app in `webapp/` provides a local UI + local API for development flows (including faucet utilities).
 
 ```bash
-cd webapp
-npm install
-cd ..
+make build          # builds program, clients, and webapp (includes npm install)
+make webapp         # starts validator + init + API + web UI
 ```
 
-Start everything (validator + init + API + web UI):
+Expected local endpoints:
 
-```bash
-make webapp
-```
+- Validator RPC: `http://localhost:8899`
+- API: `http://localhost:3001`
+- Web UI: `http://localhost:5173`
 
-When it starts successfully you should have:
-
-- **Validator RPC**: `http://localhost:8899`
-- **Local API**: `http://localhost:3001` (UI uses `VITE_API_URL`, defaults to this)
-- **Web UI**: `http://localhost:5173`
-
-
-To stop any running local validator processes:
+Stop local validators:
 
 ```bash
 make kill-validator
-```
-
-## Build & Test Commands
-
-The project uses a `Makefile` to simplify common tasks.
-
-- **Build All:** `make build` (builds program and client)
-- **Build Program:** `make build-program`
-- **Build Client:** `make build-client`
-- **Test All:** `make test` (runs both program and client tests)
-- **Test Program:** `make test-program`
-- **Test Client:** `make test-client` (starts a local validator and runs client tests)
-- **Generate IDL:** `make generate-idl`
-- **Generate Client:** `make generate-client`
-- **Clean:** `make clean`
-
-### What happens when building and testing
-
-- **Building:**
-  1. The Solana program is compiled into a `.so` file.
-  2. `shank` generates an IDL from the Rust source code.
-  3. `codama` uses the IDL to generate a TypeScript client.
-  4. The TypeScript client is built into the `dist/` directory.
-
-- **Testing:**
-  1. `make test-program` runs standard Rust SBF tests using `cargo test-sbf`.
-  2. `make test-client` ensures a local validator (`surfpool`) is running, builds all dependencies, and runs the TypeScript integration tests using `bun test`.
-
-## Codebase Overview
-
-- **Framework:** Pinocchio (lightweight, zero-copy, compute-efficient).
-- **Entrypoint:** `programs/multi_delegator/src/lib.rs` uses `entrypoint!(process_instruction)` and routes instructions based on a 1-byte discriminator.
-- **Instructions:** Located in `programs/multi_delegator/src/instructions/`. Each instruction typically has:
-  - A `process` function.
-  - A `TryFrom<&[AccountInfo]>` implementation for account validation.
-  - A `TryFrom<&[u8]>` implementation for data deserialization.
-- **Testing:** Uses `litesvm` for fast, lightweight integration tests in Rust, and `bun test` for client-side integration tests.
-
-## Delegation Architecture
-
-The project adopts a modular architecture for delegation types to ensure extensibility and clean separation of concerns.
-
-- **Modular State & Logic**: Each delegation type (e.g., `Fixed`, `Recurring`) has its own dedicated module under `programs/multi_delegator/src/delegations/`.
-- **Encapsulation**: These modules encapsulate the specific logic for:
-  - State definition
-  - Initialization
-  - Transfer validation
-- **Extensibility**: This structure simplifies adding new delegation types. To add a new type, one simply needs to create a new module implementing the required lifecycle methods and incorporate it into the main instruction dispatch.
-- **Reasoning**: By keeping all methods related to a specific delegation lifecycle (state description, initialization, validation) in a single file/module, we reduce the complexity of the main program logic. This allows developers to write the logic for a new delegation type in isolation and then easily plug it into the program.
-
-## Code Style & Conventions
-
-### Imports
-
-- Group imports by crate.
-- Prefer `pinocchio` types (`AccountInfo`, `Pubkey`, `ProgramResult`, `ProgramError`) over `solana_program` types when possible to maintain the lightweight nature.
-
-### Formatting
-
-- Follow standard Rust formatting (`cargo fmt`).
-- Use 4 spaces for indentation.
-
-### Naming
-
-- **Structs/Traits:** PascalCase (e.g., `MakeAccounts`, `MakeInstructionData`).
-- **Functions/Modules:** snake_case (e.g., `process_instruction`, `instructions::make`).
-- **Constants:** SCREAMING_SNAKE_CASE.
-
-### Account Validation
-
-- Implement `TryFrom<&'a [AccountInfo]>` for a struct representing the instruction's accounts (e.g., `MakeAccounts`).
-- Perform checks inside `try_from`:
-  - `SignerAccount::check(account)?` for signers.
-  - `MintInterface::check(account)?` for mints.
-  - `AssociatedTokenAccount::check(...)` for ATAs.
-  - Return `ProgramError::NotEnoughAccountKeys` if strict destructuring fails.
-
-### Instruction Data
-
-- Implement `TryFrom<&'a [u8]>` for a struct representing the instruction data.
-- Validate data length and constraints immediately.
-- Use `u64::from_le_bytes` for numeric deserialization.
-
-### Error Handling
-
-- Return `ProgramResult`.
-- Use standard `ProgramError` variants where applicable.
-- Define custom errors in `programs/multi_delegator/src/errors.rs` if necessary.
-
-### Testing (`litesvm`)
-
-- Rust tests are located in `programs/multi_delegator/src/tests/`.
-- Use `litesvm` to simulate the chain.
-- Helpers in `programs/multi_delegator/src/tests/utils.rs` (e.g., `setup`, `init_wallet`, `init_mint`, `build_and_send_transaction`) should be used to reduce boilerplate.
-
-## Example Pattern
-
-**Instruction Parsing:**
-
-```rust
-pub struct MyInstructionAccounts<'a> {
-    pub signer: &'a AccountInfo,
-    pub token_account: &'a AccountInfo,
-}
-
-impl<'a> TryFrom<&'a [AccountInfo]> for MyInstructionAccounts<'a> {
-    type Error = ProgramError;
-    fn try_from(accounts: &'a [AccountInfo]) -> Result<Self, Self::Error> {
-        let [signer, token_account] = accounts else {
-            return Err(ProgramError::NotEnoughAccountKeys);
-        };
-        SignerAccount::check(signer)?;
-        // ... other checks
-        Ok(Self { signer, token_account })
-    }
-}
-```
-
-**Instruction Logic:**
-
-```rust
-pub fn process((data, accounts): (&[u8], &[AccountInfo])) -> ProgramResult {
-    let accounts = MyInstructionAccounts::try_from(accounts)?;
-    let data = MyInstructionData::try_from(data)?;
-    // ... logic
-    Ok(())
-}
 ```

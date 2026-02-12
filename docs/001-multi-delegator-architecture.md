@@ -1,6 +1,6 @@
 # ADR-001: Multi-Delegator Program Architecture
 
-**Status:** Draft
+**Status:** Implemented
 
 ## Context
 
@@ -33,10 +33,10 @@ The multidelegate program will perform the relevant checks depending on the type
 
 ```mermaid
 graph TB
-    B[Bob] -->|transfer| FD
+    B[Bob] -->|transfer_fixed| FD
     A[Alice] -->|initialize_multidelegate| MD[MultiDelegate PDA]
     A -->|create_delegation | FD[Delegation]
-    FD -->|transfer| MD
+    FD -->|transfer_fixed| MD
     MD -->|transfer| TP[Token Program]
     TP -->|Transfers from Alice's ATA to Bob| B
 ```
@@ -112,7 +112,7 @@ sequenceDiagram
     participant MDA as MDA
     participant T as Token Program
 
-    B->>P: transfer(delegation_pda, amount)
+    B->>P: transfer_fixed(delegation_pda, amount)
     Note over P: Load FixedDelegation
 
     alt Not expired and amount OK
@@ -151,7 +151,7 @@ sequenceDiagram
 
 ### MultiDelegate Authority (MDA)
 
-Each user creates one MDA per token mint with seeds `["multi_delegate", user, mint]`. The MDA:
+Each user creates one MDA per token mint with seeds `["MultiDelegate", user, mint]`. The MDA:
 
 1. Receives `u64::MAX` delegated approval from the user's ATA
 2. Acts as the delegate for all transfers from that user's account
@@ -186,9 +186,10 @@ getProgramAccounts(PROGRAM_ID, {
 
 ### Transfer
 
-| Instruction | Actor     | Purpose                                                                                                                        |
-| ----------- | --------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `transfer`  | Delegatee | Execute token transfer enforcing delegation constraints, verification of constraints is done based on the `kind` of delegation |
+| Instruction          | Actor     | Purpose                                                                 |
+| -------------------- | --------- | ----------------------------------------------------------------------- |
+| `transfer_fixed`     | Delegatee | Execute token transfer for a fixed delegation, enforcing limits         |
+| `transfer_recurring` | Delegatee | Execute token transfer for a recurring delegation, enforcing period limits |
 
 ---
 
@@ -328,8 +329,8 @@ Creates a one-time delegation with nonce-based PDA.
 | 1       | writable         | MultiDelegate PDA for this token type  |
 | 2       | writable         | FixedDelegation PDA being created      |
 | 3       |                  | The delegatee (beneficiary)            |
-| 4       | signer, writable | The payer who funds the delegation account (optional, defaults to delegator) |
-| 5       | system_program   | System program                         |
+| 4       | system_program   | System program                         |
+| 5       | signer, writable | The payer who funds the delegation account (optional, defaults to delegator) |
 
 **Parameters:**
 
@@ -353,8 +354,8 @@ Creates a recurring delegation with period tracking.
 | 1       | writable         | MultiDelegate PDA for this token type  |
 | 2       | writable         | RecurringDelegation PDA being created  |
 | 3       |                  | The delegatee (beneficiary)            |
-| 4       | signer, writable | The payer who funds the delegation account (optional, defaults to delegator) |
-| 5       | system_program   | System program                         |
+| 4       | system_program   | System program                         |
+| 5       | signer, writable | The payer who funds the delegation account (optional, defaults to delegator) |
 
 **Parameters:**
 
@@ -378,7 +379,7 @@ Revokes a delegation by closing the delegation PDA and returning rent to the ori
 
 | Account | Type     | Description                                                                 |
 | ------- | -------- | --------------------------------------------------------------------------- |
-| 0       | signer   | The delegator (authority)                                                   |
+| 0       | signer, writable | The delegator (authority)                                        |
 | 1       | writable | Delegation PDA to close                                                    |
 | 2       | writable | Receiver account (required only if payer != delegator)                     |
 
@@ -393,106 +394,63 @@ Revokes a delegation by closing the delegation PDA and returning rent to the ori
 
 ## Spend/Transfer Design
 
-The transfer mechanism must validate delegation PDA constraints before allowing the MDA to transfer tokens from the delegator's ATA.
+The transfer mechanism uses specific instructions for each delegation type to validate constraints before allowing the MDA to transfer tokens.
 
-### `transfer` (Discriminator: 4)
+### `transfer_fixed` (Discriminator: 4)
 
-A unified instruction that validates constraints based on delegation kind at runtime.
+Executes a transfer for a fixed delegation.
 
-```rust
-pub fn process((data, accounts): (&[u8], &[AccountInfo])) -> ProgramResult {
-    // Always delegation has to be the first account
+| Account | Type             | Description                                |
+| ------- | ---------------- | ------------------------------------------ |
+| 0       | writable         | FixedDelegation PDA                        |
+| 1       | writable         | MultiDelegate PDA                          |
+| 2       | writable         | Delegator's ATA                            |
+| 3       | writable         | Receiver's ATA                             |
+| 4       |                  | Token Program                              |
+| 5       | signer           | Delegatee (beneficiary)                    |
 
-    match accounts.body().first().from_le_bytes() {
-        0 => validate_and_execute_fixed_transfer(
-            delegation, data, accounts, current_ts
-        )?,
-        1 => validate_and_execute_recurring_transfer(
-            delegation, data, accounts, current_ts
-        )?,
-        _ => return Err(MultiDelegatorError::InvalidDelegationKind.into()),
-    }
+**Parameters (in instruction data):**
 
-    Ok(())
-}
+- `amount: u64` - Amount to transfer
+- `delegator: Pubkey` - The delegator's public key (for verification)
+- `mint: Pubkey` - The token mint (for verification)
 
-fn validate_and_execute_fixed_transfer(
-    delegation: &FixedDelegation,
-    transfer_data: &vec[u8],
-    accounts: &[AccountInfo],
-    current_ts: i64,
-) -> ProgramResult {
-    let accounts = FixedTransferAccounts::try_from(accounts)?;
-    let transfer_data = FixedTransferData::load(data)?;
+**Process:**
 
-    if current_ts > delegation.expiry_ts {
-        return Err(MultiDelegatorError::DelegationExpired.into());
-    }
+1. Validate delegation is `Fixed` kind
+2. Verify signer is authorized delegatee
+3. Check expiry and amount limits
+4. Deduct amount from delegation
+5. Execute transfer via MultiDelegate
 
-    if transfer_data.amount > delegation.amount {
-        return Err(MultiDelegatorError::AmountExceedsLimit.into());
-    }
+### `transfer_recurring` (Discriminator: 5)
 
-    let fixed_delegation = FixedDelegation::load_mut(&mut accounts.delegation_pda.try_borrow_mut_data()?);
-    fixed_delegation.amount -= transfer_data.amount;
+Executes a transfer for a recurring delegation.
 
-    let binding = &mut accounts.vault.try_borrow_mut_data()?;
-    let vault = Vault::load_mut(binding)?;
-    vault.total_pulled_from_delegation += transfer_data.amount;
+| Account | Type             | Description                                |
+| ------- | ---------------- | ------------------------------------------ |
+| 0       | writable         | RecurringDelegation PDA                    |
+| 1       | writable         | MultiDelegate PDA                          |
+| 2       | writable         | Delegator's ATA                            |
+| 3       | writable         | Receiver's ATA                             |
+| 4       |                  | Token Program                              |
+| 5       | signer           | Delegatee (beneficiary)                    |
 
-    // Execute transfer...
-    Transfer {
-        source: accounts.user_ata,
-        destination: accounts.delegatee_ata,
-        authority: accounts.multi_delegate,
-        amount: transfer_data.amount,
-    }.invoke()?;
+**Parameters (in instruction data):**
 
-    Ok(())
-}
+- `amount: u64` - Amount to transfer
+- `delegator: Pubkey` - The delegator's public key
+- `mint: Pubkey` - The token mint
 
-fn validate_and_execute_recurring_transfer(
-    delegation: &RecurringDelegation,
-    transfer_data: &vec[u8],
-    accounts: &[AccountInfo],
-    current_ts: i64,
-) -> ProgramResult {
-    let accounts = RecurringTransferAccounts::try_from(accounts)?;
-    let transfer_data = RecurringTransferData::load(data)?;
-    if current_ts > delegation.expiry_ts {
-        return Err(MultiDelegatorError::DelegationExpired.into());
-    }
+**Process:**
 
-    // Check if we are in a new period
-    let current_period_end = delegation.current_period_start_ts + delegation.period_length_s as i64;
-
-    if current_ts >= current_period_end {
-        // Reset tracking for new period
-        delegation.current_period_start_ts = current_period_end;
-        delegation.amount_pulled_in_period = 0;
-    }
-
-    let available = delegation.amount_per_period - delegation.amount_pulled_in_period;
-    if transfer_data.amount > available {
-        return Err(MultiDelegatorError::AmountExceedsPeriodLimit.into());
-    }
-
-    // Update tracking
-    let binding = &mut accounts.delegation_pda.try_borrow_mut_data()?;
-    let recurring = RecurringDelegation::load_mut(binding)?;
-    recurring.amount_pulled_in_period += transfer_data.amount;
-
-    // Execute transfer...
-    Transfer {
-        source: accounts.user_ata,
-        destination: accounts.delegatee_ata,
-        authority: accounts.multi_delegate,
-        amount: transfer_data.amount,
-    }.invoke()?;
-
-    Ok(())
-}
-```
+1. Validate delegation is `Recurring` kind
+2. Verify signer is authorized delegatee
+3. Check expiry
+4. Update period logic (reset if new period)
+5. Check period limits
+6. Update tracking
+7. Execute transfer via MultiDelegate
 
 ---
 
