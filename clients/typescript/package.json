@@ -32,6 +32,9 @@
     "typescript": "^5.7.0",
     "@types/node": "^25.0.10",
     "@solana-program/system": "latest",
-    "@solana-program/token": "latest"
+    "@solana-program/token": "latest",
+    "@sqds/multisig": "^2.1.4",
+    "@swig-wallet/kit": "^1.5.0",
+    "tweetnacl": "^1.0.3"
   }
 }
