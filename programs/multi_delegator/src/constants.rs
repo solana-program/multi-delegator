@@ -1,4 +1,4 @@
-pub const TOKEN_2022_PROGRAM_ID: [u8; 32] = pinocchio_token_2022::ID;
+pub const TOKEN_2022_PROGRAM_ID: pinocchio::Address = pinocchio_token_2022::ID;
 
 pub const TOKEN_2022_ACCOUNT_DISCRIMINATOR_OFFSET: usize = 165;
 pub const TOKEN_2022_MINT_DISCRIMINATOR: u8 = 0x01;

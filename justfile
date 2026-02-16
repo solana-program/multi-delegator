@@ -9,7 +9,7 @@ program_dir := "programs/multi_delegator"
 ts_client_dir := "clients/typescript"
 webapp_dir := "webapp"
 deploy_key := "keys/multi_delegator-keypair.json"
-target_deploy_key := program_dir / "target/deploy/multi_delegator-keypair.json"
+target_deploy_key := "target/deploy/multi_delegator-keypair.json"
 idl_file := program_dir / "idl/multi_delegator.json"
 program_id := "3PuMsYqaLY4Sy1DR8np3aAiHravZXCeyMYDUECLqfswY"
 
@@ -47,7 +47,7 @@ prepare-deploy-keys:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    mkdir -p "{{program_dir}}/target/deploy"
+    mkdir -p "target/deploy"
 
     if [[ -f "{{deploy_key}}" ]]; then
         cp "{{deploy_key}}" "{{target_deploy_key}}"
@@ -227,7 +227,7 @@ clean: clean-program clean-client
 
 # Clean Rust build artifacts and IDL
 clean-program:
-    cd {{program_dir}} && cargo clean
+    cargo clean
     rm -f {{idl_file}}
     @echo "✓ Program cleaned"
 
@@ -253,7 +253,7 @@ clean-webapp:
 # Check formatting without fixing
 fmt-check:
     @echo "Checking Rust formatting..."
-    @cd {{program_dir}} && cargo fmt --check
+    @cargo fmt -p multi-delegator --check
     @echo "Checking TypeScript formatting..."
     @cd {{ts_client_dir}} && pnpm run format:check
     @echo "✓ Format check passed"
@@ -261,7 +261,7 @@ fmt-check:
 # Auto-format all code
 fmt:
     @echo "Formatting Rust..."
-    @cd {{program_dir}} && cargo fmt
+    @cargo fmt -p multi-delegator
     @echo "Formatting TypeScript..."
     @cd {{ts_client_dir}} && pnpm run format
     @echo "✓ Code formatted"
@@ -269,7 +269,7 @@ fmt:
 # Lint with auto-fix
 lint:
     @echo "Linting Rust..."
-    @cd {{program_dir}} && cargo clippy --all-targets --no-deps --fix -- -D warnings
+    @cargo clippy --workspace --exclude multidelegator-client --all-targets --no-deps --fix -- -D warnings
     @echo "Linting TypeScript..."
     @cd {{ts_client_dir}} && pnpm run lint
     @echo "✓ Code linted"
@@ -277,7 +277,7 @@ lint:
 # Check linting without fixing
 lint-check:
     @echo "Checking Rust lint..."
-    @cd {{program_dir}} && cargo clippy --all-targets --no-deps -- -D warnings
+    @cargo clippy --workspace --exclude multidelegator-client --all-targets --no-deps -- -D warnings
     @echo "Checking TypeScript lint..."
     @cd {{ts_client_dir}} && pnpm run lint:check
     @echo "✓ Lint check passed"

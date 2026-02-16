@@ -1,6 +1,6 @@
 use codama::CodamaAccount;
 use core::mem::{size_of, transmute};
-use pinocchio::program_error::ProgramError;
+use pinocchio::error::ProgramError;
 
 use crate::{Header, MultiDelegatorError};
 

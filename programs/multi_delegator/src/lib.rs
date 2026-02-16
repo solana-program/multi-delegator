@@ -1,12 +1,11 @@
-use pinocchio::{account_info::AccountInfo, entrypoint, pubkey::Pubkey, ProgramResult};
+use pinocchio::{address::declare_id, AccountView, Address, ProgramResult};
 
-entrypoint!(process_instruction);
+pinocchio::entrypoint!(process_instruction);
 
 pub mod instructions;
 pub use instructions::*;
 
 pub mod state;
-use pinocchio_pubkey::declare_id;
 pub use state::*;
 
 pub mod errors;
@@ -20,8 +19,8 @@ pub mod tests;
 declare_id!("3PuMsYqaLY4Sy1DR8np3aAiHravZXCeyMYDUECLqfswY");
 
 fn process_instruction(
-    _program_id: &Pubkey,
-    accounts: &[AccountInfo],
+    _program_id: &Address,
+    accounts: &[AccountView],
     instruction_data: &[u8],
 ) -> ProgramResult {
     let instruction = MultiDelegatorInstruction::from_bytes(instruction_data)?;

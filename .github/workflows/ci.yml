@@ -25,8 +25,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin
-            programs/multi_delegator/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('programs/multi_delegator/Cargo.toml') }}
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Install Solana CLI
@@ -95,8 +95,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin
-            programs/multi_delegator/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('programs/multi_delegator/Cargo.toml') }}
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
 
       - name: Save pnpm cache
         uses: actions/cache/save@v4

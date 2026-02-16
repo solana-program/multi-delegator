@@ -1,4 +1,4 @@
-use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramResult};
+use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 
 use crate::{
     AccountCheck, AccountClose, Header, MultiDelegatorError, ProgramAccount, SignerAccount,
@@ -6,15 +6,15 @@ use crate::{
 };
 
 pub struct RevokeDelegationAccounts<'a> {
-    pub authority: &'a AccountInfo,
-    pub delegation_account: &'a AccountInfo,
-    pub receiver: Option<&'a AccountInfo>,
+    pub authority: &'a AccountView,
+    pub delegation_account: &'a AccountView,
+    pub receiver: Option<&'a AccountView>,
 }
 
-impl<'a> TryFrom<&'a [AccountInfo]> for RevokeDelegationAccounts<'a> {
+impl<'a> TryFrom<&'a [AccountView]> for RevokeDelegationAccounts<'a> {
     type Error = ProgramError;
 
-    fn try_from(accounts: &'a [AccountInfo]) -> Result<Self, Self::Error> {
+    fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> {
         let [authority, delegation_account, rem @ ..] = accounts else {
             return Err(MultiDelegatorError::NotEnoughAccountKeys.into());
         };
@@ -34,11 +34,11 @@ pub const DISCRIMINATOR: &u8 = &3;
 
 /// Revokes a delegation by closing the delegation PDA.
 /// The rent lamports are returned to the original payer.
-pub fn process(accounts: &[AccountInfo]) -> ProgramResult {
+pub fn process(accounts: &[AccountView]) -> ProgramResult {
     let accounts = RevokeDelegationAccounts::try_from(accounts)?;
 
     let destination = {
-        let data = accounts.delegation_account.try_borrow_data()?;
+        let data = accounts.delegation_account.try_borrow()?;
 
         if data.len() < Header::LEN {
             return Err(MultiDelegatorError::InvalidHeaderData.into());
@@ -47,7 +47,7 @@ pub fn process(accounts: &[AccountInfo]) -> ProgramResult {
         let delegator_bytes: &[u8; 32] = data[DELEGATOR_OFFSET..DELEGATEE_OFFSET]
             .try_into()
             .map_err(|_| MultiDelegatorError::InvalidHeaderData)?;
-        if delegator_bytes != accounts.authority.key().as_ref() {
+        if delegator_bytes != accounts.authority.address().as_ref() {
             return Err(MultiDelegatorError::Unauthorized.into());
         }
 
@@ -55,13 +55,13 @@ pub fn process(accounts: &[AccountInfo]) -> ProgramResult {
             .try_into()
             .map_err(|_| MultiDelegatorError::InvalidPayerData)?;
 
-        if payer_bytes == accounts.authority.key().as_ref() {
+        if payer_bytes == accounts.authority.address().as_ref() {
             accounts.authority
         } else {
             let receiver = accounts
                 .receiver
                 .ok_or(MultiDelegatorError::NotEnoughAccountKeys)?;
-            if receiver.key().as_ref() != payer_bytes {
+            if receiver.address().as_ref() != payer_bytes {
                 return Err(MultiDelegatorError::Unauthorized.into());
             }
             receiver

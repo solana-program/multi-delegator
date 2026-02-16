@@ -68,8 +68,10 @@ pub fn get_ata_balance(litesvm: &LiteSVM, ata: &Pubkey) -> u64 {
 pub fn setup() -> (LiteSVM, Keypair) {
     let mut litesvm = LiteSVM::new();
 
+    let so_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/deploy/multi_delegator.so");
     litesvm
-        .add_program_from_file(PROGRAM_ID.to_bytes(), "target/deploy/multi_delegator.so")
+        .add_program_from_file(PROGRAM_ID.to_bytes(), so_path)
         .unwrap();
 
     let mut initial_clock = litesvm.get_sysvar::<Clock>();

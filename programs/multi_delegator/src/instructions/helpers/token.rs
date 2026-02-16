@@ -1,9 +1,7 @@
 use pinocchio::{
-    account_info::AccountInfo,
-    program_error::ProgramError,
-    pubkey::{create_program_address, find_program_address, Pubkey},
+    error::ProgramError,
     sysvars::{rent::Rent, Sysvar},
-    ProgramResult,
+    AccountView, Address, ProgramResult,
 };
 use pinocchio_associated_token_account::instructions::Create;
 use pinocchio_system::instructions::CreateAccount;
@@ -27,14 +25,14 @@ use crate::{
 // Private helpers to consolidate initialization logic
 
 fn init_mint_helper(
-    account: &AccountInfo,
-    payer: &AccountInfo,
+    account: &AccountView,
+    payer: &AccountView,
     decimals: u8,
-    mint_authority: &[u8; 32],
-    freeze_authority: Option<&[u8; 32]>,
-    owner_program_id: &Pubkey,
+    mint_authority: &Address,
+    freeze_authority: Option<&Address>,
+    owner_program_id: &Address,
 ) -> ProgramResult {
-    let lamports = Rent::get()?.minimum_balance(Mint::LEN);
+    let lamports = Rent::get()?.try_minimum_balance(Mint::LEN)?;
 
     CreateAccount {
         from: payer,
@@ -55,13 +53,13 @@ fn init_mint_helper(
 }
 
 fn init_token_helper(
-    account: &AccountInfo,
-    mint: &AccountInfo,
-    payer: &AccountInfo,
-    owner: &[u8; 32],
-    owner_program_id: &Pubkey,
+    account: &AccountView,
+    mint: &AccountView,
+    payer: &AccountView,
+    owner: &Address,
+    owner_program_id: &Address,
 ) -> ProgramResult {
-    let lamports = Rent::get()?.minimum_balance(TokenAccountState::LEN);
+    let lamports = Rent::get()?.try_minimum_balance(TokenAccountState::LEN)?;
 
     CreateAccount {
         from: payer,
@@ -85,8 +83,8 @@ fn init_token_helper(
 pub struct MintAccount;
 
 impl AccountCheck for MintAccount {
-    fn check(account: &AccountInfo) -> Result<(), ProgramError> {
-        if account.owner().ne(&pinocchio_token::ID) {
+    fn check(account: &AccountView) -> Result<(), ProgramError> {
+        if !account.owned_by(&pinocchio_token::ID) {
             return Err(MultiDelegatorError::InvalidTokenSplMintAccountData.into());
         }
 
@@ -100,11 +98,11 @@ impl AccountCheck for MintAccount {
 
 impl MintInit for MintAccount {
     fn init(
-        account: &AccountInfo,
-        payer: &AccountInfo,
+        account: &AccountView,
+        payer: &AccountView,
         decimals: u8,
-        mint_authority: &[u8; 32],
-        freeze_authority: Option<&[u8; 32]>,
+        mint_authority: &Address,
+        freeze_authority: Option<&Address>,
     ) -> ProgramResult {
         init_mint_helper(
             account,
@@ -117,11 +115,11 @@ impl MintInit for MintAccount {
     }
 
     fn init_if_needed(
-        account: &AccountInfo,
-        payer: &AccountInfo,
+        account: &AccountView,
+        payer: &AccountView,
         decimals: u8,
-        mint_authority: &[u8; 32],
-        freeze_authority: Option<&[u8; 32]>,
+        mint_authority: &Address,
+        freeze_authority: Option<&Address>,
     ) -> ProgramResult {
         match Self::check(account) {
             Ok(_) => Ok(()),
@@ -135,8 +133,8 @@ impl MintInit for MintAccount {
 pub struct TokenAccount;
 
 impl AccountCheck for TokenAccount {
-    fn check(account: &AccountInfo) -> Result<(), ProgramError> {
-        if account.owner().ne(&pinocchio_token::ID) {
+    fn check(account: &AccountView) -> Result<(), ProgramError> {
+        if !account.owned_by(&pinocchio_token::ID) {
             return Err(MultiDelegatorError::InvalidTokenSplTokenAccountData.into());
         }
 
@@ -150,19 +148,19 @@ impl AccountCheck for TokenAccount {
 
 impl TokenInit for TokenAccount {
     fn init(
-        account: &AccountInfo,
-        mint: &AccountInfo,
-        payer: &AccountInfo,
-        owner: &[u8; 32],
+        account: &AccountView,
+        mint: &AccountView,
+        payer: &AccountView,
+        owner: &Address,
     ) -> ProgramResult {
         init_token_helper(account, mint, payer, owner, &pinocchio_token::ID)
     }
 
     fn init_if_needed(
-        account: &AccountInfo,
-        mint: &AccountInfo,
-        payer: &AccountInfo,
-        owner: &[u8; 32],
+        account: &AccountView,
+        mint: &AccountView,
+        payer: &AccountView,
+        owner: &Address,
     ) -> ProgramResult {
         match Self::check(account) {
             Ok(_) => Ok(()),
@@ -176,8 +174,8 @@ impl TokenInit for TokenAccount {
 pub struct Mint2022Account;
 
 impl AccountCheck for Mint2022Account {
-    fn check(account: &AccountInfo) -> Result<(), ProgramError> {
-        if account.owner().ne(&crate::constants::TOKEN_2022_PROGRAM_ID) {
+    fn check(account: &AccountView) -> Result<(), ProgramError> {
+        if !account.owned_by(&crate::constants::TOKEN_2022_PROGRAM_ID) {
             return Err(MultiDelegatorError::InvalidToken2022MintAccountData.into());
         }
 
@@ -185,7 +183,7 @@ impl AccountCheck for Mint2022Account {
             return Ok(());
         }
 
-        let data = account.try_borrow_data()?;
+        let data = account.try_borrow()?;
 
         if data[TOKEN_2022_ACCOUNT_DISCRIMINATOR_OFFSET].ne(&TOKEN_2022_MINT_DISCRIMINATOR) {
             return Err(MultiDelegatorError::InvalidToken2022MintAccountData.into());
@@ -197,11 +195,11 @@ impl AccountCheck for Mint2022Account {
 
 impl MintInit for Mint2022Account {
     fn init(
-        account: &AccountInfo,
-        payer: &AccountInfo,
+        account: &AccountView,
+        payer: &AccountView,
         decimals: u8,
-        mint_authority: &[u8; 32],
-        freeze_authority: Option<&[u8; 32]>,
+        mint_authority: &Address,
+        freeze_authority: Option<&Address>,
     ) -> ProgramResult {
         init_mint_helper(
             account,
@@ -209,16 +207,16 @@ impl MintInit for Mint2022Account {
             decimals,
             mint_authority,
             freeze_authority,
-            &crate::constants::TOKEN_2022_PROGRAM_ID, // Pass as ref to array which is Pubkey
+            &crate::constants::TOKEN_2022_PROGRAM_ID,
         )
     }
 
     fn init_if_needed(
-        account: &AccountInfo,
-        payer: &AccountInfo,
+        account: &AccountView,
+        payer: &AccountView,
         decimals: u8,
-        mint_authority: &[u8; 32],
-        freeze_authority: Option<&[u8; 32]>,
+        mint_authority: &Address,
+        freeze_authority: Option<&Address>,
     ) -> ProgramResult {
         match Self::check(account) {
             Ok(_) => Ok(()),
@@ -232,8 +230,8 @@ impl MintInit for Mint2022Account {
 pub struct TokenAccount2022Account;
 
 impl AccountCheck for TokenAccount2022Account {
-    fn check(account: &AccountInfo) -> Result<(), ProgramError> {
-        if account.owner().ne(&TOKEN_2022_PROGRAM_ID) {
+    fn check(account: &AccountView) -> Result<(), ProgramError> {
+        if !account.owned_by(&TOKEN_2022_PROGRAM_ID) {
             return Err(MultiDelegatorError::InvalidToken2022TokenAccountData.into());
         }
 
@@ -241,7 +239,7 @@ impl AccountCheck for TokenAccount2022Account {
             return Ok(());
         }
 
-        let data = account.try_borrow_data()?;
+        let data = account.try_borrow()?;
 
         if data[TOKEN_2022_ACCOUNT_DISCRIMINATOR_OFFSET].ne(&TOKEN_2022_TOKEN_ACCOUNT_DISCRIMINATOR)
         {
@@ -254,10 +252,10 @@ impl AccountCheck for TokenAccount2022Account {
 
 impl TokenInit for TokenAccount2022Account {
     fn init(
-        account: &AccountInfo,
-        mint: &AccountInfo,
-        payer: &AccountInfo,
-        owner: &[u8; 32],
+        account: &AccountView,
+        mint: &AccountView,
+        payer: &AccountView,
+        owner: &Address,
     ) -> ProgramResult {
         init_token_helper(
             account,
@@ -269,10 +267,10 @@ impl TokenInit for TokenAccount2022Account {
     }
 
     fn init_if_needed(
-        account: &AccountInfo,
-        mint: &AccountInfo,
-        payer: &AccountInfo,
-        owner: &[u8; 32],
+        account: &AccountView,
+        mint: &AccountView,
+        payer: &AccountView,
+        owner: &Address,
     ) -> ProgramResult {
         match Self::check(account) {
             Ok(_) => Ok(()),
@@ -286,8 +284,10 @@ impl TokenInit for TokenAccount2022Account {
 pub struct TokenProgramInterface;
 
 impl TokenProgramInterface {
-    pub fn check(account: &AccountInfo) -> Result<(), ProgramError> {
-        if account.key().ne(&SPL_TOKEN_PROGRAM_ID) && account.key().ne(&TOKEN_2022_PROGRAM_ID) {
+    pub fn check(account: &AccountView) -> Result<(), ProgramError> {
+        if account.address().ne(&SPL_TOKEN_PROGRAM_ID)
+            && account.address().ne(&TOKEN_2022_PROGRAM_ID)
+        {
             return Err(MultiDelegatorError::InvalidTokenProgram.into());
         }
         Ok(())
@@ -297,8 +297,8 @@ impl TokenProgramInterface {
 pub struct MintInterface;
 
 impl AccountCheck for MintInterface {
-    fn check(account: &AccountInfo) -> Result<(), ProgramError> {
-        if account.owner().eq(&TOKEN_2022_PROGRAM_ID) {
+    fn check(account: &AccountView) -> Result<(), ProgramError> {
+        if account.owned_by(&TOKEN_2022_PROGRAM_ID) {
             Mint2022Account::check(account)
         } else {
             MintAccount::check(account)
@@ -308,12 +308,12 @@ impl AccountCheck for MintInterface {
 
 impl MintInterface {
     pub fn check_with_program(
-        account: &AccountInfo,
-        token_program: &AccountInfo,
+        account: &AccountView,
+        token_program: &AccountView,
     ) -> Result<(), ProgramError> {
         Self::check(account)?;
 
-        if account.owner().ne(token_program.key()) {
+        if !account.owned_by(token_program.address()) {
             return Err(MultiDelegatorError::InvalidTokenProgram.into());
         }
 
@@ -324,8 +324,8 @@ impl MintInterface {
 pub struct TokenAccountInterface;
 
 impl AccountCheck for TokenAccountInterface {
-    fn check(account: &AccountInfo) -> Result<(), ProgramError> {
-        if account.owner().eq(&TOKEN_2022_PROGRAM_ID) {
+    fn check(account: &AccountView) -> Result<(), ProgramError> {
+        if account.owned_by(&TOKEN_2022_PROGRAM_ID) {
             TokenAccount2022Account::check(account)
         } else {
             TokenAccount::check(account)
@@ -335,12 +335,12 @@ impl AccountCheck for TokenAccountInterface {
 
 impl TokenAccountInterface {
     pub fn check_with_program(
-        account: &AccountInfo,
-        token_program: &AccountInfo,
+        account: &AccountView,
+        token_program: &AccountView,
     ) -> Result<(), ProgramError> {
         Self::check(account)?;
 
-        if account.owner().ne(token_program.key()) {
+        if !account.owned_by(token_program.address()) {
             return Err(MultiDelegatorError::InvalidTokenProgram.into());
         }
 
@@ -348,13 +348,13 @@ impl TokenAccountInterface {
     }
 
     pub fn check_accounts_with_program(
-        token_program: &AccountInfo,
-        accounts: &[&AccountInfo],
+        token_program: &AccountView,
+        accounts: &[&AccountView],
     ) -> Result<(), ProgramError> {
         for account in accounts {
             Self::check(account)?;
 
-            if account.owner().ne(token_program.key()) {
+            if !account.owned_by(token_program.address()) {
                 return Err(MultiDelegatorError::InvalidTokenProgram.into());
             }
         }
@@ -368,21 +368,26 @@ impl AssociatedTokenAccount {
     /// Verifies that the given account is a valid ATA using the provided bump.
     /// This is cheaper than the trait method as it doesn't derive the bump.
     pub fn check_with_bump(
-        account: &AccountInfo,
-        authority: &AccountInfo,
-        mint: &AccountInfo,
-        token_program: &AccountInfo,
+        account: &AccountView,
+        authority: &AccountView,
+        mint: &AccountView,
+        token_program: &AccountView,
         bump: u8,
     ) -> Result<(), ProgramError> {
         TokenAccountInterface::check(account)?;
 
-        let expected_pda = create_program_address(
-            &[authority.key(), token_program.key(), mint.key(), &[bump]],
+        let expected_pda = Address::create_program_address(
+            &[
+                authority.address().as_ref(),
+                token_program.address().as_ref(),
+                mint.address().as_ref(),
+                &[bump],
+            ],
             &pinocchio_associated_token_account::ID,
         )
         .map_err(|_| MultiDelegatorError::InvalidAssociatedTokenAccountDerivedAddress)?;
 
-        if expected_pda.ne(account.key()) {
+        if expected_pda.ne(account.address()) {
             return Err(MultiDelegatorError::InvalidAssociatedTokenAccountDerivedAddress.into());
         }
 
@@ -392,19 +397,23 @@ impl AssociatedTokenAccount {
 
 impl AssociatedTokenAccountCheck for AssociatedTokenAccount {
     fn check(
-        account: &AccountInfo,
-        authority: &AccountInfo,
-        mint: &AccountInfo,
-        token_program: &AccountInfo,
+        account: &AccountView,
+        authority: &AccountView,
+        mint: &AccountView,
+        token_program: &AccountView,
     ) -> Result<(), ProgramError> {
         TokenAccountInterface::check(account)?;
 
-        if find_program_address(
-            &[authority.key(), token_program.key(), mint.key()],
+        if Address::find_program_address(
+            &[
+                authority.address().as_ref(),
+                token_program.address().as_ref(),
+                mint.address().as_ref(),
+            ],
             &pinocchio_associated_token_account::ID,
         )
         .0
-        .ne(account.key())
+        .ne(account.address())
         {
             return Err(MultiDelegatorError::InvalidAssociatedTokenAccountDerivedAddress.into());
         }
@@ -415,12 +424,12 @@ impl AssociatedTokenAccountCheck for AssociatedTokenAccount {
 
 impl AssociatedTokenAccountInit for AssociatedTokenAccount {
     fn init(
-        account: &AccountInfo,
-        mint: &AccountInfo,
-        payer: &AccountInfo,
-        owner: &AccountInfo,
-        system_program: &AccountInfo,
-        token_program: &AccountInfo,
+        account: &AccountView,
+        mint: &AccountView,
+        payer: &AccountView,
+        owner: &AccountView,
+        system_program: &AccountView,
+        token_program: &AccountView,
     ) -> ProgramResult {
         Create {
             funding_account: payer,
@@ -434,12 +443,12 @@ impl AssociatedTokenAccountInit for AssociatedTokenAccount {
     }
 
     fn init_if_needed(
-        account: &AccountInfo,
-        mint: &AccountInfo,
-        payer: &AccountInfo,
-        owner: &AccountInfo,
-        system_program: &AccountInfo,
-        token_program: &AccountInfo,
+        account: &AccountView,
+        mint: &AccountView,
+        payer: &AccountView,
+        owner: &AccountView,
+        system_program: &AccountView,
+        token_program: &AccountView,
     ) -> ProgramResult {
         match Self::check(account, owner, mint, token_program) {
             Ok(_) => Ok(()),

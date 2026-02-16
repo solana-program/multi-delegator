@@ -1,6 +1,6 @@
 use codama::CodamaType;
 use core::mem::{size_of, transmute};
-use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramResult};
+use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 
 use crate::{
     create_delegation_account, init_header, CreateDelegationAccounts, DelegationKind,
@@ -31,23 +31,23 @@ impl CreateRecurringDelegationData {
 pub const DISCRIMINATOR: &u8 = &2;
 
 pub fn process(
-    accounts: &[AccountInfo],
+    accounts: &[AccountView],
     call_data: &CreateRecurringDelegationData,
 ) -> ProgramResult {
     let accounts = CreateDelegationAccounts::try_from(accounts)?;
 
     let bump = create_delegation_account(&accounts, call_data.nonce, RecurringDelegation::LEN)?;
 
-    let binding = &mut accounts.delegation_account.try_borrow_mut_data()?;
+    let binding = &mut accounts.delegation_account.try_borrow_mut()?;
     let delegation = RecurringDelegation::load_mut(binding)?;
 
     init_header(
         &mut delegation.header,
         DelegationKind::Recurring,
         bump,
-        accounts.delegator.key(),
-        accounts.delegatee.key(),
-        accounts.payer.key(),
+        accounts.delegator.address(),
+        accounts.delegatee.address(),
+        accounts.payer.address(),
     );
     delegation.current_period_start_ts = call_data.start_ts;
     delegation.period_length_s = call_data.period_length_s;
@@ -119,9 +119,9 @@ mod tests {
         let del_amount_pulled_in_period = delegation.amount_pulled_in_period;
         let del_current_period_start_ts = delegation.current_period_start_ts;
 
-        assert_eq!(header.delegator, payer.pubkey().to_bytes());
-        assert_eq!(header.delegatee, delegatee.to_bytes());
-        assert_eq!(header.payer, payer.pubkey().to_bytes());
+        assert_eq!(header.delegator.to_bytes(), payer.pubkey().to_bytes());
+        assert_eq!(header.delegatee.to_bytes(), delegatee.to_bytes());
+        assert_eq!(header.payer.to_bytes(), payer.pubkey().to_bytes());
         assert_eq!(header.kind, DelegationKind::Recurring as u8);
         assert_eq!(del_amount_per_period, amount_per_period);
         assert_eq!(del_period_length_s, period_length_s);

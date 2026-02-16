@@ -1,5 +1,5 @@
 use codama::CodamaType;
-use pinocchio::pubkey::Pubkey;
+use pinocchio::Address;
 
 pub const VERSION_OFFSET: usize = 0;
 pub const KIND_OFFSET: usize = 1;
@@ -15,9 +15,9 @@ pub struct Header {
     pub version: u8,
     pub kind: u8,
     pub bump: u8,
-    pub delegator: Pubkey,
-    pub delegatee: Pubkey,
-    pub payer: Pubkey,
+    pub delegator: Address,
+    pub delegatee: Address,
+    pub payer: Address,
 }
 
 impl Header {

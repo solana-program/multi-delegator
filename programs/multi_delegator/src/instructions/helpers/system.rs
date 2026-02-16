@@ -1,11 +1,11 @@
 use super::traits::AccountCheck;
 use crate::MultiDelegatorError;
-use pinocchio::{account_info::AccountInfo, program_error::ProgramError};
+use pinocchio::{error::ProgramError, AccountView};
 
 pub struct SignerAccount;
 
 impl AccountCheck for SignerAccount {
-    fn check(account: &AccountInfo) -> Result<(), ProgramError> {
+    fn check(account: &AccountView) -> Result<(), ProgramError> {
         if !account.is_signer() {
             return Err(MultiDelegatorError::NotSigner.into());
         }
@@ -16,8 +16,8 @@ impl AccountCheck for SignerAccount {
 pub struct SystemAccount;
 
 impl AccountCheck for SystemAccount {
-    fn check(account: &AccountInfo) -> Result<(), ProgramError> {
-        if account.key().ne(&pinocchio_system::ID) {
+    fn check(account: &AccountView) -> Result<(), ProgramError> {
+        if account.address().ne(&pinocchio_system::ID) {
             return Err(MultiDelegatorError::NotSystemProgram.into());
         }
 
@@ -28,8 +28,8 @@ impl AccountCheck for SystemAccount {
 pub struct MultiDelegateAccount;
 
 impl AccountCheck for MultiDelegateAccount {
-    fn check(account: &AccountInfo) -> Result<(), ProgramError> {
-        if account.owner() != &crate::ID {
+    fn check(account: &AccountView) -> Result<(), ProgramError> {
+        if !account.owned_by(&crate::ID) {
             return Err(MultiDelegatorError::InvalidMultiDelegatePda.into());
         }
         Ok(())

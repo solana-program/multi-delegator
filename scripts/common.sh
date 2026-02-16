@@ -3,7 +3,7 @@
 
 # Configuration (can be overridden via environment)
 KEYPAIR_FILE="${KEYPAIR_FILE:-keys/multi_delegator-keypair.json}"
-PROGRAM_SO="${PROGRAM_SO:-programs/multi_delegator/target/deploy/multi_delegator.so}"
+PROGRAM_SO="${PROGRAM_SO:-target/deploy/multi_delegator.so}"
 LEDGER_DIR="${LEDGER_DIR:-.validator-ledger}"
 RPC_PORT="${RPC_PORT:-8899}"
 

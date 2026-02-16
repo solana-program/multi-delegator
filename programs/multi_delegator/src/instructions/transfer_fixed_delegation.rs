@@ -1,8 +1,7 @@
 use pinocchio::{
-    account_info::AccountInfo,
-    program_error::ProgramError,
+    error::ProgramError,
     sysvars::{clock::Clock, Sysvar},
-    ProgramResult,
+    AccountView, ProgramResult,
 };
 
 use crate::{
@@ -14,12 +13,12 @@ use crate::{
 
 pub const DISCRIMINATOR: &u8 = &4;
 
-pub fn process(accounts: &[AccountInfo], transfer: &TransferData) -> ProgramResult {
+pub fn process(accounts: &[AccountView], transfer: &TransferData) -> ProgramResult {
     let accounts_struct = FixedTransferAccounts::try_from(accounts)?;
 
     // Validate kind matches Fixed and update state
     {
-        let mut binding = accounts_struct.delegation_pda.try_borrow_mut_data()?;
+        let mut binding = accounts_struct.delegation_pda.try_borrow_mut()?;
 
         if binding.len() <= KIND_OFFSET {
             return Err(MultiDelegatorError::InvalidAccountData.into());
@@ -36,7 +35,7 @@ pub fn process(accounts: &[AccountInfo], transfer: &TransferData) -> ProgramResu
         Delegation::check(
             &delegation.header,
             &transfer.delegator,
-            accounts_struct.delegatee.key(),
+            accounts_struct.delegatee.address(),
         )?;
 
         let current_ts = Clock::get()?.unix_timestamp;
@@ -71,18 +70,18 @@ pub fn process(accounts: &[AccountInfo], transfer: &TransferData) -> ProgramResu
 }
 
 pub struct FixedTransferAccounts<'a> {
-    pub delegation_pda: &'a AccountInfo,
-    pub multi_delegate: &'a AccountInfo,
-    pub delegator_ata: &'a AccountInfo,
-    pub receiver_ata: &'a AccountInfo,
-    pub token_program: &'a AccountInfo,
-    pub delegatee: &'a AccountInfo,
+    pub delegation_pda: &'a AccountView,
+    pub multi_delegate: &'a AccountView,
+    pub delegator_ata: &'a AccountView,
+    pub receiver_ata: &'a AccountView,
+    pub token_program: &'a AccountView,
+    pub delegatee: &'a AccountView,
 }
 
-impl<'a> TryFrom<&'a [AccountInfo]> for FixedTransferAccounts<'a> {
+impl<'a> TryFrom<&'a [AccountView]> for FixedTransferAccounts<'a> {
     type Error = ProgramError;
 
-    fn try_from(accounts: &'a [AccountInfo]) -> Result<Self, Self::Error> {
+    fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> {
         let [delegation_pda, multi_delegate, delegator_ata, receiver_ata, token_program, delegatee] =
             accounts
         else {

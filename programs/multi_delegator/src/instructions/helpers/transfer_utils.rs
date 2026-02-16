@@ -1,32 +1,30 @@
 use pinocchio::{
-    account_info::AccountInfo,
-    instruction::{Seed, Signer},
-    pubkey::Pubkey,
-    ProgramResult,
+    cpi::{Seed, Signer},
+    AccountView, Address, ProgramResult,
 };
 use pinocchio_token_2022::instructions::Transfer;
 
 use crate::{MultiDelegate, MultiDelegatorError};
 
 pub struct TransferAccounts<'a> {
-    pub delegator_ata: &'a AccountInfo,
+    pub delegator_ata: &'a AccountView,
     /// Account to whom these funds are being transfered too
-    pub to_ata: &'a AccountInfo,
+    pub to_ata: &'a AccountView,
     /// Pda that is the delegate to the delegators tokens
-    pub multidelegate_pda: &'a AccountInfo,
+    pub multidelegate_pda: &'a AccountView,
     /// The token program (SPL Token or Token-2022)
-    pub token_program: &'a AccountInfo,
+    pub token_program: &'a AccountView,
 }
 
 pub fn transfer_with_delegate(
     amount: u64,
-    delegator: &Pubkey,
-    mint: &Pubkey,
+    delegator: &Address,
+    mint: &Address,
     accounts: &TransferAccounts,
 ) -> ProgramResult {
     let bump = {
         // Read the bump from the MultiDelegate account data (cheaper than find_program_address)
-        let multidelegate_data = accounts.multidelegate_pda.try_borrow_data()?;
+        let multidelegate_data = accounts.multidelegate_pda.try_borrow()?;
         let multidelegate = MultiDelegate::load(&multidelegate_data)?;
 
         // Verify that the MultiDelegate account matches the provided delegator and mint.
@@ -52,7 +50,7 @@ pub fn transfer_with_delegate(
         to: accounts.to_ata,
         authority: accounts.multidelegate_pda,
         amount,
-        token_program: accounts.token_program.key(),
+        token_program: accounts.token_program.address(),
     }
     .invoke_signed(&signer)?;
 

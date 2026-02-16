@@ -1,8 +1,7 @@
 use pinocchio::{
-    account_info::AccountInfo,
-    program_error::ProgramError,
+    error::ProgramError,
     sysvars::{clock::Clock, Sysvar},
-    ProgramResult,
+    AccountView, ProgramResult,
 };
 
 use crate::{
@@ -14,12 +13,12 @@ use crate::{
 
 pub const DISCRIMINATOR: &u8 = &5;
 
-pub fn process(accounts: &[AccountInfo], transfer_data: &TransferData) -> ProgramResult {
+pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> ProgramResult {
     let accounts_struct = RecurringTransferAccounts::try_from(accounts)?;
 
     let current_ts = Clock::get()?.unix_timestamp;
     {
-        let mut binding = accounts_struct.delegation_pda.try_borrow_mut_data()?;
+        let mut binding = accounts_struct.delegation_pda.try_borrow_mut()?;
         let delegation_mut = RecurringDelegation::load_mut(&mut binding)?;
 
         if delegation_mut.header.kind != DelegationKind::Recurring as u8 {
@@ -30,7 +29,7 @@ pub fn process(accounts: &[AccountInfo], transfer_data: &TransferData) -> Progra
         Delegation::check(
             &delegation_mut.header,
             &transfer_data.delegator,
-            accounts_struct.delegatee.key(),
+            accounts_struct.delegatee.address(),
         )?;
 
         if current_ts > delegation_mut.expiry_ts {
@@ -86,18 +85,18 @@ pub fn process(accounts: &[AccountInfo], transfer_data: &TransferData) -> Progra
 }
 
 pub struct RecurringTransferAccounts<'a> {
-    pub delegation_pda: &'a AccountInfo,
-    pub multi_delegate: &'a AccountInfo,
-    pub delegator_ata: &'a AccountInfo,
-    pub receiver_ata: &'a AccountInfo,
-    pub token_program: &'a AccountInfo,
-    pub delegatee: &'a AccountInfo,
+    pub delegation_pda: &'a AccountView,
+    pub multi_delegate: &'a AccountView,
+    pub delegator_ata: &'a AccountView,
+    pub receiver_ata: &'a AccountView,
+    pub token_program: &'a AccountView,
+    pub delegatee: &'a AccountView,
 }
 
-impl<'a> TryFrom<&'a [AccountInfo]> for RecurringTransferAccounts<'a> {
+impl<'a> TryFrom<&'a [AccountView]> for RecurringTransferAccounts<'a> {
     type Error = ProgramError;
 
-    fn try_from(accounts: &'a [AccountInfo]) -> Result<Self, Self::Error> {
+    fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> {
         let [delegation_pda, multi_delegate, delegator_ata, receiver_ata, token_program, delegatee] =
             accounts
         else {

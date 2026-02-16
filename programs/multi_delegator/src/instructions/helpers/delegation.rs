@@ -1,9 +1,8 @@
 use pinocchio::{
-    account_info::AccountInfo,
-    instruction::{Seed, Signer},
-    program_error::ProgramError,
-    pubkey::Pubkey,
+    cpi::{Seed, Signer},
+    error::ProgramError,
     sysvars::{rent::Rent, Sysvar},
+    AccountView, Address,
 };
 use pinocchio_system::instructions::CreateAccount;
 
@@ -13,18 +12,18 @@ use crate::{
 };
 
 pub struct CreateDelegationAccounts<'a> {
-    pub delegator: &'a AccountInfo,
-    pub multi_delegate: &'a AccountInfo,
-    pub delegation_account: &'a AccountInfo,
-    pub delegatee: &'a AccountInfo,
-    pub system_program: &'a AccountInfo,
-    pub payer: &'a AccountInfo,
+    pub delegator: &'a AccountView,
+    pub multi_delegate: &'a AccountView,
+    pub delegation_account: &'a AccountView,
+    pub delegatee: &'a AccountView,
+    pub system_program: &'a AccountView,
+    pub payer: &'a AccountView,
 }
 
-impl<'a> TryFrom<&'a [AccountInfo]> for CreateDelegationAccounts<'a> {
+impl<'a> TryFrom<&'a [AccountView]> for CreateDelegationAccounts<'a> {
     type Error = ProgramError;
 
-    fn try_from(accounts: &'a [AccountInfo]) -> Result<Self, Self::Error> {
+    fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> {
         let [delegator, multi_delegate, delegation_account, delegatee, system_program, rem @ ..] =
             accounts
         else {
@@ -61,23 +60,23 @@ pub fn create_delegation_account(
     let nonce_bytes = nonce.to_le_bytes();
 
     let (expected_pda, bump) = find_delegation_pda(
-        accounts.multi_delegate.key(),
-        accounts.delegator.key(),
-        accounts.delegatee.key(),
+        accounts.multi_delegate.address(),
+        accounts.delegator.address(),
+        accounts.delegatee.address(),
         nonce,
     );
 
-    if expected_pda != *accounts.delegation_account.key() {
+    if expected_pda != *accounts.delegation_account.address() {
         return Err(MultiDelegatorError::InvalidDelegatePda.into());
     }
 
-    let lamports = Rent::get()?.minimum_balance(space);
+    let lamports = Rent::get()?.try_minimum_balance(space)?;
     let bump_bytes = [bump];
     let seeds = [
         Seed::from(DELEGATE_BASE_SEED),
-        Seed::from(accounts.multi_delegate.key().as_ref()),
-        Seed::from(accounts.delegator.key().as_ref()),
-        Seed::from(accounts.delegatee.key().as_ref()),
+        Seed::from(accounts.multi_delegate.address().as_ref()),
+        Seed::from(accounts.delegator.address().as_ref()),
+        Seed::from(accounts.delegatee.address().as_ref()),
         Seed::from(&nonce_bytes),
         Seed::from(&bump_bytes),
     ];
@@ -99,9 +98,9 @@ pub fn init_header(
     header: &mut Header,
     kind: DelegationKind,
     bump: u8,
-    delegator: &Pubkey,
-    delegatee: &Pubkey,
-    payer: &Pubkey,
+    delegator: &Address,
+    delegatee: &Address,
+    payer: &Address,
 ) {
     header.version = CURRENT_VERSION;
     header.kind = kind.into();
@@ -124,8 +123,8 @@ impl Delegation {
     /// 2. The caller is the authorized delegatee for this delegation
     pub fn check(
         header: &Header,
-        expected_delegator: &Pubkey,
-        caller_delegatee: &Pubkey,
+        expected_delegator: &Address,
+        caller_delegatee: &Address,
     ) -> Result<(), ProgramError> {
         if header.delegator != *expected_delegator {
             return Err(MultiDelegatorError::Unauthorized.into());

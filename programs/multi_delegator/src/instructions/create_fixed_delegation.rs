@@ -1,6 +1,6 @@
 use codama::CodamaType;
 use core::mem::{size_of, transmute};
-use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramResult};
+use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 
 use crate::{
     create_delegation_account, init_header, state::FixedDelegation, CreateDelegationAccounts,
@@ -28,21 +28,21 @@ impl CreateFixedDelegationData {
 
 pub const DISCRIMINATOR: &u8 = &1;
 
-pub fn process(accounts: &[AccountInfo], call_data: &CreateFixedDelegationData) -> ProgramResult {
+pub fn process(accounts: &[AccountView], call_data: &CreateFixedDelegationData) -> ProgramResult {
     let accounts = CreateDelegationAccounts::try_from(accounts)?;
 
     let bump = create_delegation_account(&accounts, call_data.nonce, FixedDelegation::LEN)?;
 
-    let binding = &mut accounts.delegation_account.try_borrow_mut_data()?;
+    let binding = &mut accounts.delegation_account.try_borrow_mut()?;
     let delegation = FixedDelegation::load_mut(binding)?;
 
     init_header(
         &mut delegation.header,
         DelegationKind::Fixed,
         bump,
-        accounts.delegator.key(),
-        accounts.delegatee.key(),
-        accounts.payer.key(),
+        accounts.delegator.address(),
+        accounts.delegatee.address(),
+        accounts.payer.address(),
     );
     delegation.amount = call_data.amount;
     delegation.expiry_ts = call_data.expiry_ts;
@@ -112,7 +112,10 @@ mod tests {
         let delegation_rent = account.lamports;
         let delegation = FixedDelegation::load(&account.data).unwrap();
 
-        assert_eq!(delegation.header.payer, sponsor.pubkey().to_bytes());
+        assert_eq!(
+            delegation.header.payer.to_bytes(),
+            sponsor.pubkey().to_bytes()
+        );
 
         // Now revoke and check refund
         let res = RevokeDelegation::new(litesvm, delegator, mint, delegatee, nonce)
@@ -163,8 +166,8 @@ mod tests {
         let header = delegation.header;
         let del_amount = delegation.amount;
         let del_expiry_s = delegation.expiry_ts;
-        assert_eq!(header.delegator, payer.pubkey().to_bytes());
-        assert_eq!(header.delegatee, delegatee.to_bytes());
+        assert_eq!(header.delegator.to_bytes(), payer.pubkey().to_bytes());
+        assert_eq!(header.delegatee.to_bytes(), delegatee.to_bytes());
         assert_eq!(header.kind, DelegationKind::Fixed as u8);
         assert_eq!(del_amount, amount);
         assert_eq!(del_expiry_s, expiry_ts);

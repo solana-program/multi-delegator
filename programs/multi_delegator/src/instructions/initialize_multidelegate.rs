@@ -1,9 +1,8 @@
 use pinocchio::{
-    account_info::AccountInfo,
-    instruction::{Seed, Signer},
-    program_error::ProgramError,
+    cpi::{Seed, Signer},
+    error::ProgramError,
     sysvars::{rent::Rent, Sysvar},
-    ProgramResult,
+    AccountView, ProgramResult,
 };
 
 use pinocchio_system::instructions::CreateAccount;
@@ -17,18 +16,18 @@ use crate::{
 };
 
 pub struct InitializeMultiDelegateAccounts<'a> {
-    pub user: &'a AccountInfo,
-    pub multi_delegate: &'a AccountInfo,
-    pub token_mint: &'a AccountInfo,
-    pub user_ata: &'a AccountInfo,
-    pub system_program: &'a AccountInfo,
-    pub token_program: &'a AccountInfo,
+    pub user: &'a AccountView,
+    pub multi_delegate: &'a AccountView,
+    pub token_mint: &'a AccountView,
+    pub user_ata: &'a AccountView,
+    pub system_program: &'a AccountView,
+    pub token_program: &'a AccountView,
 }
 
-impl<'a> TryFrom<&'a [AccountInfo]> for InitializeMultiDelegateAccounts<'a> {
+impl<'a> TryFrom<&'a [AccountView]> for InitializeMultiDelegateAccounts<'a> {
     type Error = ProgramError;
 
-    fn try_from(accounts: &'a [AccountInfo]) -> Result<Self, Self::Error> {
+    fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> {
         let [user, multi_delegate, token_mint, user_ata, system_program, token_program] = accounts
         else {
             return Err(MultiDelegatorError::NotEnoughAccountKeys.into());
@@ -53,27 +52,27 @@ impl<'a> TryFrom<&'a [AccountInfo]> for InitializeMultiDelegateAccounts<'a> {
 
 pub const DISCRIMINATOR: &u8 = &0;
 
-pub fn process(accounts: &[AccountInfo]) -> ProgramResult {
+pub fn process(accounts: &[AccountView]) -> ProgramResult {
     let accounts = InitializeMultiDelegateAccounts::try_from(accounts)?;
 
     let (expected_pda, bump) =
-        MultiDelegate::find_pda(accounts.user.key(), accounts.token_mint.key());
+        MultiDelegate::find_pda(accounts.user.address(), accounts.token_mint.address());
 
-    if expected_pda != *accounts.multi_delegate.key() {
+    if expected_pda != *accounts.multi_delegate.address() {
         return Err(MultiDelegatorError::InvalidMultiDelegatePda.into());
     }
 
     let bump_binding = [bump];
     let seeds = [
         Seed::from(MultiDelegate::SEED),
-        Seed::from(accounts.user.key().as_ref()),
-        Seed::from(accounts.token_mint.key().as_ref()),
+        Seed::from(accounts.user.address().as_ref()),
+        Seed::from(accounts.token_mint.address().as_ref()),
         Seed::from(&bump_binding),
     ];
 
     // Initialize the account if it doesn't exist
     if accounts.multi_delegate.data_len() == 0 {
-        let lamports = Rent::get()?.minimum_balance(MultiDelegate::LEN);
+        let lamports = Rent::get()?.try_minimum_balance(MultiDelegate::LEN)?;
         let signer = [Signer::from(&seeds)];
 
         CreateAccount {
@@ -85,19 +84,19 @@ pub fn process(accounts: &[AccountInfo]) -> ProgramResult {
         }
         .invoke_signed(&signer)?;
 
-        let mut data = accounts.multi_delegate.try_borrow_mut_data()?;
+        let mut data = accounts.multi_delegate.try_borrow_mut()?;
         let multi_delegate_state = MultiDelegate::load_mut(&mut data)?;
 
-        multi_delegate_state.user = *accounts.user.key();
-        multi_delegate_state.token_mint = *accounts.token_mint.key();
+        multi_delegate_state.user = *accounts.user.address();
+        multi_delegate_state.token_mint = *accounts.token_mint.address();
         multi_delegate_state.bump = bump;
     }
 
     // Approve delegation on the correct token program (SPL Token vs Token-2022).
     // The instruction data is the same, but the program id differs.
-    if accounts.token_program.key().as_ref() == TOKEN_2022_PROGRAM_ID {
+    if accounts.token_program.address().eq(&TOKEN_2022_PROGRAM_ID) {
         Approve2022 {
-            token_program: accounts.token_program.key(),
+            token_program: accounts.token_program.address(),
             source: accounts.user_ata,
             delegate: accounts.multi_delegate,
             authority: accounts.user,
@@ -151,8 +150,8 @@ mod tests {
         let account = litesvm.get_account(&multi_delegate_pda).unwrap();
         let multi_delegate = MultiDelegate::load(&account.data).unwrap();
 
-        assert_eq!(multi_delegate.user, user.pubkey().to_bytes());
-        assert_eq!(multi_delegate.token_mint, mint.to_bytes());
+        assert_eq!(multi_delegate.user.to_bytes(), user.pubkey().to_bytes());
+        assert_eq!(multi_delegate.token_mint.to_bytes(), mint.to_bytes());
         assert_eq!(multi_delegate.bump, bump);
 
         // Verify delegation
@@ -181,8 +180,8 @@ mod tests {
         let account = litesvm.get_account(&multi_delegate_pda).unwrap();
         let multi_delegate = MultiDelegate::load(&account.data).unwrap();
 
-        assert_eq!(multi_delegate.user, user.pubkey().to_bytes());
-        assert_eq!(multi_delegate.token_mint, mint.to_bytes());
+        assert_eq!(multi_delegate.user.to_bytes(), user.pubkey().to_bytes());
+        assert_eq!(multi_delegate.token_mint.to_bytes(), mint.to_bytes());
         assert_eq!(multi_delegate.bump, bump);
 
         // Verify delegation

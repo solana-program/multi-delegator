@@ -1,19 +1,19 @@
 use codama::CodamaType;
-use pinocchio::program_error::ProgramError;
-use pinocchio::pubkey::{create_program_address, find_program_address, Pubkey};
+use pinocchio::error::ProgramError;
+use pinocchio::Address;
 
 use crate::MultiDelegatorError;
 
 pub const DELEGATE_BASE_SEED: &[u8] = b"delegation";
 
 pub fn verify_delegation_pda(
-    multi_delegate: &Pubkey,
-    delegator: &Pubkey,
-    delegatee: &Pubkey,
+    multi_delegate: &Address,
+    delegator: &Address,
+    delegatee: &Address,
     nonce: u64,
     bump: u8,
-) -> Result<Pubkey, ProgramError> {
-    create_program_address(
+) -> Result<Address, ProgramError> {
+    Address::create_program_address(
         &[
             DELEGATE_BASE_SEED,
             multi_delegate.as_ref(),
@@ -28,12 +28,12 @@ pub fn verify_delegation_pda(
 }
 
 pub fn find_delegation_pda(
-    multi_delegate: &Pubkey,
-    delegator: &Pubkey,
-    delegatee: &Pubkey,
+    multi_delegate: &Address,
+    delegator: &Address,
+    delegatee: &Address,
     nonce: u64,
-) -> (Pubkey, u8) {
-    find_program_address(
+) -> (Address, u8) {
+    Address::find_program_address(
         &[
             DELEGATE_BASE_SEED,
             multi_delegate.as_ref(),

@@ -1,6 +1,6 @@
 use codama::CodamaType;
 use core::mem::{size_of, transmute};
-use pinocchio::{program_error::ProgramError, pubkey::Pubkey};
+use pinocchio::{error::ProgramError, Address};
 
 use crate::MultiDelegatorError;
 
@@ -8,8 +8,8 @@ use crate::MultiDelegatorError;
 #[derive(CodamaType, Debug, Clone)]
 pub struct TransferData {
     pub amount: u64,
-    pub delegator: Pubkey,
-    pub mint: Pubkey,
+    pub delegator: Address,
+    pub mint: Address,
 }
 
 impl TransferData {
