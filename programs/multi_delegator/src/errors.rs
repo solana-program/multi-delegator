@@ -45,6 +45,13 @@ impl TryFrom<u32> for MultiDelegatorError {
             29 => Ok(Self::InvalidPayerData),
             30 => Ok(Self::ArithmeticUnderflow),
             31 => Ok(Self::InvalidAccountDiscriminator),
+            32 => Ok(Self::MintHasConfidentialTransfer),
+            33 => Ok(Self::MintHasNonTransferable),
+            34 => Ok(Self::MintHasPermanentDelegate),
+            35 => Ok(Self::MintHasTransferHook),
+            36 => Ok(Self::MintHasTransferFee),
+            37 => Ok(Self::MintHasMintCloseAuthority),
+            38 => Ok(Self::MintHasPausable),
             _ => Err(code),
         }
     }
@@ -116,4 +123,18 @@ pub enum MultiDelegatorError {
     ArithmeticUnderflow,
     #[error("Invalid account discriminator")]
     InvalidAccountDiscriminator,
+    #[error("Mint has ConfidentialTransfer extension")]
+    MintHasConfidentialTransfer,
+    #[error("Mint has NonTransferable extension")]
+    MintHasNonTransferable,
+    #[error("Mint has PermanentDelegate extension")]
+    MintHasPermanentDelegate,
+    #[error("Mint has TransferHook extension")]
+    MintHasTransferHook,
+    #[error("Mint has TransferFee extension")]
+    MintHasTransferFee,
+    #[error("Mint has MintCloseAuthority extension")]
+    MintHasMintCloseAuthority,
+    #[error("Mint has Pausable extension")]
+    MintHasPausable,
 }

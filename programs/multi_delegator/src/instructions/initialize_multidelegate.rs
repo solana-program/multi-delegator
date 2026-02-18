@@ -108,7 +108,9 @@ pub fn process(accounts: &[AccountView]) -> ProgramResult {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
     use solana_signer::Signer;
+    use spl_token_2022::extension::ExtensionType;
 
     use crate::{
         tests::{
@@ -118,7 +120,7 @@ mod tests {
             },
             utils::{fetch_account, init_ata, init_mint, initialize_multidelegate_action, setup},
         },
-        AccountDiscriminator, MultiDelegate,
+        AccountDiscriminator, MultiDelegate, MultiDelegatorError,
     };
 
     #[test]
@@ -131,6 +133,7 @@ mod tests {
             MINT_DECIMALS,
             1_000_000_000,
             Some(user.pubkey()),
+            &[],
         );
         let user_ata = init_ata(litesvm, mint, user.pubkey(), 1_000_000);
 
@@ -155,8 +158,48 @@ mod tests {
         assert_eq!(ata_account.delegated_amount, u64::MAX);
     }
 
-    #[test]
-    fn initialize_multidelegate_token_2022() {
+    #[rstest]
+    #[case::no_extensions(&[], None)]
+    #[case::confidential_transfer(
+        &[ExtensionType::ConfidentialTransferMint],
+        Some(MultiDelegatorError::MintHasConfidentialTransfer)
+    )]
+    #[case::non_transferable(
+        &[ExtensionType::NonTransferable],
+        Some(MultiDelegatorError::MintHasNonTransferable)
+    )]
+    #[case::permanent_delegate(
+        &[ExtensionType::PermanentDelegate],
+        Some(MultiDelegatorError::MintHasPermanentDelegate)
+    )]
+    #[case::transfer_fee(
+        &[ExtensionType::TransferFeeConfig],
+        Some(MultiDelegatorError::MintHasTransferFee)
+    )]
+    #[case::transfer_hook(
+        &[ExtensionType::TransferHook],
+        Some(MultiDelegatorError::MintHasTransferHook)
+    )]
+    #[case::pausable(
+        &[ExtensionType::Pausable],
+        Some(MultiDelegatorError::MintHasPausable)
+    )]
+    #[case::close_authority(
+        &[ExtensionType::MintCloseAuthority],
+        Some(MultiDelegatorError::MintHasMintCloseAuthority)
+    )]
+    #[case::multiple_blocked(
+        &[ExtensionType::TransferFeeConfig, ExtensionType::TransferHook],
+        Some(MultiDelegatorError::MintHasTransferFee)
+    )]
+    #[case::mixed_blocked(
+        &[ExtensionType::MintCloseAuthority, ExtensionType::PermanentDelegate],
+        Some(MultiDelegatorError::MintHasMintCloseAuthority)
+    )]
+    fn initialize_multidelegate_token_2022(
+        #[case] extensions: &[ExtensionType],
+        #[case] expected_error: Option<MultiDelegatorError>,
+    ) {
         let (litesvm, user) = &mut setup();
 
         let mint = init_mint(
@@ -165,28 +208,36 @@ mod tests {
             MINT_DECIMALS,
             1_000_000_000,
             Some(user.pubkey()),
+            extensions,
         );
         let user_ata = init_ata(litesvm, mint, user.pubkey(), 1_000_000);
 
         let (res, multi_delegate_pda, bump) = initialize_multidelegate_action(litesvm, user, mint);
-        res.assert_ok();
 
-        let account = litesvm.get_account(&multi_delegate_pda).unwrap();
-        let multi_delegate = MultiDelegate::load(&account.data).unwrap();
+        match expected_error {
+            Some(err) => res.assert_err(err),
+            None => {
+                res.assert_ok();
 
-        assert_eq!(
-            multi_delegate.discriminator,
-            AccountDiscriminator::MultiDelegate as u8
-        );
-        assert_eq!(multi_delegate.user.to_bytes(), user.pubkey().to_bytes());
-        assert_eq!(multi_delegate.token_mint.to_bytes(), mint.to_bytes());
-        assert_eq!(multi_delegate.bump, bump);
+                let account = litesvm.get_account(&multi_delegate_pda).unwrap();
+                let multi_delegate = MultiDelegate::load(&account.data).unwrap();
 
-        // Verify delegation
-        let ata_account = fetch_account::<spl_token_2022::state::Account>(litesvm, &user_ata);
-        assert!(ata_account.delegate.is_some());
-        assert_eq!(ata_account.delegate.unwrap(), multi_delegate_pda);
-        assert_eq!(ata_account.delegated_amount, u64::MAX);
+                assert_eq!(
+                    multi_delegate.discriminator,
+                    AccountDiscriminator::MultiDelegate as u8
+                );
+                assert_eq!(multi_delegate.user.to_bytes(), user.pubkey().to_bytes());
+                assert_eq!(multi_delegate.token_mint.to_bytes(), mint.to_bytes());
+                assert_eq!(multi_delegate.bump, bump);
+
+                // Verify delegation
+                let ata_account =
+                    fetch_account::<spl_token_2022::state::Account>(litesvm, &user_ata);
+                assert!(ata_account.delegate.is_some());
+                assert_eq!(ata_account.delegate.unwrap(), multi_delegate_pda);
+                assert_eq!(ata_account.delegated_amount, u64::MAX);
+            }
+        }
     }
 
     #[test]
@@ -210,6 +261,7 @@ mod tests {
             MINT_DECIMALS,
             1_000_000_000,
             Some(user.pubkey()),
+            &[],
         );
         let user_ata = init_ata(litesvm, mint, user.pubkey(), 1_000_000);
 
@@ -248,6 +300,7 @@ mod tests {
             MINT_DECIMALS,
             1_000_000_000,
             Some(user.pubkey()),
+            &[],
         );
         let user_ata = init_ata(litesvm, mint, user.pubkey(), 1_000_000);
 
@@ -310,6 +363,7 @@ mod tests {
             MINT_DECIMALS,
             1_000_000_000,
             Some(user.pubkey()),
+            &[],
         );
         let user_ata = init_ata(litesvm, mint, user.pubkey(), 1_000_000);
 

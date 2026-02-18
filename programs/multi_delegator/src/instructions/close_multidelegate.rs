@@ -82,6 +82,7 @@ mod tests {
             MINT_DECIMALS,
             1_000_000_000,
             Some(user.pubkey()),
+            &[],
         );
         let _user_ata = init_ata(litesvm, mint, user.pubkey(), 1_000_000);
 
@@ -117,6 +118,7 @@ mod tests {
             MINT_DECIMALS,
             1_000_000_000,
             Some(user.pubkey()),
+            &[],
         );
         let _user_ata = init_ata(litesvm, mint, user.pubkey(), 1_000_000);
 
@@ -145,6 +147,7 @@ mod tests {
             MINT_DECIMALS,
             1_000_000_000,
             Some(user.pubkey()),
+            &[],
         );
         let _user_ata = init_ata(litesvm, mint, user.pubkey(), 1_000_000);
 

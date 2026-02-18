@@ -22,6 +22,63 @@ use crate::{
     MultiDelegatorError,
 };
 
+// Blocked Token-2022 extension types (u16 discriminators from ExtensionType enum)
+const EXTENSION_TYPE_TRANSFER_FEE_CONFIG: u16 = 1;
+const EXTENSION_TYPE_MINT_CLOSE_AUTHORITY: u16 = 3;
+const EXTENSION_TYPE_CONFIDENTIAL_TRANSFER_MINT: u16 = 4;
+const EXTENSION_TYPE_NON_TRANSFERABLE: u16 = 9;
+const EXTENSION_TYPE_PERMANENT_DELEGATE: u16 = 12;
+const EXTENSION_TYPE_TRANSFER_HOOK: u16 = 14;
+const EXTENSION_TYPE_PAUSABLE: u16 = 26;
+
+// TLV extensions start after: base Mint (82 bytes) + padding (83 bytes) + AccountType discriminator (1 byte)
+const TLV_EXTENSIONS_START: usize = 166;
+
+/// Validates that a Token-2022 mint does not contain any blocked extensions.
+/// The `data` slice must be the full account data (including base mint, padding, and TLV).
+fn validate_mint_extensions(data: &[u8]) -> Result<(), ProgramError> {
+    let mut offset = TLV_EXTENSIONS_START;
+
+    while offset + 4 <= data.len() {
+        let ext_type = u16::from_le_bytes([data[offset], data[offset + 1]]);
+        let ext_len = u16::from_le_bytes([data[offset + 2], data[offset + 3]]) as usize;
+
+        // Type 0 = Uninitialized, signals end of TLV entries
+        if ext_type == 0 {
+            break;
+        }
+
+        match ext_type {
+            EXTENSION_TYPE_TRANSFER_FEE_CONFIG => {
+                return Err(MultiDelegatorError::MintHasTransferFee.into());
+            }
+            EXTENSION_TYPE_MINT_CLOSE_AUTHORITY => {
+                return Err(MultiDelegatorError::MintHasMintCloseAuthority.into());
+            }
+            EXTENSION_TYPE_CONFIDENTIAL_TRANSFER_MINT => {
+                return Err(MultiDelegatorError::MintHasConfidentialTransfer.into());
+            }
+            EXTENSION_TYPE_NON_TRANSFERABLE => {
+                return Err(MultiDelegatorError::MintHasNonTransferable.into());
+            }
+            EXTENSION_TYPE_PERMANENT_DELEGATE => {
+                return Err(MultiDelegatorError::MintHasPermanentDelegate.into());
+            }
+            EXTENSION_TYPE_TRANSFER_HOOK => {
+                return Err(MultiDelegatorError::MintHasTransferHook.into());
+            }
+            EXTENSION_TYPE_PAUSABLE => {
+                return Err(MultiDelegatorError::MintHasPausable.into());
+            }
+            _ => {}
+        }
+
+        offset += 4 + ext_len;
+    }
+
+    Ok(())
+}
+
 // Private helpers to consolidate initialization logic
 
 fn init_mint_helper(
@@ -188,6 +245,8 @@ impl AccountCheck for Mint2022Account {
         if data[TOKEN_2022_ACCOUNT_DISCRIMINATOR_OFFSET].ne(&TOKEN_2022_MINT_DISCRIMINATOR) {
             return Err(MultiDelegatorError::InvalidToken2022MintAccountData.into());
         }
+
+        validate_mint_extensions(&data)?;
 
         Ok(())
     }

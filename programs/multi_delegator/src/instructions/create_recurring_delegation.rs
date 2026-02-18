@@ -97,6 +97,7 @@ mod tests {
             MINT_DECIMALS,
             1_000_000_000,
             Some(payer.pubkey()),
+            &[],
         );
         let _user_ata = init_ata(litesvm, mint, payer.pubkey(), 1_000_000);
 

@@ -16,7 +16,16 @@ use spl_associated_token_account::{
         program_pack::{IsInitialized, Pack},
     },
 };
-use spl_token_2022::state::{Account as TokenAccount, AccountState, Mint as Mint2022};
+use spl_token_2022::{
+    extension::{
+        confidential_transfer::ConfidentialTransferMint, mint_close_authority::MintCloseAuthority,
+        non_transferable::NonTransferable, pausable::PausableConfig,
+        permanent_delegate::PermanentDelegate, transfer_fee::TransferFeeConfig,
+        transfer_hook::TransferHook, BaseStateWithExtensionsMut, ExtensionType,
+        StateWithExtensionsMut,
+    },
+    state::{Account as TokenAccount, AccountState, Mint as Mint2022},
+};
 
 use solana_instruction::AccountMeta;
 
@@ -131,19 +140,70 @@ pub fn init_mint(
     decimals: u8,
     supply: u64,
     authority: Option<Pubkey>,
+    extensions: &[ExtensionType],
 ) -> Pubkey {
     let mint = Pubkey::new_unique();
 
-    let mint_state = Mint2022 {
-        mint_authority: authority.into(),
-        supply,
-        decimals,
-        is_initialized: true,
-        freeze_authority: None.into(),
+    let space = if extensions.is_empty() {
+        Mint2022::LEN
+    } else {
+        ExtensionType::try_calculate_account_len::<Mint2022>(extensions).unwrap()
     };
+    let mut mint_data = vec![0u8; space];
 
-    let mint_data = pack_data(mint_state);
-    let lamports = litesvm.minimum_balance_for_rent_exemption(Mint2022::LEN);
+    if extensions.is_empty() {
+        let mint_state = Mint2022 {
+            mint_authority: authority.into(),
+            supply,
+            decimals,
+            is_initialized: true,
+            freeze_authority: None.into(),
+        };
+        Mint2022::pack(mint_state, &mut mint_data).unwrap();
+    } else {
+        let mut state =
+            StateWithExtensionsMut::<Mint2022>::unpack_uninitialized(&mut mint_data).unwrap();
+
+        state.base.mint_authority = authority.into();
+        state.base.supply = supply;
+        state.base.decimals = decimals;
+        state.base.is_initialized = true;
+        state.base.freeze_authority = None.into();
+
+        state.pack_base();
+        state.init_account_type().unwrap();
+
+        for ext in extensions {
+            match ext {
+                ExtensionType::ConfidentialTransferMint => {
+                    state
+                        .init_extension::<ConfidentialTransferMint>(true)
+                        .unwrap();
+                }
+                ExtensionType::NonTransferable => {
+                    state.init_extension::<NonTransferable>(true).unwrap();
+                }
+                ExtensionType::PermanentDelegate => {
+                    state.init_extension::<PermanentDelegate>(true).unwrap();
+                }
+                ExtensionType::TransferFeeConfig => {
+                    state.init_extension::<TransferFeeConfig>(true).unwrap();
+                }
+                ExtensionType::TransferHook => {
+                    state.init_extension::<TransferHook>(true).unwrap();
+                }
+                ExtensionType::Pausable => {
+                    state.init_extension::<PausableConfig>(true).unwrap();
+                }
+                ExtensionType::MintCloseAuthority => {
+                    state.init_extension::<MintCloseAuthority>(true).unwrap();
+                }
+                _ => panic!("Unsupported extension type in test helper: {:?}", ext),
+            }
+        }
+    }
+
+    let lamports = litesvm.minimum_balance_for_rent_exemption(space);
 
     litesvm
         .set_account(

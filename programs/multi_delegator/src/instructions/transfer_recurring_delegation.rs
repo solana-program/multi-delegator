@@ -156,6 +156,7 @@ mod tests {
             MINT_DECIMALS,
             1_000_000_000,
             Some(alice.pubkey()),
+            &[],
         );
         let alice_ata = init_ata(&mut litesvm, mint, alice.pubkey(), 100_000_000);
         let bob_ata = init_ata(&mut litesvm, mint, bob.pubkey(), 0);
