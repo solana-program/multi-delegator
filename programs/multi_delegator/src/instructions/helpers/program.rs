@@ -1,11 +1,12 @@
 use super::traits::{AccountCheck, AccountClose, ProgramAccountInit};
+use crate::MultiDelegatorError;
 use pinocchio::{
     cpi::{Seed, Signer},
     error::ProgramError,
     sysvars::{rent::Rent, Sysvar},
     AccountView, ProgramResult,
 };
-use pinocchio_system::instructions::CreateAccount;
+use pinocchio_system::instructions::{Allocate, Assign, CreateAccount, Transfer};
 
 pub struct ProgramAccount;
 
@@ -19,6 +20,8 @@ impl AccountCheck for ProgramAccount {
     }
 }
 
+/// Creates a PDA account idempotently, handling the case where an attacker
+/// has pre-funded the PDA address with lamports to block creation.
 impl ProgramAccountInit for ProgramAccount {
     fn init<'a, T: Sized>(
         payer: &AccountView,
@@ -27,17 +30,43 @@ impl ProgramAccountInit for ProgramAccount {
         space: usize,
     ) -> ProgramResult {
         let lamports = Rent::get()?.try_minimum_balance(space)?;
-
         let signer = [Signer::from(seeds)];
 
-        CreateAccount {
-            from: payer,
-            to: account,
-            lamports,
-            space: space as u64,
-            owner: &crate::ID,
+        if account.lamports() == 0 {
+            CreateAccount {
+                from: payer,
+                to: account,
+                lamports,
+                space: space as u64,
+                owner: &crate::ID,
+            }
+            .invoke_signed(&signer)?;
+        } else {
+            let required_lamports = lamports
+                .checked_sub(account.lamports())
+                .ok_or(MultiDelegatorError::ArithmeticUnderflow)?;
+
+            if required_lamports > 0 {
+                Transfer {
+                    from: payer,
+                    to: account,
+                    lamports: required_lamports,
+                }
+                .invoke()?;
+            }
+
+            Allocate {
+                account,
+                space: space as u64,
+            }
+            .invoke_signed(&signer)?;
+
+            Assign {
+                account,
+                owner: &crate::ID,
+            }
+            .invoke_signed(&signer)?;
         }
-        .invoke_signed(&signer)?;
 
         Ok(())
     }

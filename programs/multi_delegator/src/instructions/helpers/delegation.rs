@@ -1,15 +1,9 @@
-use pinocchio::{
-    cpi::{Seed, Signer},
-    error::ProgramError,
-    sysvars::{rent::Rent, Sysvar},
-    AccountView, Address,
-};
-use pinocchio_system::instructions::CreateAccount;
+use pinocchio::{cpi::Seed, error::ProgramError, AccountView, Address};
 
 use crate::{
     state::common::find_delegation_pda, AccountCheck, AccountDiscriminator, Header,
-    MultiDelegateAccount, MultiDelegatorError, SignerAccount, SystemAccount, CURRENT_VERSION,
-    DELEGATE_BASE_SEED,
+    MultiDelegateAccount, MultiDelegatorError, ProgramAccount, ProgramAccountInit, SignerAccount,
+    SystemAccount, CURRENT_VERSION, DELEGATE_BASE_SEED,
 };
 
 pub struct CreateDelegationAccounts<'a> {
@@ -71,7 +65,6 @@ pub fn create_delegation_account(
         return Err(MultiDelegatorError::InvalidDelegatePda.into());
     }
 
-    let lamports = Rent::get()?.try_minimum_balance(space)?;
     let bump_bytes = [bump];
     let seeds = [
         Seed::from(DELEGATE_BASE_SEED),
@@ -81,16 +74,8 @@ pub fn create_delegation_account(
         Seed::from(&nonce_bytes),
         Seed::from(&bump_bytes),
     ];
-    let signer = [Signer::from(&seeds)];
 
-    CreateAccount {
-        from: accounts.payer,
-        to: accounts.delegation_account,
-        lamports,
-        space: space as u64,
-        owner: &crate::ID,
-    }
-    .invoke_signed(&signer)?;
+    ProgramAccount::init::<()>(accounts.payer, accounts.delegation_account, &seeds, space)?;
 
     Ok(bump)
 }

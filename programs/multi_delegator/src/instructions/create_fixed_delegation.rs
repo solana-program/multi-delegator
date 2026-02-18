@@ -178,6 +178,75 @@ mod tests {
         assert_eq!(del_expiry_s, expiry_ts);
     }
 
+    /// Verify that pre-funding a delegation PDA with lamports (DOS attack)
+    /// does not prevent the legitimate user from creating the delegation.
+    #[test]
+    fn create_fixed_delegation_with_prefunded_pda() {
+        use solana_account::Account;
+
+        let (litesvm, user) = &mut setup();
+        let payer = user;
+        let amount: u64 = 100_000_000;
+        let expiry_ts: i64 = current_ts() + days(1) as i64;
+        let nonce: u64 = 0;
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(payer.pubkey()),
+        );
+        let _user_ata = init_ata(litesvm, mint, payer.pubkey(), 1_000_000);
+
+        initialize_multidelegate_action(litesvm, payer, mint)
+            .0
+            .assert_ok();
+
+        let delegatee = solana_pubkey::Pubkey::new_unique();
+
+        // Simulate an attacker pre-funding the delegation PDA address with lamports
+        let (multi_delegate_pda, _) = get_delegation_pda(
+            &crate::tests::pda::get_multidelegate_pda(&payer.pubkey(), &mint).0,
+            &payer.pubkey(),
+            &delegatee,
+            nonce,
+        );
+        litesvm
+            .set_account(
+                multi_delegate_pda,
+                Account {
+                    lamports: 1_000,
+                    data: vec![],
+                    owner: solana_pubkey::Pubkey::default(), // system program
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+            .unwrap();
+
+        // The user should still be able to create the delegation PDA
+        let (res, delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .nonce(nonce)
+            .fixed(amount, expiry_ts);
+        res.assert_ok();
+
+        let account = litesvm.get_account(&delegation_pda).unwrap();
+        let delegation = FixedDelegation::load(&account.data).unwrap();
+
+        let header = delegation.header;
+        let del_amount = delegation.amount;
+        let del_expiry_ts = delegation.expiry_ts;
+        assert_eq!(header.delegator.to_bytes(), payer.pubkey().to_bytes());
+        assert_eq!(header.delegatee.to_bytes(), delegatee.to_bytes());
+        assert_eq!(
+            header.discriminator,
+            AccountDiscriminator::FixedDelegation as u8
+        );
+        assert_eq!(del_amount, amount);
+        assert_eq!(del_expiry_ts, expiry_ts);
+    }
+
     // NOTE: These error tests use FixedDelegation but validate shared code paths.
     // The same checks apply to RecurringDelegation via shared helpers.
 
