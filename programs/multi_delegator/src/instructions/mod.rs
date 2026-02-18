@@ -1,3 +1,4 @@
+pub mod close_multidelegate;
 pub mod create_fixed_delegation;
 pub use create_fixed_delegation::CreateFixedDelegationData;
 pub mod create_recurring_delegation;
@@ -158,6 +159,19 @@ pub enum MultiDelegatorInstruction {
         docs = "The delegatee signing the transfer"
     ))]
     TransferRecurring(#[codama(name = "transfer_data")] TransferData) = 5,
+
+    #[codama(account(
+        name = "user",
+        signer,
+        writable,
+        docs = "The user who owns the MultiDelegate PDA (receives rent)"
+    ))]
+    #[codama(account(
+        name = "multi_delegate",
+        writable,
+        docs = "The MultiDelegate PDA to close"
+    ))]
+    CloseMultiDelegate = 6,
 }
 
 impl MultiDelegatorInstruction {
@@ -189,6 +203,7 @@ impl MultiDelegatorInstruction {
                 let loaded = TransferData::load(rest)?;
                 Ok(Self::TransferRecurring(loaded.clone()))
             }
+            6 => Ok(Self::CloseMultiDelegate),
             _ => Err(MultiDelegatorError::InvalidInstruction.into()),
         }
     }
@@ -203,6 +218,7 @@ impl fmt::Display for MultiDelegatorInstruction {
             Self::RevokeDelegation => write!(f, "revoke_delegation"),
             Self::TransferFixed(_) => write!(f, "transfer_fixed"),
             Self::TransferRecurring(_) => write!(f, "transfer_recurring"),
+            Self::CloseMultiDelegate => write!(f, "close_multi_delegate"),
         }
     }
 }

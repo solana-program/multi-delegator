@@ -20,6 +20,7 @@ import {
   decodeRecurringDelegation,
   type FixedDelegation,
   fetchMaybeMultiDelegate,
+  getCloseMultiDelegateInstruction,
   getCreateFixedDelegationInstruction,
   getCreateRecurringDelegationInstruction,
   getInitMultiDelegateInstruction,
@@ -83,6 +84,21 @@ export class MultiDelegatorClient {
     });
 
     const sig = await this.buildAndSendTransaction([instruction], [owner]);
+    return { signature: sig };
+  }
+
+  async closeMultiDelegate(
+    user: TransactionSigner,
+    tokenMint: Address,
+  ): Promise<{ signature: string }> {
+    const [multiDelegate] = await getMultiDelegatePDA(user.address, tokenMint);
+
+    const instruction = getCloseMultiDelegateInstruction({
+      user,
+      multiDelegate,
+    });
+
+    const sig = await this.buildAndSendTransaction([instruction], [user]);
     return { signature: sig };
   }
 

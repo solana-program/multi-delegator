@@ -40,5 +40,6 @@ fn process_instruction(
         MultiDelegatorInstruction::TransferRecurring(data) => {
             transfer_recurring_delegation::process(accounts, &data)
         }
+        MultiDelegatorInstruction::CloseMultiDelegate => close_multidelegate::process(accounts),
     }
 }

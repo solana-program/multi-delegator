@@ -22,8 +22,9 @@ use solana_instruction::AccountMeta;
 
 use crate::{
     instructions::{
-        create_fixed_delegation, create_recurring_delegation, initialize_multidelegate,
-        revoke_delegation, transfer_fixed_delegation, transfer_recurring_delegation,
+        close_multidelegate, create_fixed_delegation, create_recurring_delegation,
+        initialize_multidelegate, revoke_delegation, transfer_fixed_delegation,
+        transfer_recurring_delegation,
     },
     tests::{
         constants::{PROGRAM_ID, SYSTEM_PROGRAM_ID},
@@ -504,5 +505,47 @@ impl<'a> RevokeDelegation<'a> {
             &self.delegator.pubkey(),
             &ix,
         )
+    }
+}
+
+pub struct CloseMultiDelegate<'a> {
+    litesvm: &'a mut LiteSVM,
+    user: &'a Keypair,
+    mint: Pubkey,
+    custom_pda: Option<Pubkey>,
+}
+
+impl<'a> CloseMultiDelegate<'a> {
+    pub fn new(litesvm: &'a mut LiteSVM, user: &'a Keypair, mint: Pubkey) -> Self {
+        Self {
+            litesvm,
+            user,
+            mint,
+            custom_pda: None,
+        }
+    }
+
+    pub fn pda(mut self, pda: Pubkey) -> Self {
+        self.custom_pda = Some(pda);
+        self
+    }
+
+    #[allow(clippy::result_large_err)]
+    pub fn execute(self) -> TransactionResult {
+        let (derived_pda, _) = get_multidelegate_pda(&self.user.pubkey(), &self.mint);
+        let multi_delegate_pda = self.custom_pda.unwrap_or(derived_pda);
+
+        let accounts = vec![
+            AccountMeta::new(self.user.pubkey(), true),
+            AccountMeta::new(multi_delegate_pda, false),
+        ];
+
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts,
+            data: vec![*close_multidelegate::DISCRIMINATOR],
+        };
+
+        build_and_send_transaction(self.litesvm, &[self.user], &self.user.pubkey(), &ix)
     }
 }
