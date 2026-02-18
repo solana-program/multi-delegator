@@ -85,7 +85,7 @@ mod tests {
                 initialize_multidelegate_action, setup, CreateDelegation, RevokeDelegation,
             },
         },
-        DelegationKind, FixedDelegation, MultiDelegatorError, RecurringDelegation,
+        AccountDiscriminator, FixedDelegation, MultiDelegatorError, RecurringDelegation,
     };
 
     #[test]
@@ -119,7 +119,10 @@ mod tests {
         let binding = account_before.unwrap();
         let delegation_rent = binding.lamports;
         let delegation = FixedDelegation::load(&binding.data).unwrap();
-        assert_eq!(delegation.header.kind, DelegationKind::Fixed as u8);
+        assert_eq!(
+            delegation.header.discriminator,
+            AccountDiscriminator::FixedDelegation as u8
+        );
 
         let delegator_balance_before = litesvm.get_account(&payer.pubkey()).unwrap().lamports;
 
@@ -169,7 +172,10 @@ mod tests {
         let binding = account_before.unwrap();
         let delegation_rent = binding.lamports;
         let delegation = RecurringDelegation::load(&binding.data).unwrap();
-        assert_eq!(delegation.header.kind, DelegationKind::Recurring as u8);
+        assert_eq!(
+            delegation.header.discriminator,
+            AccountDiscriminator::RecurringDelegation as u8
+        );
 
         let delegator_balance_before = litesvm.get_account(&payer.pubkey()).unwrap().lamports;
 

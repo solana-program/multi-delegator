@@ -5,9 +5,9 @@ import { MULTI_DELEGATOR_PROGRAM_ADDRESS } from './generated/index.js';
 export const PROGRAM_ID = MULTI_DELEGATOR_PROGRAM_ADDRESS;
 
 // Header struct layout offsets
-// Layout: version (1 byte) + kind (1 byte) + bump (1 byte) + delegator (32 bytes) + delegatee (32 bytes)
+// Layout: discriminator (1 byte) + version (1 byte) + bump (1 byte) + delegator (32 bytes) + delegatee (32 bytes)
 // See: programs/multi_delegator/src/state/header.rs
-export const KIND_DISCRIMINATOR_OFFSET = 1;
+export const DISCRIMINATOR_OFFSET = 0;
 export const DELEGATOR_OFFSET = 3;
 export const DELEGATEE_OFFSET = 35;
 
@@ -23,7 +23,7 @@ export const MULTI_DELEGATE_SEED = 'MultiDelegate';
 export const DELEGATION_SEED = 'delegation';
 
 // Delegation kinds with metadata for UI display
-// Maps to DelegationKind enum in programs/multi_delegator/src/state/common.rs
+// Maps to AccountDiscriminator enum in programs/multi_delegator/src/state/common.rs
 export const DELEGATION_KINDS = {
   fixed: {
     id: 'fixed',

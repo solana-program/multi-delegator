@@ -7,8 +7,9 @@ use pinocchio::{
 use pinocchio_system::instructions::CreateAccount;
 
 use crate::{
-    state::common::find_delegation_pda, AccountCheck, DelegationKind, Header, MultiDelegateAccount,
-    MultiDelegatorError, SignerAccount, SystemAccount, CURRENT_VERSION, DELEGATE_BASE_SEED,
+    state::common::find_delegation_pda, AccountCheck, AccountDiscriminator, Header,
+    MultiDelegateAccount, MultiDelegatorError, SignerAccount, SystemAccount, CURRENT_VERSION,
+    DELEGATE_BASE_SEED,
 };
 
 pub struct CreateDelegationAccounts<'a> {
@@ -96,14 +97,14 @@ pub fn create_delegation_account(
 
 pub fn init_header(
     header: &mut Header,
-    kind: DelegationKind,
+    discriminator: AccountDiscriminator,
     bump: u8,
     delegator: &Address,
     delegatee: &Address,
     payer: &Address,
 ) {
     header.version = CURRENT_VERSION;
-    header.kind = kind.into();
+    header.discriminator = discriminator.into();
     header.bump = bump;
     header.delegator = *delegator;
     header.delegatee = *delegatee;

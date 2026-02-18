@@ -9,7 +9,7 @@ import {
   decodeRecurringDelegation,
   getMultiDelegatePDA,
   fetchMaybeMultiDelegate,
-  DelegationKind,
+  AccountDiscriminator,
 } from '@multidelegator/client'
 import type { ClusterWithUrl, DelegationAccountRaw } from '@/lib/types'
 import { decodeBase64ToUint8Array } from '@/lib/utils'
@@ -99,7 +99,7 @@ async function fetchDelegationsByRole(
       space: BigInt(data.length),
     }
 
-    if (kind === DelegationKind.Fixed) {
+    if (kind === AccountDiscriminator.FixedDelegation) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const decoded = decodeFixedDelegation(encodedAccount as any)
       all.push({
@@ -108,7 +108,7 @@ async function fetchDelegationsByRole(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         data: (decoded as any).data as DelegationData,
       })
-    } else if (kind === DelegationKind.Recurring) {
+    } else if (kind === AccountDiscriminator.RecurringDelegation) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const decoded = decodeRecurringDelegation(encodedAccount as any)
       all.push({

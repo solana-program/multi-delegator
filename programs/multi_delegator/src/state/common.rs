@@ -47,27 +47,30 @@ pub fn find_delegation_pda(
 
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Debug, CodamaType)]
-pub enum DelegationKind {
-    Fixed = 0,
-    Recurring = 1,
+pub enum AccountDiscriminator {
+    MultiDelegate = 0,
+    FixedDelegation = 1,
+    RecurringDelegation = 2,
 }
 
-impl TryFrom<u8> for DelegationKind {
+impl TryFrom<u8> for AccountDiscriminator {
     type Error = ProgramError;
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(Self::Fixed),
-            1 => Ok(Self::Recurring),
-            _ => Err(MultiDelegatorError::InvalidDelegationKind.into()),
+            0 => Ok(Self::MultiDelegate),
+            1 => Ok(Self::FixedDelegation),
+            2 => Ok(Self::RecurringDelegation),
+            _ => Err(MultiDelegatorError::InvalidAccountDiscriminator.into()),
         }
     }
 }
 
-impl From<DelegationKind> for u8 {
-    fn from(val: DelegationKind) -> Self {
+impl From<AccountDiscriminator> for u8 {
+    fn from(val: AccountDiscriminator) -> Self {
         match val {
-            DelegationKind::Fixed => 0,
-            DelegationKind::Recurring => 1,
+            AccountDiscriminator::MultiDelegate => 0,
+            AccountDiscriminator::FixedDelegation => 1,
+            AccountDiscriminator::RecurringDelegation => 2,
         }
     }
 }

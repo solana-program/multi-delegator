@@ -25,26 +25,26 @@ impl TryFrom<u32> for MultiDelegatorError {
             9 => Ok(Self::InvalidTokenSplMintAccountData),
             10 => Ok(Self::InvalidTokenSplTokenAccountData),
             11 => Ok(Self::InvalidDelegatePda),
-            12 => Ok(Self::InvalidDelegationKind),
-            13 => Ok(Self::InvalidAccountData),
-            14 => Ok(Self::InvalidHeaderData),
-            15 => Ok(Self::InvalidInstructionData),
-            16 => Ok(Self::NotEnoughAccountKeys),
-            17 => Ok(Self::InvalidInstruction),
-            18 => Ok(Self::DelegationExpired),
-            19 => Ok(Self::AmountExceedsLimit),
-            20 => Ok(Self::AmountExceedsPeriodLimit),
-            21 => Ok(Self::PeriodNotElapsed),
-            22 => Ok(Self::TimestampError),
-            23 => Ok(Self::InvalidAmount),
-            24 => Ok(Self::TransferInvalidKind),
-            25 => Ok(Self::TransferInvalidCallData),
-            26 => Ok(Self::Unauthorized),
-            27 => Ok(Self::TransferKindMismatch),
-            28 => Ok(Self::ArithmeticOverflow),
-            29 => Ok(Self::InvalidPeriodLength),
-            30 => Ok(Self::InvalidPayerData),
-            31 => Ok(Self::ArithmeticUnderflow),
+            12 => Ok(Self::InvalidAccountData),
+            13 => Ok(Self::InvalidHeaderData),
+            14 => Ok(Self::InvalidInstructionData),
+            15 => Ok(Self::NotEnoughAccountKeys),
+            16 => Ok(Self::InvalidInstruction),
+            17 => Ok(Self::DelegationExpired),
+            18 => Ok(Self::AmountExceedsLimit),
+            19 => Ok(Self::AmountExceedsPeriodLimit),
+            20 => Ok(Self::PeriodNotElapsed),
+            21 => Ok(Self::TimestampError),
+            22 => Ok(Self::InvalidAmount),
+            23 => Ok(Self::TransferInvalidKind),
+            24 => Ok(Self::TransferInvalidCallData),
+            25 => Ok(Self::Unauthorized),
+            26 => Ok(Self::TransferKindMismatch),
+            27 => Ok(Self::ArithmeticOverflow),
+            28 => Ok(Self::InvalidPeriodLength),
+            29 => Ok(Self::InvalidPayerData),
+            30 => Ok(Self::ArithmeticUnderflow),
+            31 => Ok(Self::InvalidAccountDiscriminator),
             _ => Err(code),
         }
     }
@@ -76,8 +76,6 @@ pub enum MultiDelegatorError {
     InvalidTokenSplTokenAccountData,
     #[error("Invalid delegation PDA derivation")]
     InvalidDelegatePda,
-    #[error("Invalid delegation kind")]
-    InvalidDelegationKind,
     #[error("Invalid account data")]
     InvalidAccountData,
     #[error("Invalid header data")]
@@ -116,4 +114,6 @@ pub enum MultiDelegatorError {
     InvalidPayerData,
     #[error("Arithmetic Underflow")]
     ArithmeticUnderflow,
+    #[error("Invalid account discriminator")]
+    InvalidAccountDiscriminator,
 }

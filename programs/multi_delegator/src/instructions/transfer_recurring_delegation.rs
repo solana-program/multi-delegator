@@ -6,7 +6,7 @@ use pinocchio::{
 
 use crate::{
     helpers::{transfer_with_delegate, Delegation, TransferAccounts, TransferData},
-    state::{DelegationKind, RecurringDelegation},
+    state::RecurringDelegation,
     AccountCheck, MultiDelegateAccount, MultiDelegatorError, ProgramAccount, SignerAccount,
     TokenAccountInterface, TokenProgramInterface,
 };
@@ -20,10 +20,6 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
     {
         let mut binding = accounts_struct.delegation_pda.try_borrow_mut()?;
         let delegation_mut = RecurringDelegation::load_mut(&mut binding)?;
-
-        if delegation_mut.header.kind != DelegationKind::Recurring as u8 {
-            return Err(MultiDelegatorError::TransferKindMismatch.into());
-        }
 
         // Fail fast: Check authorization first
         Delegation::check(

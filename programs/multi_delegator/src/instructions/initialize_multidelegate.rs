@@ -85,11 +85,12 @@ pub fn process(accounts: &[AccountView]) -> ProgramResult {
         .invoke_signed(&signer)?;
 
         let mut data = accounts.multi_delegate.try_borrow_mut()?;
-        let multi_delegate_state = MultiDelegate::load_mut(&mut data)?;
-
-        multi_delegate_state.user = *accounts.user.address();
-        multi_delegate_state.token_mint = *accounts.token_mint.address();
-        multi_delegate_state.bump = bump;
+        MultiDelegate::init(
+            &mut data,
+            accounts.user.address(),
+            accounts.token_mint.address(),
+            bump,
+        )?;
     }
 
     // Approve delegation on the correct token program (SPL Token vs Token-2022).
@@ -128,7 +129,7 @@ mod tests {
             },
             utils::{fetch_account, init_ata, init_mint, initialize_multidelegate_action, setup},
         },
-        MultiDelegate,
+        AccountDiscriminator, MultiDelegate,
     };
 
     #[test]
@@ -150,6 +151,10 @@ mod tests {
         let account = litesvm.get_account(&multi_delegate_pda).unwrap();
         let multi_delegate = MultiDelegate::load(&account.data).unwrap();
 
+        assert_eq!(
+            multi_delegate.discriminator,
+            AccountDiscriminator::MultiDelegate as u8
+        );
         assert_eq!(multi_delegate.user.to_bytes(), user.pubkey().to_bytes());
         assert_eq!(multi_delegate.token_mint.to_bytes(), mint.to_bytes());
         assert_eq!(multi_delegate.bump, bump);
@@ -180,6 +185,10 @@ mod tests {
         let account = litesvm.get_account(&multi_delegate_pda).unwrap();
         let multi_delegate = MultiDelegate::load(&account.data).unwrap();
 
+        assert_eq!(
+            multi_delegate.discriminator,
+            AccountDiscriminator::MultiDelegate as u8
+        );
         assert_eq!(multi_delegate.user.to_bytes(), user.pubkey().to_bytes());
         assert_eq!(multi_delegate.token_mint.to_bytes(), mint.to_bytes());
         assert_eq!(multi_delegate.bump, bump);

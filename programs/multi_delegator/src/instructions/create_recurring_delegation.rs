@@ -3,8 +3,8 @@ use core::mem::{size_of, transmute};
 use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 
 use crate::{
-    create_delegation_account, init_header, CreateDelegationAccounts, DelegationKind,
-    MultiDelegatorError, RecurringDelegation,
+    create_delegation_account, init_header, AccountDiscriminator, CreateDelegationAccounts,
+    MultiDelegatorError, RecurringDelegation, DISCRIMINATOR_OFFSET,
 };
 
 #[repr(C, packed)]
@@ -39,11 +39,13 @@ pub fn process(
     let bump = create_delegation_account(&accounts, call_data.nonce, RecurringDelegation::LEN)?;
 
     let binding = &mut accounts.delegation_account.try_borrow_mut()?;
+    // Set discriminator before load_mut so validation passes on freshly created account
+    binding[DISCRIMINATOR_OFFSET] = AccountDiscriminator::RecurringDelegation as u8;
     let delegation = RecurringDelegation::load_mut(binding)?;
 
     init_header(
         &mut delegation.header,
-        DelegationKind::Recurring,
+        AccountDiscriminator::RecurringDelegation,
         bump,
         accounts.delegator.address(),
         accounts.delegatee.address(),
@@ -73,7 +75,7 @@ mod tests {
                 days, init_ata, init_mint, initialize_multidelegate_action, setup, CreateDelegation,
             },
         },
-        DelegationKind, RecurringDelegation,
+        AccountDiscriminator, RecurringDelegation,
     };
 
     #[test]
@@ -122,7 +124,10 @@ mod tests {
         assert_eq!(header.delegator.to_bytes(), payer.pubkey().to_bytes());
         assert_eq!(header.delegatee.to_bytes(), delegatee.to_bytes());
         assert_eq!(header.payer.to_bytes(), payer.pubkey().to_bytes());
-        assert_eq!(header.kind, DelegationKind::Recurring as u8);
+        assert_eq!(
+            header.discriminator,
+            AccountDiscriminator::RecurringDelegation as u8
+        );
         assert_eq!(del_amount_per_period, amount_per_period);
         assert_eq!(del_period_length_s, period_length_s);
         assert_eq!(del_expiry_s, expiry_ts);

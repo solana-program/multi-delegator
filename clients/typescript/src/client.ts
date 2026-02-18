@@ -13,9 +13,9 @@ import {
   getBase64Encoder,
   signTransactionMessageWithSigners,
 } from 'gill';
-import { DELEGATOR_OFFSET, KIND_DISCRIMINATOR_OFFSET } from './constants.js';
+import { DELEGATOR_OFFSET, DISCRIMINATOR_OFFSET } from './constants.js';
 import {
-  DelegationKind,
+  AccountDiscriminator,
   decodeFixedDelegation,
   decodeRecurringDelegation,
   type FixedDelegation,
@@ -273,7 +273,7 @@ export class MultiDelegatorClient {
     for (const account of response) {
       const base64Data = account.account.data[0];
       const data = base64Encoder.encode(base64Data);
-      const kind = data[KIND_DISCRIMINATOR_OFFSET];
+      const kind = data[DISCRIMINATOR_OFFSET];
 
       const encodedAccount = {
         address: account.pubkey,
@@ -284,14 +284,14 @@ export class MultiDelegatorClient {
         space: account.account.space,
       };
 
-      if (kind === DelegationKind.Fixed) {
+      if (kind === AccountDiscriminator.FixedDelegation) {
         const decoded = decodeFixedDelegation(encodedAccount);
         delegations.push({
           kind: 'fixed',
           address: account.pubkey,
           data: decoded.data,
         });
-      } else if (kind === DelegationKind.Recurring) {
+      } else if (kind === AccountDiscriminator.RecurringDelegation) {
         const decoded = decodeRecurringDelegation(encodedAccount);
         delegations.push({
           kind: 'recurring',

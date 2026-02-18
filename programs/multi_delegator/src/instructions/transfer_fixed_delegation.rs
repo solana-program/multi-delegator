@@ -6,7 +6,7 @@ use pinocchio::{
 
 use crate::{
     helpers::{transfer_with_delegate, Delegation, TransferAccounts, TransferData},
-    state::{DelegationKind, FixedDelegation, KIND_OFFSET},
+    state::FixedDelegation,
     AccountCheck, MultiDelegateAccount, MultiDelegatorError, ProgramAccount, SignerAccount,
     TokenAccountInterface, TokenProgramInterface,
 };
@@ -16,19 +16,8 @@ pub const DISCRIMINATOR: &u8 = &4;
 pub fn process(accounts: &[AccountView], transfer: &TransferData) -> ProgramResult {
     let accounts_struct = FixedTransferAccounts::try_from(accounts)?;
 
-    // Validate kind matches Fixed and update state
     {
         let mut binding = accounts_struct.delegation_pda.try_borrow_mut()?;
-
-        if binding.len() <= KIND_OFFSET {
-            return Err(MultiDelegatorError::InvalidAccountData.into());
-        }
-
-        let kind = binding[KIND_OFFSET];
-        if kind != DelegationKind::Fixed as u8 {
-            return Err(MultiDelegatorError::TransferKindMismatch.into());
-        }
-
         let delegation = FixedDelegation::load_mut(&mut binding)?;
 
         // Fail fast: Check authorization first

@@ -3,8 +3,8 @@ use core::mem::{size_of, transmute};
 use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 
 use crate::{
-    create_delegation_account, init_header, state::FixedDelegation, CreateDelegationAccounts,
-    DelegationKind, MultiDelegatorError,
+    create_delegation_account, init_header, state::FixedDelegation, AccountDiscriminator,
+    CreateDelegationAccounts, MultiDelegatorError, DISCRIMINATOR_OFFSET,
 };
 
 #[repr(C, packed)]
@@ -34,11 +34,13 @@ pub fn process(accounts: &[AccountView], call_data: &CreateFixedDelegationData) 
     let bump = create_delegation_account(&accounts, call_data.nonce, FixedDelegation::LEN)?;
 
     let binding = &mut accounts.delegation_account.try_borrow_mut()?;
+    // Set discriminator before load_mut so validation passes on freshly created account
+    binding[DISCRIMINATOR_OFFSET] = AccountDiscriminator::FixedDelegation as u8;
     let delegation = FixedDelegation::load_mut(binding)?;
 
     init_header(
         &mut delegation.header,
-        DelegationKind::Fixed,
+        AccountDiscriminator::FixedDelegation,
         bump,
         accounts.delegator.address(),
         accounts.delegatee.address(),
@@ -65,7 +67,7 @@ mod tests {
                 initialize_multidelegate_action, setup, CreateDelegation, RevokeDelegation,
             },
         },
-        DelegationKind, FixedDelegation,
+        AccountDiscriminator, FixedDelegation,
     };
 
     #[test]
@@ -168,7 +170,10 @@ mod tests {
         let del_expiry_s = delegation.expiry_ts;
         assert_eq!(header.delegator.to_bytes(), payer.pubkey().to_bytes());
         assert_eq!(header.delegatee.to_bytes(), delegatee.to_bytes());
-        assert_eq!(header.kind, DelegationKind::Fixed as u8);
+        assert_eq!(
+            header.discriminator,
+            AccountDiscriminator::FixedDelegation as u8
+        );
         assert_eq!(del_amount, amount);
         assert_eq!(del_expiry_s, expiry_ts);
     }
