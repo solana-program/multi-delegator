@@ -18,6 +18,7 @@ pinocchio-system = "0.5.0"
 pinocchio-token = "0.5.0"
 pinocchio-token-2022 = "0.2.0"
 codama = "0.7.2"
+const-crypto = "0.3"
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]

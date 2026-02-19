@@ -12,3 +12,6 @@ pub mod asserts;
 
 #[cfg(test)]
 pub mod cu_tracker;
+
+#[cfg(test)]
+pub mod events;

@@ -22,6 +22,18 @@ export const MULTI_DELEGATE_SEED = 'MultiDelegate';
 // See: programs/multi_delegator/src/state/common.rs (DELEGATE_BASE_SEED)
 export const DELEGATION_SEED = 'delegation';
 
+export const PLAN_SEED = 'plan';
+export const SUBSCRIPTION_SEED = 'subscription';
+
+export const PLAN_SIZE = 483;
+export const SUBSCRIPTION_SIZE = 123;
+
+export const PLAN_OWNER_OFFSET = 1;
+
+export const MAX_PLAN_DESTINATIONS = 4;
+export const MAX_PLAN_PULLERS = 4;
+export const METADATA_URI_LEN = 128;
+
 // Delegation kinds with metadata for UI display
 // Maps to AccountDiscriminator enum in programs/multi_delegator/src/state/common.rs
 export const DELEGATION_KINDS = {
@@ -36,6 +48,12 @@ export const DELEGATION_KINDS = {
     label: 'Recurring',
     description: 'Periodic delegation with amount per time period',
     icon: 'RefreshCw', // lucide-react icon name
+  },
+  subscription: {
+    id: 'subscription',
+    label: 'Subscription',
+    description: 'Plan-based recurring subscription delegation',
+    icon: 'CalendarCheck',
   },
 } as const;
 

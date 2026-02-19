@@ -6,7 +6,9 @@ import {
 import {
   DELEGATION_SEED,
   MULTI_DELEGATE_SEED,
+  PLAN_SEED,
   PROGRAM_ID,
+  SUBSCRIPTION_SEED,
   U64_BYTE_SIZE,
 } from './constants.js';
 
@@ -45,6 +47,43 @@ export async function getDelegationPDA(
     addressEncoder.encode(delegator),
     addressEncoder.encode(delegatee),
     nonceBytes,
+  ];
+
+  const [pda, bump] = await getProgramDerivedAddress({
+    programAddress: PROGRAM_ID,
+    seeds,
+  });
+  return [pda, bump];
+}
+
+export async function getPlanPDA(
+  owner: Address,
+  planId: number | bigint,
+): Promise<[Address, number]> {
+  const planIdBytes = new Uint8Array(U64_BYTE_SIZE);
+  new DataView(planIdBytes.buffer).setBigUint64(0, BigInt(planId), true);
+
+  const seeds = [
+    textEncoder.encode(PLAN_SEED),
+    addressEncoder.encode(owner),
+    planIdBytes,
+  ];
+
+  const [pda, bump] = await getProgramDerivedAddress({
+    programAddress: PROGRAM_ID,
+    seeds,
+  });
+  return [pda, bump];
+}
+
+export async function getSubscriptionPDA(
+  planPda: Address,
+  subscriber: Address,
+): Promise<[Address, number]> {
+  const seeds = [
+    textEncoder.encode(SUBSCRIPTION_SEED),
+    addressEncoder.encode(planPda),
+    addressEncoder.encode(subscriber),
   ];
 
   const [pda, bump] = await getProgramDerivedAddress({

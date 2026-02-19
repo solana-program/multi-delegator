@@ -58,6 +58,22 @@ impl TryFrom<u32> for MultiDelegatorError {
             42 => Ok(Self::RecurringDelegationAmountZero),
             43 => Ok(Self::FixedDelegationExpiryInPast),
             44 => Ok(Self::FixedDelegationAmountZero),
+            45 => Ok(Self::PlanSunset),
+            46 => Ok(Self::PlanExpired),
+            47 => Ok(Self::InvalidPlanPda),
+            48 => Ok(Self::InvalidSubscriptionPda),
+            49 => Ok(Self::NotPlanOwner),
+            50 => Ok(Self::SubscriptionPlanMismatch),
+            51 => Ok(Self::InvalidDestination),
+            52 => Ok(Self::MintMismatch),
+            53 => Ok(Self::InvalidNumDestinations),
+            54 => Ok(Self::SubscriptionCancelled),
+            55 => Ok(Self::SubscriptionAlreadyCancelled),
+            56 => Ok(Self::SubscriptionNotCancelled),
+            57 => Ok(Self::InvalidEventAuthority),
+            58 => Ok(Self::InvalidEventData),
+            59 => Ok(Self::InvalidEventTag),
+            60 => Ok(Self::InvalidEventDiscriminator),
             _ => Err(code),
         }
     }
@@ -155,4 +171,36 @@ pub enum MultiDelegatorError {
     FixedDelegationExpiryInPast,
     #[error("zero amount specified")]
     FixedDelegationAmountZero,
+    #[error("Plan is in sunset status")]
+    PlanSunset,
+    #[error("Plan has expired")]
+    PlanExpired,
+    #[error("Invalid Plan PDA derivation")]
+    InvalidPlanPda,
+    #[error("Invalid subscription PDA derivation")]
+    InvalidSubscriptionPda,
+    #[error("Caller is not the plan owner")]
+    NotPlanOwner,
+    #[error("Subscription does not belong to this plan")]
+    SubscriptionPlanMismatch,
+    #[error("Destination not in plan whitelist")]
+    InvalidDestination,
+    #[error("Token mint mismatch")]
+    MintMismatch,
+    #[error("No valid destinations provided")]
+    InvalidNumDestinations,
+    #[error("Subscription cancelled and past valid period")]
+    SubscriptionCancelled,
+    #[error("Subscription already cancelled")]
+    SubscriptionAlreadyCancelled,
+    #[error("Subscription must be cancelled before revoke")]
+    SubscriptionNotCancelled,
+    #[error("Invalid event authority PDA")]
+    InvalidEventAuthority,
+    #[error("Invalid event data")]
+    InvalidEventData,
+    #[error("Invalid event tag prefix")]
+    InvalidEventTag,
+    #[error("Unknown event discriminator")]
+    InvalidEventDiscriminator,
 }

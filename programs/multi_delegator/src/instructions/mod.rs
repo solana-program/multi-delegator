@@ -3,6 +3,7 @@ pub mod create_fixed_delegation;
 pub use create_fixed_delegation::CreateFixedDelegationData;
 pub mod create_recurring_delegation;
 pub use create_recurring_delegation::CreateRecurringDelegationData;
+pub mod emit_event;
 pub mod helpers;
 pub mod initialize_multidelegate;
 pub mod revoke_delegation;
@@ -16,6 +17,7 @@ use core::fmt;
 use codama::CodamaInstructions;
 use pinocchio::error::ProgramError;
 
+use crate::event_engine::EMIT_EVENT_IX_DISC;
 use crate::MultiDelegatorError;
 
 #[derive(Debug, CodamaInstructions)]
@@ -172,6 +174,9 @@ pub enum MultiDelegatorInstruction {
         docs = "The MultiDelegate PDA to close"
     ))]
     CloseMultiDelegate = 6,
+
+    #[codama(account(name = "event_authority", signer, docs = "The event authority PDA"))]
+    EmitEvent = 228,
 }
 
 impl MultiDelegatorInstruction {
@@ -204,6 +209,7 @@ impl MultiDelegatorInstruction {
                 Ok(Self::TransferRecurring(loaded.clone()))
             }
             6 => Ok(Self::CloseMultiDelegate),
+            &EMIT_EVENT_IX_DISC => Ok(Self::EmitEvent),
             _ => Err(MultiDelegatorError::InvalidInstruction.into()),
         }
     }
@@ -219,6 +225,7 @@ impl fmt::Display for MultiDelegatorInstruction {
             Self::TransferFixed(_) => write!(f, "transfer_fixed"),
             Self::TransferRecurring(_) => write!(f, "transfer_recurring"),
             Self::CloseMultiDelegate => write!(f, "close_multi_delegate"),
+            Self::EmitEvent => write!(f, "emit_event"),
         }
     }
 }

@@ -5,7 +5,9 @@ use pinocchio::{
 };
 
 use crate::{
-    helpers::{transfer_with_delegate, Delegation, TransferAccounts, TransferData},
+    helpers::{
+        transfer_with_delegate, validate_fixed_transfer, Delegation, TransferAccounts, TransferData,
+    },
     state::FixedDelegation,
     AccountCheck, MultiDelegateAccount, MultiDelegatorError, ProgramAccount, SignerAccount,
     TokenAccountInterface, TokenProgramInterface,
@@ -28,14 +30,12 @@ pub fn process(accounts: &[AccountView], transfer: &TransferData) -> ProgramResu
         )?;
 
         let current_ts = Clock::get()?.unix_timestamp;
-
-        if current_ts > delegation.expiry_ts {
-            return Err(MultiDelegatorError::DelegationExpired.into());
-        }
-
-        if transfer.amount > delegation.amount {
-            return Err(MultiDelegatorError::AmountExceedsLimit.into());
-        }
+        validate_fixed_transfer(
+            transfer.amount,
+            delegation.amount,
+            delegation.expiry_ts,
+            current_ts,
+        )?;
 
         delegation.amount = delegation
             .amount

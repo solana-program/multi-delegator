@@ -1,5 +1,8 @@
 use crate::{
-    helpers::{transfer_with_delegate, Delegation, TransferAccounts, TransferData},
+    helpers::{
+        transfer_with_delegate, validate_recurring_transfer, Delegation, TransferAccounts,
+        TransferData,
+    },
     state::RecurringDelegation,
     AccountCheck, MultiDelegateAccount, MultiDelegatorError, ProgramAccount, SignerAccount,
     TokenAccountInterface, TokenProgramInterface,
@@ -27,41 +30,19 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
             accounts_struct.delegatee.address(),
         )?;
 
-        if current_ts > delegation_mut.expiry_ts {
-            return Err(MultiDelegatorError::DelegationExpired.into());
-        }
-
-        // If we have passed into the next period, then start new period
-        let time_since_start = current_ts.saturating_sub(delegation_mut.current_period_start_ts);
-        let period_length = delegation_mut.period_length_s as i64;
-
-        if time_since_start >= period_length {
-            if period_length == 0 {
-                return Err(MultiDelegatorError::InvalidPeriodLength.into());
-            }
-            let periods_passed = time_since_start / period_length;
-            let increment = periods_passed
-                .checked_mul(period_length)
-                .ok_or(MultiDelegatorError::ArithmeticOverflow)?;
-            delegation_mut.current_period_start_ts = delegation_mut
-                .current_period_start_ts
-                .checked_add(increment)
-                .ok_or(MultiDelegatorError::ArithmeticOverflow)?;
-            delegation_mut.amount_pulled_in_period = 0;
-        }
-
-        let available = delegation_mut
-            .amount_per_period
-            .checked_sub(delegation_mut.amount_pulled_in_period)
-            .ok_or(MultiDelegatorError::ArithmeticUnderflow)?;
-        if transfer_data.amount > available {
-            return Err(MultiDelegatorError::AmountExceedsPeriodLimit.into());
-        }
-
-        delegation_mut.amount_pulled_in_period = delegation_mut
-            .amount_pulled_in_period
-            .checked_add(transfer_data.amount)
-            .ok_or(MultiDelegatorError::ArithmeticOverflow)?;
+        let mut period_start = delegation_mut.current_period_start_ts;
+        let mut pulled = delegation_mut.amount_pulled_in_period;
+        validate_recurring_transfer(
+            transfer_data.amount,
+            delegation_mut.amount_per_period,
+            delegation_mut.period_length_s,
+            &mut period_start,
+            &mut pulled,
+            delegation_mut.expiry_ts,
+            current_ts,
+        )?;
+        delegation_mut.current_period_start_ts = period_start;
+        delegation_mut.amount_pulled_in_period = pulled;
     }
 
     transfer_with_delegate(

@@ -11,6 +11,9 @@ pub use state::*;
 pub mod errors;
 pub use errors::*;
 
+pub mod event_engine;
+pub mod events;
+
 pub mod constants;
 pub use constants::*;
 
@@ -19,7 +22,7 @@ pub mod tests;
 declare_id!("3PuMsYqaLY4Sy1DR8np3aAiHravZXCeyMYDUECLqfswY");
 
 fn process_instruction(
-    _program_id: &Address,
+    program_id: &Address,
     accounts: &[AccountView],
     instruction_data: &[u8],
 ) -> ProgramResult {
@@ -41,5 +44,6 @@ fn process_instruction(
             transfer_recurring_delegation::process(accounts, &data)
         }
         MultiDelegatorInstruction::CloseMultiDelegate => close_multidelegate::process(accounts),
+        MultiDelegatorInstruction::EmitEvent => emit_event::process(program_id, accounts),
     }
 }

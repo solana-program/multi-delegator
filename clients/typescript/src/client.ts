@@ -18,6 +18,7 @@ import {
   AccountDiscriminator,
   decodeFixedDelegation,
   decodeRecurringDelegation,
+  decodeSubscriptionDelegation,
   type FixedDelegation,
   fetchMaybeMultiDelegate,
   getCloseMultiDelegateInstruction,
@@ -29,6 +30,7 @@ import {
   getTransferRecurringInstruction,
   MULTI_DELEGATOR_PROGRAM_ADDRESS,
   type RecurringDelegation,
+  type SubscriptionDelegation,
 } from './generated/index.js';
 import { getDelegationPDA, getMultiDelegatePDA } from './pdas.js';
 
@@ -41,7 +43,12 @@ type SolanaClient = {
 
 export type Delegation =
   | { kind: 'fixed'; address: Address; data: FixedDelegation }
-  | { kind: 'recurring'; address: Address; data: RecurringDelegation };
+  | { kind: 'recurring'; address: Address; data: RecurringDelegation }
+  | {
+      kind: 'subscription';
+      address: Address;
+      data: SubscriptionDelegation;
+    };
 
 export class MultiDelegatorClient {
   constructor(public readonly client: SolanaClient) {}
@@ -311,6 +318,13 @@ export class MultiDelegatorClient {
         const decoded = decodeRecurringDelegation(encodedAccount);
         delegations.push({
           kind: 'recurring',
+          address: account.pubkey,
+          data: decoded.data,
+        });
+      } else if (kind === AccountDiscriminator.SubscriptionDelegation) {
+        const decoded = decodeSubscriptionDelegation(encodedAccount);
+        delegations.push({
+          kind: 'subscription',
           address: account.pubkey,
           data: decoded.data,
         });
