@@ -52,6 +52,12 @@ impl TryFrom<u32> for MultiDelegatorError {
             36 => Ok(Self::MintHasTransferFee),
             37 => Ok(Self::MintHasMintCloseAuthority),
             38 => Ok(Self::MintHasPausable),
+            39 => Ok(Self::RecurringDelegationStartTimeInPast),
+            40 => Ok(Self::RecurringDelegationZeroPeriod),
+            41 => Ok(Self::RecurringDelegationStartTimeGreaterThanExpiry),
+            42 => Ok(Self::RecurringDelegationAmountZero),
+            43 => Ok(Self::FixedDelegationExpiryInPast),
+            44 => Ok(Self::FixedDelegationAmountZero),
             _ => Err(code),
         }
     }
@@ -137,4 +143,16 @@ pub enum MultiDelegatorError {
     MintHasMintCloseAuthority,
     #[error("Mint has Pausable extension")]
     MintHasPausable,
+    #[error("Past start time specified")]
+    RecurringDelegationStartTimeInPast,
+    #[error("zero period specified")]
+    RecurringDelegationZeroPeriod,
+    #[error("start time specified is greater than expiry")]
+    RecurringDelegationStartTimeGreaterThanExpiry,
+    #[error("zero amount specified")]
+    RecurringDelegationAmountZero,
+    #[error("Expiry time specified is less than current time")]
+    FixedDelegationExpiryInPast,
+    #[error("zero amount specified")]
+    FixedDelegationAmountZero,
 }

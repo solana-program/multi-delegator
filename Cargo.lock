@@ -2078,6 +2078,7 @@ dependencies = [
  "solana-transaction",
  "solana-transaction-error",
  "spl-associated-token-account",
+ "spl-token",
  "spl-token-2022",
  "tabled",
  "thiserror 2.0.18",

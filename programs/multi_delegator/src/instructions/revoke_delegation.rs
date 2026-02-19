@@ -112,7 +112,7 @@ mod tests {
 
         let (res, delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
             .nonce(nonce)
-            .fixed(100, 1000);
+            .fixed(100, current_ts() + 1000);
         res.assert_ok();
 
         let account_before = litesvm.get_account(&delegation_pda);
@@ -263,7 +263,7 @@ mod tests {
 
         let (res, delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
             .nonce(nonce)
-            .fixed(100, 1000);
+            .fixed(100, current_ts() + 1000);
         res.assert_ok();
 
         let account_before = litesvm.get_account(&delegation_pda);
@@ -309,7 +309,7 @@ mod tests {
         let (res, _) = CreateDelegation::new(litesvm, delegator, mint, delegatee)
             .payer(&sponsor)
             .nonce(nonce)
-            .fixed(100, 1000);
+            .fixed(100, current_ts() + 1000);
         res.assert_ok();
 
         let result = RevokeDelegation::new(litesvm, delegator, mint, delegatee, nonce)

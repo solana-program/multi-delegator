@@ -1,14 +1,13 @@
-use pinocchio::{
-    error::ProgramError,
-    sysvars::{clock::Clock, Sysvar},
-    AccountView, ProgramResult,
-};
-
 use crate::{
     helpers::{transfer_with_delegate, Delegation, TransferAccounts, TransferData},
     state::RecurringDelegation,
     AccountCheck, MultiDelegateAccount, MultiDelegatorError, ProgramAccount, SignerAccount,
     TokenAccountInterface, TokenProgramInterface,
+};
+use pinocchio::{
+    error::ProgramError,
+    sysvars::{clock::Clock, Sysvar},
+    AccountView, ProgramResult,
 };
 
 pub const DISCRIMINATOR: &u8 = &5;
@@ -121,6 +120,7 @@ impl<'a> TryFrom<&'a [AccountView]> for RecurringTransferAccounts<'a> {
 
 #[cfg(test)]
 mod tests {
+    use crate::tests::utils::build_and_send_transaction;
     use crate::{
         state::RecurringDelegation,
         tests::{
@@ -135,9 +135,12 @@ mod tests {
         MultiDelegatorError,
     };
     use litesvm::LiteSVM;
+    use solana_instruction::{AccountMeta, Instruction};
     use solana_keypair::Keypair;
     use solana_pubkey::Pubkey;
     use solana_signer::Signer;
+    use solana_transaction_error::TransactionError::InstructionError;
+    use spl_token::instruction::TokenInstruction::{Approve, Revoke};
 
     fn setup_recurring_delegation(
         amount_per_period: u64,
@@ -145,7 +148,16 @@ mod tests {
         start_ts: i64,
         expiry_ts: i64,
         nonce: u64,
-    ) -> (LiteSVM, Keypair, Keypair, Pubkey, Pubkey, Pubkey, Pubkey) {
+    ) -> (
+        LiteSVM,
+        Keypair,
+        Keypair,
+        Pubkey,
+        Pubkey,
+        Pubkey,
+        Pubkey,
+        Pubkey,
+    ) {
         let (mut litesvm, alice) = setup();
         let bob = Keypair::new();
         litesvm.airdrop(&bob.pubkey(), 10_000_000).unwrap();
@@ -161,9 +173,8 @@ mod tests {
         let alice_ata = init_ata(&mut litesvm, mint, alice.pubkey(), 100_000_000);
         let bob_ata = init_ata(&mut litesvm, mint, bob.pubkey(), 0);
 
-        initialize_multidelegate_action(&mut litesvm, &alice, mint)
-            .0
-            .assert_ok();
+        let init_result = initialize_multidelegate_action(&mut litesvm, &alice, mint);
+        init_result.0.assert_ok();
 
         let (res, delegation_pda) = CreateDelegation::new(&mut litesvm, &alice, mint, bob.pubkey())
             .nonce(nonce)
@@ -178,6 +189,7 @@ mod tests {
             mint,
             alice_ata,
             bob_ata,
+            init_result.1,
         )
     }
 
@@ -189,7 +201,7 @@ mod tests {
         let expiry_ts: i64 = current_ts() + days(1) as i64;
         let nonce = 0;
 
-        let (mut litesvm, alice, bob, delegation_pda, mint, _, bob_ata) =
+        let (mut litesvm, alice, bob, delegation_pda, mint, _, bob_ata, _) =
             setup_recurring_delegation(
                 amount_per_period,
                 period_length_s,
@@ -254,7 +266,7 @@ mod tests {
         let expiry_ts: i64 = current_ts() + days(1) as i64;
         let nonce = 1;
 
-        let (mut litesvm, alice, bob, delegation_pda, mint, _, bob_ata) =
+        let (mut litesvm, alice, bob, delegation_pda, mint, _, bob_ata, _) =
             setup_recurring_delegation(
                 amount_per_period,
                 period_length_s,
@@ -280,10 +292,10 @@ mod tests {
         let amount_per_period: u64 = 50_000_000;
         let period_length_s: u64 = hours(1);
         let start_ts: i64 = current_ts();
-        let expiry_ts: i64 = current_ts() - days(1) as i64;
+        let expiry_ts: i64 = current_ts() + days(1) as i64;
         let nonce = 1;
 
-        let (mut litesvm, alice, bob, delegation_pda, mint, _, bob_ata) =
+        let (mut litesvm, alice, bob, delegation_pda, mint, _, bob_ata, _) =
             setup_recurring_delegation(
                 amount_per_period,
                 period_length_s,
@@ -299,9 +311,19 @@ mod tests {
             TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
                 .amount(transfer_amount)
                 .recurring();
+        result.assert_ok();
+        assert_eq!(get_ata_balance(&litesvm, &bob_ata), 30_000_000);
 
+        // Now let's move the clock and try to transfer again
+        move_clock_forward(&mut litesvm, (current_ts() + (days(2) as i64)) as u64);
+
+        let transfer_amount: u64 = 30_000_000;
+        let result =
+            TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+                .amount(transfer_amount)
+                .recurring();
         result.assert_err(MultiDelegatorError::DelegationExpired);
-        assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
+        assert_eq!(get_ata_balance(&litesvm, &bob_ata), 30_000_000);
     }
 
     #[test]
@@ -312,7 +334,7 @@ mod tests {
         let expiry_ts: i64 = current_ts() + days(1) as i64;
         let nonce = 1;
 
-        let (mut litesvm, alice, bob, delegation_pda, mint, _, bob_ata) =
+        let (mut litesvm, alice, bob, delegation_pda, mint, _, bob_ata, _) =
             setup_recurring_delegation(
                 amount_per_period,
                 period_length_s,
@@ -363,7 +385,7 @@ mod tests {
         let expiry_ts: i64 = current_ts() + days(1) as i64;
         let nonce = 2;
 
-        let (mut litesvm, alice, bob, delegation_pda, mint, _, bob_ata) =
+        let (mut litesvm, alice, bob, delegation_pda, mint, _, bob_ata, _) =
             setup_recurring_delegation(
                 amount_per_period,
                 period_length_s,
@@ -405,6 +427,70 @@ mod tests {
     }
 
     #[test]
+    fn test_recurring_transfer_skip_period_cannot_double_claim() {
+        // Bug hypothesis: after skipping one period with no claims, the delegatee
+        // can claim twice (2x amount_per_period) in the next period.
+        //
+        // Scenario:
+        //   Period 0: claim full allowance
+        //   Period 1: no claims (skipped)
+        //   Period 2 start: claim full allowance, then immediately try again
+        //
+        // Expected: second claim in period 2 should fail — skipped periods
+        // do not accumulate allowance.
+        let amount_per_period: u64 = 50_000_000;
+        let period_length_s: u64 = hours(1);
+        let start_ts: i64 = current_ts();
+        let expiry_ts: i64 = current_ts() + days(7) as i64;
+        let nonce = 3;
+
+        let (mut litesvm, alice, bob, delegation_pda, mint, _, bob_ata, _) =
+            setup_recurring_delegation(
+                amount_per_period,
+                period_length_s,
+                start_ts,
+                expiry_ts,
+                nonce,
+            );
+
+        // Period 0: Use the full allowance
+        TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+            .amount(amount_per_period)
+            .recurring()
+            .assert_ok();
+        assert_eq!(get_ata_balance(&litesvm, &bob_ata), 50_000_000);
+
+        // Skip period 1 entirely — advance exactly to the start of period 2
+        move_clock_forward(&mut litesvm, period_length_s * 2);
+
+        // Period 2, transfer 1: claim full allowance — should succeed
+        TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+            .amount(amount_per_period)
+            .recurring()
+            .assert_ok();
+        assert_eq!(get_ata_balance(&litesvm, &bob_ata), 100_000_000);
+
+        // Period 2, transfer 2: immediately try to claim again — should fail
+        let result =
+            TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+                .amount(amount_per_period)
+                .recurring();
+        result.assert_err(MultiDelegatorError::AmountExceedsPeriodLimit);
+
+        // Balances unchanged after failed transfer
+        assert_eq!(get_ata_balance(&litesvm, &bob_ata), 100_000_000);
+
+        // Verify delegation state
+        let delegation_account = litesvm.get_account(&delegation_pda).unwrap();
+        let delegation = RecurringDelegation::load(&delegation_account.data).unwrap();
+        let actual_pulled = delegation.amount_pulled_in_period;
+        let actual_start = delegation.current_period_start_ts;
+        assert_eq!(actual_pulled, amount_per_period);
+        let expected_start = start_ts + (period_length_s * 2) as i64;
+        assert_eq!(actual_start, expected_start);
+    }
+
+    #[test]
     fn test_recurring_transfer_delegator_mismatch_exploit() {
         // This test demonstrates the access control vulnerability where an attacker
         // can use their own delegation to transfer funds from another user's account
@@ -416,7 +502,7 @@ mod tests {
         let nonce = 0;
 
         // Setup: Alice (victim) with funds and Bob (attacker)
-        let (mut litesvm, alice, bob, _alice_delegation_pda, mint, alice_ata, bob_ata) =
+        let (mut litesvm, alice, bob, _alice_delegation_pda, mint, alice_ata, bob_ata, _) =
             setup_recurring_delegation(
                 amount_per_period,
                 period_length_s,
@@ -453,5 +539,108 @@ mod tests {
         assert_eq!(get_ata_balance(&litesvm, &alice_ata), 100_000_000);
         // Verify Bob received no funds
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
+    }
+
+    #[test]
+    fn test_recurring_transfer_token_revoke() {
+        let amount_per_period: u64 = 50_000_000;
+        let period_length_s: u64 = hours(1);
+        let start_ts: i64 = current_ts();
+        let expiry_ts: i64 = current_ts() + days(1) as i64;
+        let nonce = 0;
+
+        let (mut litesvm, alice, bob, delegation_pda, mint, alice_ata, bob_ata, multidelegate_pda) =
+            setup_recurring_delegation(
+                amount_per_period,
+                period_length_s,
+                start_ts,
+                expiry_ts,
+                nonce,
+            );
+
+        assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
+
+        TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+            .amount(50_000_000)
+            .recurring()
+            .assert_ok();
+        assert_eq!(get_ata_balance(&litesvm, &bob_ata), 50_000_000);
+
+        // Let's revoke the token approval
+        let ix = Instruction {
+            program_id: TOKEN_PROGRAM_ID,
+            accounts: vec![
+                AccountMeta::new(alice_ata, false),
+                AccountMeta::new(alice.pubkey(), true),
+            ],
+            data: Revoke.pack(),
+        };
+        assert!(build_and_send_transaction(&mut litesvm, &[&alice], &alice.pubkey(), &ix).is_ok());
+
+        // Now let's move the clock and try to fetch recurring delegation again
+        move_clock_forward(&mut litesvm, period_length_s);
+
+        // Now, let's try again
+        let result =
+            TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+                .amount(50_000_000)
+                .recurring();
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().err,
+            InstructionError(
+                0,
+                solana_instruction::error::InstructionError::Custom(
+                    spl_token::error::TokenError::OwnerMismatch as u32
+                ),
+            )
+        );
+
+        // Doing approval once again fixes it, but it has to be max possible for it to work
+
+        // Scenario 1: We approve, but less amount
+        let ix = Instruction {
+            program_id: TOKEN_PROGRAM_ID,
+            accounts: vec![
+                AccountMeta::new(alice_ata, false),
+                AccountMeta::new(multidelegate_pda, false),
+                AccountMeta::new(alice.pubkey(), true),
+            ],
+            data: Approve { amount: 100000 }.pack(),
+        };
+        assert!(build_and_send_transaction(&mut litesvm, &[&alice], &alice.pubkey(), &ix).is_ok());
+
+        // Since the approval amount is less than what is needed, we fail again
+        let result =
+            TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+                .amount(50_000_000)
+                .recurring();
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().err,
+            InstructionError(
+                0,
+                solana_instruction::error::InstructionError::Custom(
+                    spl_token::error::TokenError::InsufficientFunds as u32
+                ),
+            )
+        );
+
+        // Scenario 2: We approve for max amount. Now it should work as usual
+        let ix = Instruction {
+            program_id: TOKEN_PROGRAM_ID,
+            accounts: vec![
+                AccountMeta::new(alice_ata, false),
+                AccountMeta::new(multidelegate_pda, false),
+                AccountMeta::new(alice.pubkey(), true),
+            ],
+            data: Approve { amount: u64::MAX }.pack(),
+        };
+        assert!(build_and_send_transaction(&mut litesvm, &[&alice], &alice.pubkey(), &ix).is_ok());
+
+        TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+            .amount(50_000_000)
+            .recurring()
+            .assert_ok();
     }
 }

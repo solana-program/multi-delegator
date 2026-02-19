@@ -99,6 +99,7 @@ impl<'a> TryFrom<&'a [AccountView]> for FixedTransferAccounts<'a> {
 
 #[cfg(test)]
 mod tests {
+    use crate::tests::utils::move_clock_forward;
     use crate::{
         state::FixedDelegation,
         tests::{
@@ -256,7 +257,7 @@ mod tests {
     #[test]
     fn test_fixed_transfer_expired() {
         let amount: u64 = 50_000_000;
-        let expiry_ts: i64 = current_ts() - days(1) as i64;
+        let expiry_ts: i64 = current_ts() + days(1) as i64;
         let nonce = 1;
 
         let (mut litesvm, alice, bob, delegation_pda, mint, _, bob_ata) =
@@ -270,14 +271,26 @@ mod tests {
                 .amount(transfer_amount)
                 .fixed();
 
+        result.assert_ok();
+        assert_eq!(get_ata_balance(&litesvm, &bob_ata), 30_000_000);
+
+        // Now let's move the clock and try to transfer again
+        move_clock_forward(&mut litesvm, (current_ts() + (days(2) as i64)) as u64);
+
+        let transfer_amount: u64 = 30_000_000;
+        let result =
+            TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+                .amount(transfer_amount)
+                .fixed();
+
         result.assert_err(MultiDelegatorError::DelegationExpired);
-        assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
+        assert_eq!(get_ata_balance(&litesvm, &bob_ata), 30_000_000);
 
         let delegation_account = litesvm.get_account(&delegation_pda).unwrap();
         let delegation_amount = FixedDelegation::load(&delegation_account.data)
             .unwrap()
             .amount;
-        assert_eq!(delegation_amount, 50_000_000);
+        assert_eq!(delegation_amount, 20_000_000);
     }
 
     #[test]

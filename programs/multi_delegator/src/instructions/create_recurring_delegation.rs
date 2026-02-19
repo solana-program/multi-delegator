@@ -1,11 +1,14 @@
-use codama::CodamaType;
-use core::mem::{size_of, transmute};
-use pinocchio::{error::ProgramError, AccountView, ProgramResult};
-
 use crate::{
     create_delegation_account, init_header, AccountDiscriminator, CreateDelegationAccounts,
     MultiDelegatorError, RecurringDelegation, DISCRIMINATOR_OFFSET,
 };
+use codama::CodamaType;
+use core::mem::{size_of, transmute};
+use pinocchio::sysvars::clock::Clock;
+use pinocchio::sysvars::Sysvar;
+use pinocchio::{error::ProgramError, AccountView, ProgramResult};
+
+pub const TIME_DRIFT_ALLOWED: i64 = 120;
 
 #[repr(C, packed)]
 #[derive(Debug, Clone, CodamaType)]
@@ -26,6 +29,26 @@ impl CreateRecurringDelegationData {
         }
         Ok(unsafe { &*transmute::<*const u8, *const Self>(data.as_ptr()) })
     }
+
+    pub fn validate(&self, current_time: i64) -> Result<(), MultiDelegatorError> {
+        if self.start_ts < current_time - TIME_DRIFT_ALLOWED {
+            return Err(MultiDelegatorError::RecurringDelegationStartTimeInPast);
+        }
+
+        if self.period_length_s == 0 {
+            return Err(MultiDelegatorError::RecurringDelegationZeroPeriod);
+        }
+
+        if self.start_ts >= self.expiry_ts {
+            return Err(MultiDelegatorError::RecurringDelegationStartTimeGreaterThanExpiry);
+        }
+
+        if self.amount_per_period == 0 {
+            return Err(MultiDelegatorError::RecurringDelegationAmountZero);
+        }
+
+        Ok(())
+    }
 }
 
 pub const DISCRIMINATOR: &u8 = &2;
@@ -34,6 +57,8 @@ pub fn process(
     accounts: &[AccountView],
     call_data: &CreateRecurringDelegationData,
 ) -> ProgramResult {
+    call_data.validate(Clock::get()?.unix_timestamp)?;
+
     let accounts = CreateDelegationAccounts::try_from(accounts)?;
 
     let bump = create_delegation_account(&accounts, call_data.nonce, RecurringDelegation::LEN)?;
@@ -67,6 +92,7 @@ mod tests {
     use solana_pubkey::Pubkey;
     use solana_signer::Signer;
 
+    use crate::tests::utils::current_ts;
     use crate::{
         tests::{
             asserts::TransactionResultExt,
@@ -75,7 +101,7 @@ mod tests {
                 days, init_ata, init_mint, initialize_multidelegate_action, setup, CreateDelegation,
             },
         },
-        AccountDiscriminator, RecurringDelegation,
+        AccountDiscriminator, MultiDelegatorError, RecurringDelegation,
     };
 
     #[test]
@@ -134,5 +160,101 @@ mod tests {
         assert_eq!(del_expiry_s, expiry_ts);
         assert_eq!(del_amount_pulled_in_period, 0);
         assert_eq!(del_current_period_start_ts, start_ts);
+    }
+
+    #[test]
+    fn create_recurring_delegation_with_past_start_ts() {
+        let (litesvm, user) = &mut setup();
+        let payer = user;
+        let amount_per_period: u64 = 50_000_000;
+        let period_length_s: u64 = 86400;
+        let start_ts: i64 = i64::MIN;
+        let expiry_ts = current_ts() + 100000000;
+        let nonce: u64 = 0;
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(payer.pubkey()),
+            &[],
+        );
+        let _user_ata = init_ata(litesvm, mint, payer.pubkey(), 1_000_000);
+
+        initialize_multidelegate_action(litesvm, payer, mint)
+            .0
+            .assert_ok();
+
+        let delegatee = Pubkey::new_unique();
+
+        let (res, _delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .nonce(nonce)
+            .recurring(amount_per_period, period_length_s, start_ts, expiry_ts);
+        res.assert_err(MultiDelegatorError::RecurringDelegationStartTimeInPast);
+    }
+
+    #[test]
+    fn create_recurring_delegation_with_zero_period() {
+        let (litesvm, user) = &mut setup();
+        let payer = user;
+        let amount_per_period: u64 = 50_000_000;
+        let period_length_s: u64 = 0;
+        let start_ts: i64 = current_ts() + 10000;
+        let expiry_ts = current_ts() + 100000000;
+        let nonce: u64 = 0;
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(payer.pubkey()),
+            &[],
+        );
+        let _user_ata = init_ata(litesvm, mint, payer.pubkey(), 1_000_000);
+
+        initialize_multidelegate_action(litesvm, payer, mint)
+            .0
+            .assert_ok();
+
+        let delegatee = Pubkey::new_unique();
+
+        let (res, _delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .nonce(nonce)
+            .recurring(amount_per_period, period_length_s, start_ts, expiry_ts);
+        res.assert_err(MultiDelegatorError::RecurringDelegationZeroPeriod);
+    }
+
+    #[test]
+    fn create_recurring_delegation_with_start_ts_greater_than_expiry_ts() {
+        let (litesvm, user) = &mut setup();
+        let payer = user;
+        let amount_per_period: u64 = 50_000_000;
+        let period_length_s: u64 = 1;
+        let start_ts: i64 = current_ts() + 100000000;
+        let expiry_ts = current_ts() + 10000;
+        let nonce: u64 = 0;
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(payer.pubkey()),
+            &[],
+        );
+        let _user_ata = init_ata(litesvm, mint, payer.pubkey(), 1_000_000);
+
+        initialize_multidelegate_action(litesvm, payer, mint)
+            .0
+            .assert_ok();
+
+        let delegatee = Pubkey::new_unique();
+
+        let (res, _delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .nonce(nonce)
+            .recurring(amount_per_period, period_length_s, start_ts, expiry_ts);
+        res.assert_err(MultiDelegatorError::RecurringDelegationStartTimeGreaterThanExpiry);
     }
 }

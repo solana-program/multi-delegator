@@ -1,11 +1,13 @@
+use crate::{
+    create_delegation_account, init_header,
+    instructions::create_recurring_delegation::TIME_DRIFT_ALLOWED, state::FixedDelegation,
+    AccountDiscriminator, CreateDelegationAccounts, MultiDelegatorError, DISCRIMINATOR_OFFSET,
+};
 use codama::CodamaType;
 use core::mem::{size_of, transmute};
+use pinocchio::sysvars::clock::Clock;
+use pinocchio::sysvars::Sysvar;
 use pinocchio::{error::ProgramError, AccountView, ProgramResult};
-
-use crate::{
-    create_delegation_account, init_header, state::FixedDelegation, AccountDiscriminator,
-    CreateDelegationAccounts, MultiDelegatorError, DISCRIMINATOR_OFFSET,
-};
 
 #[repr(C, packed)]
 #[derive(Debug, Clone, CodamaType)]
@@ -13,6 +15,20 @@ pub struct CreateFixedDelegationData {
     pub nonce: u64,
     pub amount: u64,
     pub expiry_ts: i64,
+}
+
+impl CreateFixedDelegationData {
+    pub fn validate(&self, current_time: i64) -> Result<(), MultiDelegatorError> {
+        if self.expiry_ts < current_time - TIME_DRIFT_ALLOWED {
+            return Err(MultiDelegatorError::FixedDelegationExpiryInPast);
+        }
+
+        if self.amount == 0 {
+            return Err(MultiDelegatorError::FixedDelegationAmountZero);
+        }
+
+        Ok(())
+    }
 }
 
 impl CreateFixedDelegationData {
@@ -29,6 +45,8 @@ impl CreateFixedDelegationData {
 pub const DISCRIMINATOR: &u8 = &1;
 
 pub fn process(accounts: &[AccountView], call_data: &CreateFixedDelegationData) -> ProgramResult {
+    call_data.validate(Clock::get()?.unix_timestamp)?;
+
     let accounts = CreateDelegationAccounts::try_from(accounts)?;
 
     let bump = create_delegation_account(&accounts, call_data.nonce, FixedDelegation::LEN)?;
@@ -67,7 +85,7 @@ mod tests {
                 initialize_multidelegate_action, setup, CreateDelegation, RevokeDelegation,
             },
         },
-        AccountDiscriminator, FixedDelegation,
+        AccountDiscriminator, FixedDelegation, MultiDelegatorError,
     };
 
     #[test]
@@ -329,12 +347,12 @@ mod tests {
 
         let (res, _) = CreateDelegation::new(litesvm, payer, mint, delegatee)
             .nonce(0)
-            .fixed(100, 1000);
+            .fixed(100, current_ts() + 1000);
         res.assert_ok();
 
         let (res2, _) = CreateDelegation::new(litesvm, payer, mint, delegatee)
             .nonce(0)
-            .fixed(200, 2000);
+            .fixed(200, current_ts() + 2000);
         assert!(res2.is_err());
     }
 
@@ -359,7 +377,7 @@ mod tests {
 
         let (res0, pda0) = CreateDelegation::new(litesvm, payer, mint, delegatee)
             .nonce(0)
-            .fixed(100, 1000);
+            .fixed(100, current_ts() + 1000);
         let tx = res0.assert_ok();
         println!(
             "Create Fixed delegation consumed: {} CUs",
@@ -368,7 +386,7 @@ mod tests {
 
         let (res1, pda1) = CreateDelegation::new(litesvm, payer, mint, delegatee)
             .nonce(1)
-            .fixed(200, 2000);
+            .fixed(200, current_ts() + 2000);
         let tx = res1.assert_ok();
         println!(
             "Create Fixed delegation consumed: {} CUs",
@@ -377,7 +395,7 @@ mod tests {
 
         let (res2, pda2) = CreateDelegation::new(litesvm, payer, mint, delegatee)
             .nonce(2)
-            .fixed(300, 3000);
+            .fixed(300, current_ts() + 3000);
         let tx = res2.assert_ok();
         println!(
             "Create Fixed delegation consumed: {} CUs",
@@ -398,5 +416,35 @@ mod tests {
         assert_eq!(pda0, expected_pda0);
         assert_eq!(pda1, expected_pda1);
         assert_eq!(pda2, expected_pda2);
+    }
+
+    #[test]
+    fn create_fixed_delegation_with_expiry_in_past() {
+        let (litesvm, user) = &mut setup();
+        let payer = user;
+        let amount: u64 = 100_000_000;
+        let expiry_ts: i64 = -10000000;
+        let nonce: u64 = 0;
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(payer.pubkey()),
+            &[],
+        );
+        let _user_ata = init_ata(litesvm, mint, payer.pubkey(), 1_000_000);
+
+        initialize_multidelegate_action(litesvm, payer, mint)
+            .0
+            .assert_ok();
+
+        let delegatee = Pubkey::new_unique();
+
+        let (res, _delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .nonce(nonce)
+            .fixed(amount, expiry_ts);
+        res.assert_err(MultiDelegatorError::FixedDelegationExpiryInPast);
     }
 }
