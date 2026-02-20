@@ -13,6 +13,17 @@ impl AccountCheck for SignerAccount {
     }
 }
 
+pub struct WritableAccount;
+
+impl AccountCheck for WritableAccount {
+    fn check(account: &AccountView) -> Result<(), ProgramError> {
+        if !account.is_writable() {
+            return Err(MultiDelegatorError::AccountNotWritable.into());
+        }
+        Ok(())
+    }
+}
+
 pub struct SystemAccount;
 
 impl AccountCheck for SystemAccount {

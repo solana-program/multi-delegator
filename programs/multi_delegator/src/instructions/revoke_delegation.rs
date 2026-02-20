@@ -2,7 +2,7 @@ use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 
 use crate::{
     AccountCheck, AccountClose, Header, MultiDelegatorError, ProgramAccount, SignerAccount,
-    DELEGATEE_OFFSET, DELEGATOR_OFFSET, PAYER_OFFSET,
+    WritableAccount, DELEGATEE_OFFSET, DELEGATOR_OFFSET, PAYER_OFFSET,
 };
 
 pub struct RevokeDelegationAccounts<'a> {
@@ -20,6 +20,8 @@ impl<'a> TryFrom<&'a [AccountView]> for RevokeDelegationAccounts<'a> {
         };
 
         SignerAccount::check(authority)?;
+        WritableAccount::check(authority)?;
+        WritableAccount::check(delegation_account)?;
         ProgramAccount::check(delegation_account)?;
 
         Ok(Self {
@@ -317,6 +319,135 @@ mod tests {
             .execute();
 
         result.assert_err(MultiDelegatorError::Unauthorized);
+    }
+
+    #[test]
+    fn writable_accounts_must_be_writable() {
+        use solana_instruction::{AccountMeta, Instruction};
+
+        use crate::{
+            instructions::revoke_delegation,
+            tests::{
+                constants::PROGRAM_ID,
+                idl,
+                utils::{build_and_send_transaction, init_wallet},
+            },
+        };
+
+        let writable = idl::writable_account_indices("revokeDelegation");
+
+        let (litesvm, user) = &mut setup();
+        let payer = user;
+        let fee_payer = init_wallet(litesvm, 10_000_000_000);
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(payer.pubkey()),
+            &[],
+        );
+        let _user_ata = init_ata(litesvm, mint, payer.pubkey(), 1_000_000);
+
+        initialize_multidelegate_action(litesvm, payer, mint)
+            .0
+            .assert_ok();
+
+        let delegatee = Pubkey::new_unique();
+        let nonce: u64 = 0;
+
+        let (res, delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .nonce(nonce)
+            .fixed(100, current_ts() + 1000);
+        res.assert_ok();
+
+        for (idx, _name, is_signer) in &writable {
+            let mut accounts = vec![
+                AccountMeta::new(payer.pubkey(), true),
+                AccountMeta::new(delegation_pda, false),
+            ];
+
+            // Flip writable account to readonly, preserving signer flag
+            let pubkey = accounts[*idx].pubkey;
+            accounts[*idx] = AccountMeta::new_readonly(pubkey, *is_signer);
+
+            let ix = Instruction {
+                program_id: PROGRAM_ID,
+                accounts,
+                data: vec![*revoke_delegation::DISCRIMINATOR],
+            };
+
+            let res =
+                build_and_send_transaction(litesvm, &[&fee_payer, payer], &fee_payer.pubkey(), &ix);
+            res.assert_err(MultiDelegatorError::AccountNotWritable);
+        }
+    }
+
+    #[test]
+    fn signer_accounts_must_be_signers() {
+        use solana_instruction::{AccountMeta, Instruction};
+
+        use crate::{
+            instructions::revoke_delegation,
+            tests::{
+                constants::PROGRAM_ID,
+                idl,
+                utils::{build_and_send_transaction, init_wallet},
+            },
+        };
+
+        let signers = idl::signer_account_indices("revokeDelegation");
+
+        let (litesvm, user) = &mut setup();
+        let payer = user;
+        let fee_payer = init_wallet(litesvm, 10_000_000_000);
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(payer.pubkey()),
+            &[],
+        );
+        let _user_ata = init_ata(litesvm, mint, payer.pubkey(), 1_000_000);
+
+        initialize_multidelegate_action(litesvm, payer, mint)
+            .0
+            .assert_ok();
+
+        let delegatee = Pubkey::new_unique();
+        let nonce: u64 = 0;
+
+        let (res, delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .nonce(nonce)
+            .fixed(100, current_ts() + 1000);
+        res.assert_ok();
+
+        for (idx, _name, is_writable) in &signers {
+            let mut accounts = vec![
+                AccountMeta::new(payer.pubkey(), true),
+                AccountMeta::new(delegation_pda, false),
+            ];
+
+            // Flip signer to non-signer, preserving writable flag
+            let pubkey = accounts[*idx].pubkey;
+            accounts[*idx] = if *is_writable {
+                AccountMeta::new(pubkey, false)
+            } else {
+                AccountMeta::new_readonly(pubkey, false)
+            };
+
+            let ix = Instruction {
+                program_id: PROGRAM_ID,
+                accounts,
+                data: vec![*revoke_delegation::DISCRIMINATOR],
+            };
+
+            let res = build_and_send_transaction(litesvm, &[&fee_payer], &fee_payer.pubkey(), &ix);
+            res.assert_err(MultiDelegatorError::NotSigner);
+        }
     }
 
     #[allow(clippy::result_large_err)]

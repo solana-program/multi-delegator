@@ -6,7 +6,7 @@ use pinocchio_token_2022::instructions::Approve as Approve2022;
 use crate::{
     constants::TOKEN_2022_PROGRAM_ID, AccountCheck, MintInterface, MultiDelegate,
     MultiDelegatorError, ProgramAccount, ProgramAccountInit, SignerAccount, SystemAccount,
-    TokenAccountInterface, TokenProgramInterface,
+    TokenAccountInterface, TokenProgramInterface, WritableAccount,
 };
 
 pub struct InitializeMultiDelegateAccounts<'a> {
@@ -28,6 +28,9 @@ impl<'a> TryFrom<&'a [AccountView]> for InitializeMultiDelegateAccounts<'a> {
         };
 
         SignerAccount::check(user)?;
+        WritableAccount::check(user)?;
+        WritableAccount::check(multi_delegate)?;
+        WritableAccount::check(user_ata)?;
         MintInterface::check_with_program(token_mint, token_program)?;
         TokenAccountInterface::check_with_program(user_ata, token_program)?;
         TokenProgramInterface::check(token_program)?;
@@ -340,6 +343,121 @@ mod tests {
         assert!(ata_account.delegate.is_some());
         assert_eq!(ata_account.delegate.unwrap(), multi_delegate_pda);
         assert_eq!(ata_account.delegated_amount, u64::MAX);
+    }
+
+    #[test]
+    fn writable_accounts_must_be_writable() {
+        use solana_instruction::{AccountMeta, Instruction};
+
+        use crate::{
+            instructions::initialize_multidelegate,
+            tests::{
+                constants::PROGRAM_ID,
+                idl,
+                pda::get_multidelegate_pda,
+                utils::{build_and_send_transaction, init_wallet},
+            },
+        };
+
+        let writable = idl::writable_account_indices("initMultiDelegate");
+
+        let (litesvm, user) = &mut setup();
+        let fee_payer = init_wallet(litesvm, 10_000_000_000);
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(user.pubkey()),
+            &[],
+        );
+        let user_ata = init_ata(litesvm, mint, user.pubkey(), 1_000_000);
+        let (multi_delegate_pda, _) = get_multidelegate_pda(&user.pubkey(), &mint);
+
+        for (idx, _name, is_signer) in &writable {
+            let mut accounts = vec![
+                AccountMeta::new(user.pubkey(), true),
+                AccountMeta::new(multi_delegate_pda, false),
+                AccountMeta::new_readonly(mint, false),
+                AccountMeta::new(user_ata, false),
+                AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+                AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+            ];
+
+            // Flip writable account to readonly, preserving signer flag
+            let pubkey = accounts[*idx].pubkey;
+            accounts[*idx] = AccountMeta::new_readonly(pubkey, *is_signer);
+
+            let ix = Instruction {
+                program_id: PROGRAM_ID,
+                accounts,
+                data: vec![*initialize_multidelegate::DISCRIMINATOR],
+            };
+
+            let res =
+                build_and_send_transaction(litesvm, &[&fee_payer, user], &fee_payer.pubkey(), &ix);
+            res.assert_err(MultiDelegatorError::AccountNotWritable);
+        }
+    }
+
+    #[test]
+    fn signer_accounts_must_be_signers() {
+        use solana_instruction::{AccountMeta, Instruction};
+
+        use crate::{
+            instructions::initialize_multidelegate,
+            tests::{
+                constants::PROGRAM_ID,
+                idl,
+                pda::get_multidelegate_pda,
+                utils::{build_and_send_transaction, init_wallet},
+            },
+        };
+
+        let signers = idl::signer_account_indices("initMultiDelegate");
+
+        let (litesvm, user) = &mut setup();
+        let fee_payer = init_wallet(litesvm, 10_000_000_000);
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(user.pubkey()),
+            &[],
+        );
+        let user_ata = init_ata(litesvm, mint, user.pubkey(), 1_000_000);
+        let (multi_delegate_pda, _) = get_multidelegate_pda(&user.pubkey(), &mint);
+
+        for (idx, _name, is_writable) in &signers {
+            let mut accounts = vec![
+                AccountMeta::new(user.pubkey(), true),
+                AccountMeta::new(multi_delegate_pda, false),
+                AccountMeta::new_readonly(mint, false),
+                AccountMeta::new(user_ata, false),
+                AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+                AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+            ];
+
+            // Flip signer to non-signer, preserving writable flag
+            let pubkey = accounts[*idx].pubkey;
+            accounts[*idx] = if *is_writable {
+                AccountMeta::new(pubkey, false)
+            } else {
+                AccountMeta::new_readonly(pubkey, false)
+            };
+
+            let ix = Instruction {
+                program_id: PROGRAM_ID,
+                accounts,
+                data: vec![*initialize_multidelegate::DISCRIMINATOR],
+            };
+
+            let res = build_and_send_transaction(litesvm, &[&fee_payer], &fee_payer.pubkey(), &ix);
+            res.assert_err(MultiDelegatorError::NotSigner);
+        }
     }
 
     #[test]

@@ -62,7 +62,6 @@ pub enum MultiDelegatorInstruction {
     ))]
     #[codama(account(
         name = "multi_delegate",
-        writable,
         docs = "The multi_delegate PDA for this token"
     ))]
     #[codama(account(
@@ -86,7 +85,6 @@ pub enum MultiDelegatorInstruction {
     ))]
     #[codama(account(
         name = "multi_delegate",
-        writable,
         docs = "The multi_delegate PDA for this token"
     ))]
     #[codama(account(
@@ -122,7 +120,7 @@ pub enum MultiDelegatorInstruction {
         writable,
         docs = "The fixed delegation PDA to transfer from"
     ))]
-    #[codama(account(name = "multi_delegate", writable, docs = "The multi delegate PDA"))]
+    #[codama(account(name = "multi_delegate", docs = "The multi delegate PDA"))]
     #[codama(account(
         name = "delegator_ata",
         writable,
@@ -146,7 +144,7 @@ pub enum MultiDelegatorInstruction {
         writable,
         docs = "The recurring delegation PDA to transfer from"
     ))]
-    #[codama(account(name = "multi_delegate", writable, docs = "The multi delegate PDA"))]
+    #[codama(account(name = "multi_delegate", docs = "The multi delegate PDA"))]
     #[codama(account(
         name = "delegator_ata",
         writable,

@@ -15,3 +15,6 @@ pub mod cu_tracker;
 
 #[cfg(test)]
 pub mod events;
+
+#[cfg(test)]
+pub mod idl;

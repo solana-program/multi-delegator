@@ -3,7 +3,7 @@ use pinocchio::{cpi::Seed, error::ProgramError, AccountView, Address};
 use crate::{
     state::common::find_delegation_pda, AccountCheck, AccountDiscriminator, Header,
     MultiDelegateAccount, MultiDelegatorError, ProgramAccount, ProgramAccountInit, SignerAccount,
-    SystemAccount, CURRENT_VERSION, DELEGATE_BASE_SEED,
+    SystemAccount, WritableAccount, CURRENT_VERSION, DELEGATE_BASE_SEED,
 };
 
 pub struct CreateDelegationAccounts<'a> {
@@ -26,11 +26,14 @@ impl<'a> TryFrom<&'a [AccountView]> for CreateDelegationAccounts<'a> {
         };
 
         SignerAccount::check(delegator)?;
+        WritableAccount::check(delegator)?;
+        WritableAccount::check(delegation_account)?;
         SystemAccount::check(system_program)?;
         MultiDelegateAccount::check(multi_delegate)?;
 
         let payer = if let Some(payer) = rem.first() {
             SignerAccount::check(payer)?;
+            WritableAccount::check(payer)?;
             payer
         } else {
             delegator

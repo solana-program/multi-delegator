@@ -5,7 +5,7 @@ use crate::{
     },
     state::RecurringDelegation,
     AccountCheck, MultiDelegateAccount, MultiDelegatorError, ProgramAccount, SignerAccount,
-    TokenAccountInterface, TokenProgramInterface,
+    TokenAccountInterface, TokenProgramInterface, WritableAccount,
 };
 use pinocchio::{
     error::ProgramError,
@@ -80,6 +80,9 @@ impl<'a> TryFrom<&'a [AccountView]> for RecurringTransferAccounts<'a> {
         };
 
         ProgramAccount::check(delegation_pda)?;
+        WritableAccount::check(delegation_pda)?;
+        WritableAccount::check(delegator_ata)?;
+        WritableAccount::check(receiver_ata)?;
         MultiDelegateAccount::check(multi_delegate)?;
         TokenProgramInterface::check(token_program)?;
         TokenAccountInterface::check_accounts_with_program(
@@ -469,6 +472,158 @@ mod tests {
         assert_eq!(actual_pulled, amount_per_period);
         let expected_start = start_ts + (period_length_s * 2) as i64;
         assert_eq!(actual_start, expected_start);
+    }
+
+    #[test]
+    fn writable_accounts_must_be_writable() {
+        use spl_associated_token_account::get_associated_token_address_with_program_id;
+
+        use crate::{
+            instructions::transfer_recurring_delegation,
+            tests::{
+                constants::PROGRAM_ID,
+                idl,
+                pda::get_multidelegate_pda,
+                utils::{build_and_send_transaction, init_wallet},
+            },
+        };
+
+        let writable = idl::writable_account_indices("transferRecurring");
+
+        let amount_per_period: u64 = 50_000_000;
+        let period_length_s: u64 = hours(1);
+        let start_ts: i64 = current_ts();
+        let expiry_ts: i64 = current_ts() + days(1) as i64;
+        let nonce = 0;
+
+        let (mut litesvm, alice, bob, delegation_pda, mint, _, _, _) = setup_recurring_delegation(
+            amount_per_period,
+            period_length_s,
+            start_ts,
+            expiry_ts,
+            nonce,
+        );
+        let fee_payer = init_wallet(&mut litesvm, 10_000_000_000);
+
+        let (multi_delegate_pda, _) = get_multidelegate_pda(&alice.pubkey(), &mint);
+        let delegator_ata =
+            get_associated_token_address_with_program_id(&alice.pubkey(), &mint, &TOKEN_PROGRAM_ID);
+        let receiver_ata =
+            get_associated_token_address_with_program_id(&bob.pubkey(), &mint, &TOKEN_PROGRAM_ID);
+
+        for (idx, _name, is_signer) in &writable {
+            let mut accounts = vec![
+                AccountMeta::new(delegation_pda, false),
+                AccountMeta::new_readonly(multi_delegate_pda, false),
+                AccountMeta::new(delegator_ata, false),
+                AccountMeta::new(receiver_ata, false),
+                AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+                AccountMeta::new_readonly(bob.pubkey(), true),
+            ];
+
+            // Flip writable account to readonly, preserving signer flag
+            let pubkey = accounts[*idx].pubkey;
+            accounts[*idx] = AccountMeta::new_readonly(pubkey, *is_signer);
+
+            let transfer_amount: u64 = 10_000_000;
+            let data = [
+                vec![*transfer_recurring_delegation::DISCRIMINATOR],
+                transfer_amount.to_le_bytes().to_vec(),
+                alice.pubkey().to_bytes().to_vec(),
+                mint.to_bytes().to_vec(),
+            ]
+            .concat();
+
+            let ix = Instruction {
+                program_id: PROGRAM_ID,
+                accounts,
+                data,
+            };
+
+            let res = build_and_send_transaction(
+                &mut litesvm,
+                &[&fee_payer, &bob],
+                &fee_payer.pubkey(),
+                &ix,
+            );
+            res.assert_err(MultiDelegatorError::AccountNotWritable);
+        }
+    }
+
+    #[test]
+    fn signer_accounts_must_be_signers() {
+        use spl_associated_token_account::get_associated_token_address_with_program_id;
+
+        use crate::{
+            instructions::transfer_recurring_delegation,
+            tests::{
+                constants::PROGRAM_ID,
+                idl,
+                pda::get_multidelegate_pda,
+                utils::{build_and_send_transaction, init_wallet},
+            },
+        };
+
+        let signers = idl::signer_account_indices("transferRecurring");
+
+        let amount_per_period: u64 = 50_000_000;
+        let period_length_s: u64 = hours(1);
+        let start_ts: i64 = current_ts();
+        let expiry_ts: i64 = current_ts() + days(1) as i64;
+        let nonce = 0;
+
+        let (mut litesvm, alice, bob, delegation_pda, mint, _, _, _) = setup_recurring_delegation(
+            amount_per_period,
+            period_length_s,
+            start_ts,
+            expiry_ts,
+            nonce,
+        );
+        let fee_payer = init_wallet(&mut litesvm, 10_000_000_000);
+
+        let (multi_delegate_pda, _) = get_multidelegate_pda(&alice.pubkey(), &mint);
+        let delegator_ata =
+            get_associated_token_address_with_program_id(&alice.pubkey(), &mint, &TOKEN_PROGRAM_ID);
+        let receiver_ata =
+            get_associated_token_address_with_program_id(&bob.pubkey(), &mint, &TOKEN_PROGRAM_ID);
+
+        for (idx, _name, is_writable) in &signers {
+            let mut accounts = vec![
+                AccountMeta::new(delegation_pda, false),
+                AccountMeta::new_readonly(multi_delegate_pda, false),
+                AccountMeta::new(delegator_ata, false),
+                AccountMeta::new(receiver_ata, false),
+                AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+                AccountMeta::new_readonly(bob.pubkey(), true),
+            ];
+
+            // Flip signer to non-signer, preserving writable flag
+            let pubkey = accounts[*idx].pubkey;
+            accounts[*idx] = if *is_writable {
+                AccountMeta::new(pubkey, false)
+            } else {
+                AccountMeta::new_readonly(pubkey, false)
+            };
+
+            let transfer_amount: u64 = 10_000_000;
+            let data = [
+                vec![*transfer_recurring_delegation::DISCRIMINATOR],
+                transfer_amount.to_le_bytes().to_vec(),
+                alice.pubkey().to_bytes().to_vec(),
+                mint.to_bytes().to_vec(),
+            ]
+            .concat();
+
+            let ix = Instruction {
+                program_id: PROGRAM_ID,
+                accounts,
+                data,
+            };
+
+            let res =
+                build_and_send_transaction(&mut litesvm, &[&fee_payer], &fee_payer.pubkey(), &ix);
+            res.assert_err(MultiDelegatorError::NotSigner);
+        }
     }
 
     #[test]
