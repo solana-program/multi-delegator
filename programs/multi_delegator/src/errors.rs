@@ -13,74 +13,71 @@ impl TryFrom<u32> for MultiDelegatorError {
 
     fn try_from(code: u32) -> Result<Self, Self::Error> {
         match code {
-            0 => Ok(Self::NotSigner),
-            1 => Ok(Self::InvalidAddress),
-            2 => Ok(Self::InvalidEscrowPda),
-            3 => Ok(Self::InvalidMultiDelegatePda),
-            4 => Ok(Self::NotSystemProgram),
-            5 => Ok(Self::InvalidTokenProgram),
-            6 => Ok(Self::InvalidToken2022MintAccountData),
-            7 => Ok(Self::InvalidToken2022TokenAccountData),
-            8 => Ok(Self::InvalidAssociatedTokenAccountDerivedAddress),
-            9 => Ok(Self::InvalidTokenSplMintAccountData),
-            10 => Ok(Self::InvalidTokenSplTokenAccountData),
-            11 => Ok(Self::InvalidDelegatePda),
-            12 => Ok(Self::InvalidAccountData),
-            13 => Ok(Self::InvalidHeaderData),
-            14 => Ok(Self::InvalidInstructionData),
-            15 => Ok(Self::NotEnoughAccountKeys),
-            16 => Ok(Self::InvalidInstruction),
-            17 => Ok(Self::DelegationExpired),
-            18 => Ok(Self::AmountExceedsLimit),
-            19 => Ok(Self::AmountExceedsPeriodLimit),
-            20 => Ok(Self::PeriodNotElapsed),
-            21 => Ok(Self::TimestampError),
-            22 => Ok(Self::InvalidAmount),
-            23 => Ok(Self::TransferInvalidKind),
-            24 => Ok(Self::TransferInvalidCallData),
-            25 => Ok(Self::Unauthorized),
-            26 => Ok(Self::TransferKindMismatch),
-            27 => Ok(Self::ArithmeticOverflow),
-            28 => Ok(Self::InvalidPeriodLength),
-            29 => Ok(Self::InvalidPayerData),
-            30 => Ok(Self::ArithmeticUnderflow),
-            31 => Ok(Self::InvalidAccountDiscriminator),
-            32 => Ok(Self::MintHasConfidentialTransfer),
-            33 => Ok(Self::MintHasNonTransferable),
-            34 => Ok(Self::MintHasPermanentDelegate),
-            35 => Ok(Self::MintHasTransferHook),
-            36 => Ok(Self::MintHasTransferFee),
-            37 => Ok(Self::MintHasMintCloseAuthority),
-            38 => Ok(Self::MintHasPausable),
-            39 => Ok(Self::RecurringDelegationStartTimeInPast),
-            40 => Ok(Self::RecurringDelegationZeroPeriod),
-            41 => Ok(Self::RecurringDelegationStartTimeGreaterThanExpiry),
-            42 => Ok(Self::RecurringDelegationAmountZero),
-            43 => Ok(Self::FixedDelegationExpiryInPast),
-            44 => Ok(Self::FixedDelegationAmountZero),
-            45 => Ok(Self::AccountNotWritable),
-            46 => Ok(Self::PlanSunset),
-            47 => Ok(Self::PlanExpired),
-            48 => Ok(Self::InvalidPlanPda),
-            49 => Ok(Self::InvalidSubscriptionPda),
-            50 => Ok(Self::NotPlanOwner),
-            51 => Ok(Self::SubscriptionPlanMismatch),
-            52 => Ok(Self::UnauthorizedDestination),
-            53 => Ok(Self::MintMismatch),
-            54 => Ok(Self::InvalidNumDestinations),
-            55 => Ok(Self::SubscriptionCancelled),
-            56 => Ok(Self::SubscriptionAlreadyCancelled),
-            57 => Ok(Self::SubscriptionNotCancelled),
-            58 => Ok(Self::InvalidEventAuthority),
-            59 => Ok(Self::InvalidEventData),
-            60 => Ok(Self::InvalidEventTag),
-            61 => Ok(Self::InvalidEventDiscriminator),
-            62 => Ok(Self::InvalidEndTs),
-            63 => Ok(Self::InvalidPlanStatus),
-            64 => Ok(Self::PlanImmutableAfterSunset),
-            65 => Ok(Self::SunsetRequiresEndTs),
-            66 => Ok(Self::PlanNotExpired),
-            67 => Ok(Self::PlanClosed),
+            100 => Ok(Self::NotSigner),
+            101 => Ok(Self::InvalidAddress),
+            102 => Ok(Self::InvalidEscrowPda),
+            103 => Ok(Self::InvalidMultiDelegatePda),
+            104 => Ok(Self::NotSystemProgram),
+            105 => Ok(Self::InvalidTokenProgram),
+            106 => Ok(Self::InvalidToken2022MintAccountData),
+            107 => Ok(Self::InvalidToken2022TokenAccountData),
+            108 => Ok(Self::InvalidAssociatedTokenAccountDerivedAddress),
+            109 => Ok(Self::InvalidTokenSplMintAccountData),
+            110 => Ok(Self::InvalidTokenSplTokenAccountData),
+            111 => Ok(Self::InvalidAccountData),
+            112 => Ok(Self::InvalidInstructionData),
+            113 => Ok(Self::NotEnoughAccountKeys),
+            114 => Ok(Self::InvalidInstruction),
+            115 => Ok(Self::ArithmeticOverflow),
+            116 => Ok(Self::ArithmeticUnderflow),
+            117 => Ok(Self::InvalidAccountDiscriminator),
+            118 => Ok(Self::MintHasConfidentialTransfer),
+            119 => Ok(Self::MintHasNonTransferable),
+            120 => Ok(Self::MintHasPermanentDelegate),
+            121 => Ok(Self::MintHasTransferHook),
+            122 => Ok(Self::MintHasTransferFee),
+            123 => Ok(Self::MintHasMintCloseAuthority),
+            124 => Ok(Self::MintHasPausable),
+            125 => Ok(Self::MintMismatch),
+            126 => Ok(Self::InvalidDelegatePda),
+            127 => Ok(Self::InvalidHeaderData),
+            128 => Ok(Self::DelegationExpired),
+            129 => Ok(Self::InvalidAmount),
+            130 => Ok(Self::Unauthorized),
+            131 => Ok(Self::AccountNotWritable),
+            300 => Ok(Self::AmountExceedsLimit),
+            301 => Ok(Self::FixedDelegationExpiryInPast),
+            302 => Ok(Self::FixedDelegationAmountZero),
+            400 => Ok(Self::AmountExceedsPeriodLimit),
+            401 => Ok(Self::PeriodNotElapsed),
+            402 => Ok(Self::TransferInvalidKind),
+            403 => Ok(Self::InvalidPeriodLength),
+            404 => Ok(Self::InvalidPayerData),
+            405 => Ok(Self::RecurringDelegationStartTimeInPast),
+            406 => Ok(Self::RecurringDelegationZeroPeriod),
+            407 => Ok(Self::RecurringDelegationStartTimeGreaterThanExpiry),
+            408 => Ok(Self::RecurringDelegationAmountZero),
+            500 => Ok(Self::PlanSunset),
+            501 => Ok(Self::PlanExpired),
+            502 => Ok(Self::InvalidPlanPda),
+            503 => Ok(Self::InvalidSubscriptionPda),
+            504 => Ok(Self::NotPlanOwner),
+            505 => Ok(Self::SubscriptionPlanMismatch),
+            506 => Ok(Self::UnauthorizedDestination),
+            507 => Ok(Self::InvalidNumDestinations),
+            508 => Ok(Self::SubscriptionCancelled),
+            509 => Ok(Self::SubscriptionAlreadyCancelled),
+            510 => Ok(Self::SubscriptionNotCancelled),
+            511 => Ok(Self::InvalidEndTs),
+            512 => Ok(Self::InvalidPlanStatus),
+            513 => Ok(Self::PlanImmutableAfterSunset),
+            514 => Ok(Self::SunsetRequiresEndTs),
+            515 => Ok(Self::PlanNotExpired),
+            516 => Ok(Self::PlanClosed),
+            600 => Ok(Self::InvalidEventAuthority),
+            601 => Ok(Self::InvalidEventData),
+            602 => Ok(Self::InvalidEventTag),
+            603 => Ok(Self::InvalidEventDiscriminator),
             _ => Err(code),
         }
     }
@@ -88,8 +85,10 @@ impl TryFrom<u32> for MultiDelegatorError {
 
 #[derive(Debug, Copy, Clone, Error)]
 pub enum MultiDelegatorError {
+    // Generic errors
+    // Starts with 100
     #[error("Account must be a signer")]
-    NotSigner,
+    NotSigner = 100,
     #[error("Invalid account address")]
     InvalidAddress,
     #[error("Invalid escrow PDA derivation")]
@@ -110,44 +109,16 @@ pub enum MultiDelegatorError {
     InvalidTokenSplMintAccountData,
     #[error("Invalid SPL Token account data")]
     InvalidTokenSplTokenAccountData,
-    #[error("Invalid delegation PDA derivation")]
-    InvalidDelegatePda,
     #[error("Invalid account data")]
     InvalidAccountData,
-    #[error("Invalid header data")]
-    InvalidHeaderData,
     #[error("Invalid instruction data")]
     InvalidInstructionData,
     #[error("Not enough account keys provided")]
     NotEnoughAccountKeys,
     #[error("Invalid instruction")]
     InvalidInstruction,
-    #[error("Delegation has expired")]
-    DelegationExpired,
-    #[error("Transfer amount exceeds delegation limit")]
-    AmountExceedsLimit,
-    #[error("Transfer amount exceeds period limit")]
-    AmountExceedsPeriodLimit,
-    #[error("Period has not elapsed yet")]
-    PeriodNotElapsed,
-    #[error("Clock timestamp error")]
-    TimestampError,
-    #[error("Invalid amount specified")]
-    InvalidAmount,
-    #[error("Invalid transfer kind")]
-    TransferInvalidKind,
-    #[error("Invalid transfer call data")]
-    TransferInvalidCallData,
-    #[error("Caller not authorized for this action")]
-    Unauthorized,
-    #[error("Transfer kind does not match delegation type")]
-    TransferKindMismatch,
     #[error("Arithmetic Overflow")]
     ArithmeticOverflow,
-    #[error("Invalid Period length")]
-    InvalidPeriodLength,
-    #[error("Payer provided does not match delegation")]
-    InvalidPayerData,
     #[error("Arithmetic Underflow")]
     ArithmeticUnderflow,
     #[error("Invalid account discriminator")]
@@ -166,6 +137,42 @@ pub enum MultiDelegatorError {
     MintHasMintCloseAuthority,
     #[error("Mint has Pausable extension")]
     MintHasPausable,
+    #[error("Token mint mismatch")]
+    MintMismatch,
+    #[error("Invalid delegation PDA derivation")]
+    InvalidDelegatePda,
+    #[error("Invalid header data")]
+    InvalidHeaderData,
+    #[error("Delegation has expired")]
+    DelegationExpired,
+    #[error("Invalid amount specified")]
+    InvalidAmount,
+    #[error("Caller not authorized for this action")]
+    Unauthorized,
+    #[error("Account must be writable")]
+    AccountNotWritable,
+
+    // Fixed delegation errors
+    // Start with 300
+    #[error("Transfer amount exceeds delegation limit")]
+    AmountExceedsLimit = 300,
+    #[error("Expiry time specified is less than current time")]
+    FixedDelegationExpiryInPast,
+    #[error("zero amount specified")]
+    FixedDelegationAmountZero,
+
+    // Recurring delegation errors
+    // Start with 400
+    #[error("Transfer amount exceeds period limit")]
+    AmountExceedsPeriodLimit = 400,
+    #[error("Period has not elapsed yet")]
+    PeriodNotElapsed,
+    #[error("Invalid transfer kind")]
+    TransferInvalidKind,
+    #[error("Invalid Period length")]
+    InvalidPeriodLength,
+    #[error("Payer provided does not match delegation")]
+    InvalidPayerData,
     #[error("Past start time specified")]
     RecurringDelegationStartTimeInPast,
     #[error("zero period specified")]
@@ -174,14 +181,11 @@ pub enum MultiDelegatorError {
     RecurringDelegationStartTimeGreaterThanExpiry,
     #[error("zero amount specified")]
     RecurringDelegationAmountZero,
-    #[error("Expiry time specified is less than current time")]
-    FixedDelegationExpiryInPast,
-    #[error("zero amount specified")]
-    FixedDelegationAmountZero,
-    #[error("Account must be writable")]
-    AccountNotWritable,
+
+    // Plan related errors
+    // Start with 500
     #[error("Plan is in sunset status")]
-    PlanSunset,
+    PlanSunset = 500,
     #[error("Plan has expired")]
     PlanExpired,
     #[error("Invalid Plan PDA derivation")]
@@ -194,8 +198,6 @@ pub enum MultiDelegatorError {
     SubscriptionPlanMismatch,
     #[error("Destination not in plan whitelist")]
     UnauthorizedDestination,
-    #[error("Token mint mismatch")]
-    MintMismatch,
     #[error("No valid destinations provided")]
     InvalidNumDestinations,
     #[error("Subscription cancelled and past valid period")]
@@ -204,14 +206,6 @@ pub enum MultiDelegatorError {
     SubscriptionAlreadyCancelled,
     #[error("Subscription must be cancelled before revoke")]
     SubscriptionNotCancelled,
-    #[error("Invalid event authority PDA")]
-    InvalidEventAuthority,
-    #[error("Invalid event data")]
-    InvalidEventData,
-    #[error("Invalid event tag prefix")]
-    InvalidEventTag,
-    #[error("Unknown event discriminator")]
-    InvalidEventDiscriminator,
     #[error("End timestamp must be zero or in the future")]
     InvalidEndTs,
     #[error("Invalid plan status value")]
@@ -224,4 +218,15 @@ pub enum MultiDelegatorError {
     PlanNotExpired,
     #[error("Plan account has been closed")]
     PlanClosed,
+
+    // Event related errors
+    // Start with 600
+    #[error("Invalid event authority PDA")]
+    InvalidEventAuthority = 600,
+    #[error("Invalid event data")]
+    InvalidEventData,
+    #[error("Invalid event tag prefix")]
+    InvalidEventTag,
+    #[error("Unknown event discriminator")]
+    InvalidEventDiscriminator,
 }
