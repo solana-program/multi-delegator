@@ -30,6 +30,7 @@ use spl_token_2022::{
 use solana_instruction::AccountMeta;
 
 use crate::{
+    instructions::create_plan::{PlanData, MAX_DESTINATIONS, MAX_PULLERS},
     instructions::{
         close_multidelegate, create_fixed_delegation, create_recurring_delegation,
         initialize_multidelegate, revoke_delegation, transfer_fixed_delegation,
@@ -38,9 +39,11 @@ use crate::{
     tests::{
         constants::{PROGRAM_ID, SYSTEM_PROGRAM_ID},
         cu_tracker::record_transaction,
-        pda::{get_delegation_pda, get_multidelegate_pda},
+        pda::{get_delegation_pda, get_multidelegate_pda, get_plan_pda},
     },
 };
+
+const CREATE_PLAN_DISCRIMINATOR: u8 = 7;
 
 /// Converts number of minutes into seconds
 pub fn minutes(mins: u64) -> u64 {
@@ -607,5 +610,138 @@ impl<'a> CloseMultiDelegate<'a> {
         };
 
         build_and_send_transaction(self.litesvm, &[self.user], &self.user.pubkey(), &ix)
+    }
+}
+
+pub struct CreatePlan<'a> {
+    litesvm: &'a mut LiteSVM,
+    owner: &'a Keypair,
+    data: PlanData,
+    destinations_vec: Vec<Pubkey>,
+    pullers_vec: Vec<Pubkey>,
+    custom_pda: Option<Pubkey>,
+}
+
+impl<'a> CreatePlan<'a> {
+    pub fn new(litesvm: &'a mut LiteSVM, owner: &'a Keypair, mint: Pubkey) -> Self {
+        let zero_addr: pinocchio::Address = [0u8; 32].into();
+        Self {
+            litesvm,
+            owner,
+            data: PlanData {
+                plan_id: 0,
+                mint: mint.to_bytes().into(),
+                amount: 0,
+                period_hours: 0,
+                end_ts: 0,
+                destinations: [zero_addr; MAX_DESTINATIONS],
+                pullers: [zero_addr; MAX_PULLERS],
+                metadata_uri: [0u8; 128],
+            },
+            destinations_vec: vec![],
+            pullers_vec: vec![],
+            custom_pda: None,
+        }
+    }
+
+    pub fn plan_id(mut self, plan_id: u64) -> Self {
+        self.data.plan_id = plan_id;
+        self
+    }
+
+    pub fn amount(mut self, amount: u64) -> Self {
+        self.data.amount = amount;
+        self
+    }
+
+    pub fn period_hours(mut self, period_hours: u64) -> Self {
+        self.data.period_hours = period_hours;
+        self
+    }
+
+    pub fn end_ts(mut self, end_ts: i64) -> Self {
+        self.data.end_ts = end_ts;
+        self
+    }
+
+    pub fn destinations(mut self, destinations: Vec<Pubkey>) -> Self {
+        self.destinations_vec = destinations;
+        self
+    }
+
+    pub fn pullers(mut self, pullers: Vec<Pubkey>) -> Self {
+        self.pullers_vec = pullers;
+        self
+    }
+
+    pub fn metadata_uri(mut self, uri: &str) -> Self {
+        let bytes = uri.as_bytes();
+        let len = bytes.len().min(128);
+        self.data.metadata_uri[..len].copy_from_slice(&bytes[..len]);
+        self
+    }
+
+    pub fn pda(mut self, pda: Pubkey) -> Self {
+        self.custom_pda = Some(pda);
+        self
+    }
+
+    #[allow(clippy::result_large_err)]
+    pub fn execute(mut self) -> (TransactionResult, Pubkey) {
+        let (derived_pda, _) = get_plan_pda(&self.owner.pubkey(), self.data.plan_id);
+        let plan_pda = self.custom_pda.unwrap_or(derived_pda);
+
+        assert!(
+            self.destinations_vec.len() <= MAX_DESTINATIONS,
+            "max {MAX_DESTINATIONS} destinations"
+        );
+        let mut destinations = [[0u8; 32]; MAX_DESTINATIONS];
+        for (i, d) in self.destinations_vec.iter().enumerate() {
+            destinations[i] = d.to_bytes();
+        }
+        self.data.destinations = destinations.map(|d| d.into());
+
+        assert!(
+            self.pullers_vec.len() <= MAX_PULLERS,
+            "max {MAX_PULLERS} pullers"
+        );
+        let mut pullers = [[0u8; 32]; MAX_PULLERS];
+        for (i, p) in self.pullers_vec.iter().enumerate() {
+            pullers[i] = p.to_bytes();
+        }
+        self.data.pullers = pullers.map(|p| p.into());
+
+        let plan_data_bytes = unsafe {
+            std::slice::from_raw_parts(&self.data as *const PlanData as *const u8, PlanData::LEN)
+        };
+
+        let mut data = vec![CREATE_PLAN_DISCRIMINATOR];
+        data.extend_from_slice(plan_data_bytes);
+
+        let mint_pubkey = Pubkey::new_from_array(self.data.mint.to_bytes());
+        let token_program = self
+            .litesvm
+            .get_account(&mint_pubkey)
+            .map(|a| a.owner)
+            .unwrap_or(crate::tests::constants::TOKEN_PROGRAM_ID);
+
+        let accounts = vec![
+            AccountMeta::new(self.owner.pubkey(), true),
+            AccountMeta::new(plan_pda, false),
+            AccountMeta::new_readonly(mint_pubkey, false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+            AccountMeta::new_readonly(token_program, false),
+        ];
+
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts,
+            data,
+        };
+
+        (
+            build_and_send_transaction(self.litesvm, &[self.owner], &self.owner.pubkey(), &ix),
+            plan_pda,
+        )
     }
 }

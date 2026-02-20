@@ -74,6 +74,7 @@ impl TryFrom<u32> for MultiDelegatorError {
             58 => Ok(Self::InvalidEventData),
             59 => Ok(Self::InvalidEventTag),
             60 => Ok(Self::InvalidEventDiscriminator),
+            61 => Ok(Self::InvalidEndTs),
             _ => Err(code),
         }
     }
@@ -203,4 +204,6 @@ pub enum MultiDelegatorError {
     InvalidEventTag,
     #[error("Unknown event discriminator")]
     InvalidEventDiscriminator,
+    #[error("End timestamp must be zero or in the future")]
+    InvalidEndTs,
 }

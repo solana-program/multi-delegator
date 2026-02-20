@@ -44,6 +44,7 @@ fn process_instruction(
             transfer_recurring_delegation::process(accounts, &data)
         }
         MultiDelegatorInstruction::CloseMultiDelegate => close_multidelegate::process(accounts),
+        MultiDelegatorInstruction::CreatePlan(data) => create_plan::process(accounts, &data),
         MultiDelegatorInstruction::EmitEvent => emit_event::process(program_id, accounts),
     }
 }

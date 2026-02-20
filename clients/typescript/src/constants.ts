@@ -4,6 +4,10 @@ import { MULTI_DELEGATOR_PROGRAM_ADDRESS } from './generated/index.js';
 // See: programs/multi_delegator/src/lib.rs
 export const PROGRAM_ID = MULTI_DELEGATOR_PROGRAM_ADDRESS;
 
+// Default zero address used for padding arrays
+export const ZERO_ADDRESS =
+  '11111111111111111111111111111111' as import('gill').Address<'11111111111111111111111111111111'>;
+
 // Header struct layout offsets
 // Layout: discriminator (1 byte) + version (1 byte) + bump (1 byte) + delegator (32 bytes) + delegatee (32 bytes)
 // See: programs/multi_delegator/src/state/header.rs

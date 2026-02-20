@@ -1,6 +1,7 @@
 pub mod close_multidelegate;
 pub mod create_fixed_delegation;
 pub use create_fixed_delegation::CreateFixedDelegationData;
+pub mod create_plan;
 pub mod create_recurring_delegation;
 pub use create_recurring_delegation::CreateRecurringDelegationData;
 pub mod emit_event;
@@ -18,10 +19,12 @@ use codama::CodamaInstructions;
 use pinocchio::error::ProgramError;
 
 use crate::event_engine::EMIT_EVENT_IX_DISC;
+use crate::instructions::create_plan::PlanData;
 use crate::MultiDelegatorError;
 
 #[derive(Debug, CodamaInstructions)]
 #[repr(u8)]
+#[allow(clippy::large_enum_variant)]
 pub enum MultiDelegatorInstruction {
     #[codama(account(
         name = "owner",
@@ -175,6 +178,26 @@ pub enum MultiDelegatorInstruction {
     ))]
     CloseMultiDelegate = 6,
 
+    #[codama(account(
+        name = "merchant",
+        signer,
+        writable,
+        docs = "The merchant creating the plan"
+    ))]
+    #[codama(account(name = "plan_pda", writable, docs = "The plan PDA being created"))]
+    #[codama(account(name = "token_mint", docs = "The token mint"))]
+    #[codama(account(
+        name = "system_program",
+        docs = "The system program",
+        default_value = program("system")
+    ))]
+    #[codama(account(
+        name = "token_program",
+        docs = "The token program",
+        default_value = program("token")
+    ))]
+    CreatePlan(#[codama(name = "plan_data")] PlanData) = 7,
+
     #[codama(account(name = "event_authority", signer, docs = "The event authority PDA"))]
     EmitEvent = 228,
 }
@@ -209,6 +232,10 @@ impl MultiDelegatorInstruction {
                 Ok(Self::TransferRecurring(loaded.clone()))
             }
             6 => Ok(Self::CloseMultiDelegate),
+            7 => {
+                let loaded = PlanData::load(rest)?;
+                Ok(Self::CreatePlan(loaded.clone()))
+            }
             &EMIT_EVENT_IX_DISC => Ok(Self::EmitEvent),
             _ => Err(MultiDelegatorError::InvalidInstruction.into()),
         }
@@ -225,6 +252,7 @@ impl fmt::Display for MultiDelegatorInstruction {
             Self::TransferFixed(_) => write!(f, "transfer_fixed"),
             Self::TransferRecurring(_) => write!(f, "transfer_recurring"),
             Self::CloseMultiDelegate => write!(f, "close_multi_delegate"),
+            Self::CreatePlan(_) => write!(f, "create_plan"),
             Self::EmitEvent => write!(f, "emit_event"),
         }
     }

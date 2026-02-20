@@ -79,7 +79,7 @@ graph TB
 1. **Add-On, Not Replacement**: ADR-002 extends ADR-001 without modifying core flows
 2. **Mutual Agreement**: Plans enable both parties to verify and agree on terms before commitment
 3. **Immutable Terms**: Once published, Plan terms cannot change (prevents mid-stream price hikes)
-4. **Separate Controls vs Terms**: `update_plan` can modify metadata, whitelist, sunset - but NOT terms
+4. **Separate Controls vs Terms**: `update_plan` can modify metadata, pullers, status, end_ts - but NOT core terms
 5. **Unified Execution**: Subscriptions and direct delegations share the same MDA and transfer flows
 6. **Coexistence**: Direct delegations (ADR-001) and subscriptions (ADR-002) operate simultaneously
 
@@ -113,15 +113,15 @@ ADR-001 provides the core delegation infrastructure. Plans add a subscription mo
 
 5. **Management Flexibility**
    - `update_plan` allows:
-      - Stop accepting new subscribers (when sunsetting service)
-      - Configure pull whitelist (for controlled execution)
-      - Set sunset timestamp (graceful discontinuation)
-   - Without modifying core terms (pricing, periods, destination)
+      - Set status to Sunset (stop accepting new subscribers)
+      - Configure pullers array (for controlled execution)
+      - Set end_ts (graceful discontinuation)
+   - Without modifying core terms (mint, amount, period_hours, destinations)
 
 6. **Zero Breaking Changes to ADR-001**
    - All direct delegation flows continue working unchanged
    - Transfer logic is reused with Plan-provided terms instead of embedded terms
-   - `use_pull_whitelist` configures authorization without modifying core transfer validation
+   - `pullers` array configures authorization without modifying core transfer validation
    - Both models use the same MultiDelegate PDA infrastructure
 
 7. **Opt-In Enhancement**
@@ -139,7 +139,7 @@ ADR-001 provides the core delegation infrastructure. Plans add a subscription mo
 | **Term Mutability** | Per delegation | None (immutable after creation) |
 | **Discoverability** | Manual PDA sharing | Plans can be discovered/marketplace |
 | **Use Cases** | P2P, custom, one-off | Subscription services, SaaS, platforms |
-| **Whitelist Control** | N/A (delegatee-only) | Configurable (permissionless or whitelist) |
+| **Pull Authorization** | N/A (delegatee-only) | Owner + configurable pullers array |
 | **Cancellability** | Not implemented (add later) | Delegator can revoke, Plan can sunset |
 
 ### Integration With ADR-001
@@ -221,89 +221,92 @@ The Plan serves as a **source of truth** for terms. When a delegator subscribes,
 
 ## Types
 
-### Terms (Discriminator + Payload)
+### Plan PDA (`repr(C, packed)`)
 
-PlanTerms uses a discriminator + payload pattern for zero-copy compatibility with Pinocchio. The discriminator indicates the kind (Recurring or OneTime), and the payload contains the term-specific data.
-
-### RecurringTerms (96 bytes)
-
-Contains:
-- `mint`: 32 bytes - Token mint
-- `destination`: 32 bytes - Funds recipient
-- `amount_per_period`: 8 bytes - Maximum pullable per period
-- `period_secs`: 8 bytes - Seconds in each period
-- `start_ts`: 8 bytes - Start timestamp
-- `end_ts`: 8 bytes - End timestamp
-
-### OneTimeTerms (72 bytes)
-
-Contains:
-- `mint`: 32 bytes - Token mint
-- `destination`: 32 bytes - Funds recipient
-- `amount`: 8 bytes - Maximum pullable amount
-
-### Plan PDA
-
-Contains:
+Top-level account structure:
+- `discriminator`: 1 byte - `AccountDiscriminator::Plan` (= 1)
 - `owner`: 32 bytes - Merchant (Plan creator)
-- `plan_id`: 8 bytes - Unique identifier
-- `terms`: 104 bytes - Plan terms (Recurring or OneTime)
-- `accepting_new_subscribers`: 1 byte - Can new delegators subscribe?
-- `use_pull_whitelist`: 1 byte - Enable whitelist for pull
-- `_padding`: 6 bytes - Alignment
-- `sunset_ts`: 8 bytes - No renewals after timestamp
-- `pull_whitelist`: 128 bytes - Allowed pullers (up to 4 addresses)
-- `metadata_uri`: 128 bytes - Optional metadata
+- `bump`: 1 byte - PDA bump seed
+- `status`: 1 byte - `PlanStatus` enum (Sunset=0, Active=1)
+- `data`: PlanData (see below)
+
+### PlanData (448 bytes)
+
+Embedded payload within the Plan PDA:
+- `plan_id`: 8 bytes (`u64`) - Unique identifier
+- `mint`: 32 bytes (`Address`) - Token mint
+- `amount`: 8 bytes (`u64`) - Amount per period
+- `period_hours`: 8 bytes (`u64`) - Hours in each billing period
+- `end_ts`: 8 bytes (`i64`) - Plan expiration timestamp (0 = no expiry)
+- `destinations`: 128 bytes (`[Address; 4]`) - Up to 4 fund recipients (all zeros = any destination valid at transfer time)
+- `pullers`: 128 bytes (`[Address; 4]`) - Up to 4 authorized pullers
+- `metadata_uri`: 128 bytes (`[u8; 128]`) - Optional metadata URI
+
+Plans are always recurring; there is no one-time variant.
 
 **PDA seeds**: `["plan", merchant, plan_id]`
 
-**Pull Whitelist Logic:**
-- `0`: Permissionless - anyone can call `pull`
-- `1`: Restricted - only `owner` or addresses in `pull_whitelist`
+**Puller Authorization:**
+- The plan owner is **always** implicitly authorized to pull (does not need to be in the `pullers` array)
+- If all 4 puller slots are zero, only the plan owner can pull
+- Up to 4 additional puller addresses can be specified in the `pullers` array
+- Zero-filled entries are ignored
 
 ---
 
 ## Instructions
 
-### `create_plan` (Discriminator: 3)
+### `create_plan` (Discriminator: 7)
 
-Merchant publishes a Plan with terms.
+Merchant publishes a Plan with subscription terms.
 
-| Account | Type | Description |
-|---------|------|-------------|
-| 0 | signer, writable | Merchant (Plan owner) |
-| 1 | writable | Plan PDA to create |
-| 2 | system_program | System program |
+| Account | Type              | Description          |
+| ------- | ----------------- | -------------------- |
+| 0       | signer, writable  | Merchant (Plan owner)|
+| 1       | writable          | Plan PDA to create   |
+| 2       | system_program    | System program       |
 
-**Parameters:**
+**Parameters (PlanData):**
 - `plan_id: u64` - Unique identifier
-- `terms: PlanTerms` - Terms (RecurringTerms or OneTimeTerms)
-- `metadata_uri: [u8; 128]` - Optional metadata
+- `mint: Address` - Token mint
+- `amount: u64` - Amount per period
+- `period_hours: u64` - Hours per billing period
+- `end_ts: i64` - Plan expiration (0 = no expiry)
+- `destinations: [Address; 4]` - Fund recipients, optional (all zeros = any destination valid at transfer time)
+- `pullers: [Address; 4]` - Authorized pullers (optional, plan owner always authorized by default)
+- `metadata_uri: [u8; 128]` - Optional metadata URI
+
+**Validation:**
+1. `amount > 0` (else `InvalidAmount`)
+2. `0 < period_hours <= 8760` (else `InvalidPeriodLength`)
+3. `end_ts == 0` or `end_ts > current_time` (else `InvalidEndTs`)
 
 **Process:**
-1. Validate PDA derived from `["plan", merchant, plan_id]`
-2. Create Plan with owner, terms, defaults (accepting_new_subscribers=1, use_pull_whitelist=0)
+1. Validate PlanData fields (see above)
+2. Derive PDA from `["plan", merchant, plan_id]` and verify match (else `InvalidPlanPda`)
+3. Create Plan account via CPI to System Program (handles pre-funded accounts)
+4. Set `discriminator = Plan (1)`, `owner = merchant`, `bump`, `status = Active (1)`
+5. Copy PlanData into the account
 
-### `update_plan` (Discriminator: 4)
+### `update_plan` (Discriminator: TBD)
 
-Merchant updates Plan controls (metadata, whitelist, sunset), NOT terms.
+Merchant updates Plan controls (status, end_ts, metadata), NOT core terms.
 
-| Account | Type | Description |
-|---------|------|-------------|
-| 0 | signer, writable | Plan owner |
-| 1 | writable | Plan PDA to update |
+| Account | Type     | Description        |
+| ------- | -------- | ------------------ |
+| 0       | signer   | Plan owner         |
+| 1       | writable | Plan PDA to update |
 
-**Parameters (all optional):**
-- `accepting_new_subscribers: u8?` - Can new users subscribe?
-- `sunset_ts: u64?` - No renewals after timestamp
-- `use_pull_whitelist: u8?` - Enable/disable whitelist
-- `pull_whitelist: [Pubkey; 4]?` - Allowed pullers
-- `metadata_uri: [u8; 128]?` - Update metadata
+**Parameters (TBD):**
+- `status: u8` - PlanStatus (Sunset=0, Active=1)
+- `end_ts: i64` - Plan expiration timestamp
+- `pullers: [Address; 4]` - Authorized pullers
+- `metadata_uri: [u8; 128]` - Update metadata
 
 **Process:**
 1. Verify caller is Plan owner
-2. Update provided fields (immutable: terms, plan_id, owner)
-3. Rejected if trying to modify terms
+2. Update provided fields (immutable: plan_id, owner, mint, amount, period_hours, destinations)
+3. Rejected if trying to modify immutable fields
 
 ### `subscribe` (Discriminator: 5)
 
@@ -320,7 +323,7 @@ Delegator subscribes to a Plan, **copying the Plan's terms to a new Delegation P
 **Parameters:** None (terms come from Plan and are copied to Delegation)
 
 **Process:**
-1. Validate Plan exists and `accepting_new_subscribers == 1`
+1. Validate Plan exists and `status == Active (1)`
 2. Derive Delegation PDA from `["delegation", plan_pda, delegator]`
 3. **Create Delegation with terms copied from Plan:**
    - Copy `header.kind`, `header.delegatee` from Plan.terms
@@ -339,20 +342,16 @@ Delegator subscribes to a Plan, **copying the Plan's terms to a new Delegation P
 **Process:**
 1. Load the subscription Delegation PDA
 2. Retrieve the associated Plan PDA
-3. Check if Plan whitelist is enabled:
-   - If disabled: Anyone is authorized to call pull
-   - If enabled: Verify caller is Plan owner or in pull_whitelist
+3. Verify caller is authorized: Plan owner is always authorized, plus any non-zero address in the `pullers[4]` array
 4. Load terms from Delegation PDA (same as ADR-001 direct delegations)
 5. Validate and execute transfer using same logic as ADR-001
 
 **Authorization Logic:**
 - Direct delegations (ADR-001): Only delegatee can call transfer
-- Subscription delegations (ADR-002):
-  - If `use_pull_whitelist == 0`: Permissionless - anyone can call `pull`
-  - If `use_pull_whitelist == 1`: Only `owner` or addresses in `pull_whitelist`
+- Subscription delegations (ADR-002): Plan owner is always authorized, plus up to 4 additional addresses in `pullers` array
 
 **Key Points:**
-- The `pull` instruction validates whitelist, then delegates to the same transfer validation as ADR-001
+- The `pull` instruction validates puller authorization, then delegates to the same transfer validation as ADR-001
 - Transfer validation reads terms from Delegation PDA (same for both models)
 - No changes to ADR-001's `transfer_fixed` or `transfer_recurring` logic
 
@@ -383,41 +382,33 @@ sequenceDiagram
     participant MDA as MDA
 
     A->>P: subscribe(plan_pda)
-    Note over P: Plan accepting new subscribers?
+    Note over P: Plan status == Active?
     Note over P: Derive Delegation PDA from<br/>["delegation", plan_pda, alice]
-    Note over P: Create Deletion PDA<br/>referencing Plan
+    Note over P: Create Delegation PDA<br/>referencing Plan
     P->>A: Subscribed through MDA
 ```
 
-### Whitelist Pull vs Permissionless Pull
+### Pull Authorization
 
 ```mermaid
 sequenceDiagram
-    participant X as Anyone/Whitelist
+    participant X as Caller
     participant P as Program
     participant DA as Delegation PDA
     participant T as TokenProgram
 
-    Note over P: Check use_pull_whitelist
+    Note over P: Check caller is owner<br/>or in pullers[4] array
 
-    alt Permissionless (use_pull_whitelist == 0)
+    alt Caller is owner or in pullers
         X->>P: pull(delegation_pda, amount)
-        Note over P: Anyone authorized
+        Note over P: Authorization passed
         P->>DA: Validate Plan terms
         P->>T: Transfer via MDA
         T->>X: Tokens transferred
-    else Restricted (use_pull_whitelist == 1)
-        alt Caller in whitelist or is owner
-            X->>P: pull(delegation_pda, amount)
-            Note over P: Whitelist check passed
-            P->>DA: Validate Plan terms
-            P->>T: Transfer via MDA
-            T->>X: Tokens transferred
-        else Caller not authorized
-            X->>P: pull(delegation_pda, amount)
-            Note over P: Whitelist check failed
-            P->>X: UnauthorizedPull error
-        end
+    else Caller not authorized
+        X->>P: pull(delegation_pda, amount)
+        Note over P: Authorization failed
+        P->>X: Unauthorized error
     end
 ```
 
@@ -444,11 +435,11 @@ sequenceDiagram
     participant P as Program
     participant X as Anyone/Whitelist
 
-    M->>P: update_plan(sunset_ts)
-    Note over P: Plan sunset timestamp updated
+    M->>P: update_plan(status=Sunset)
+    Note over P: Plan status set to Sunset
 
     X->>P: pull(delegation_pda, amount)
-    Note over P: If past sunset_ts:<br/>allow final period pull if due<br/>then mark as completed
+    Note over P: If plan status == Sunset:<br/>reject new subscriptions<br/>existing subscriptions honored until end_ts
 ```
 
 ---
@@ -459,10 +450,10 @@ sequenceDiagram
 |--------|------------|
 | Merchant changes terms mid-subscription | `update_plan` cannot modify terms field; rejects changes |
 | Delegator can't verify terms | Terms stored in immutable Plan PDA; delegator verifies before subscribing |
-| Unauthorized pull on restricted Plans | Whititelist check: only owner or pull_whitelist addresses |
+| Unauthorized pull on Plans | Owner is always authorized, plus explicit pullers array |
 | Delegator hijacks subscription | Delegation PDA seeds include plan_pda; can't be recreated |
-| Plan expiration handling | `sunset_ts`; final payment if due then auto-cancel |
-| Plan with invalid terms | Plan creation validates kind discriminators and payload structure |
+| Plan expiration handling | `end_ts` field; 0 means no expiry, otherwise must be in the future at creation |
+| Plan with invalid data | Validated: amount>0, period_hours in (0,8760], destinations optional (0-4), end_ts=0 or future |
 | Orphaned Delegation reference | Delegation tracks state; pull instruction checks Plan reference |
 | MDA spends without Plan constraint | Pull must validate Plan terms and Delegation constraints |
 
@@ -474,7 +465,7 @@ sequenceDiagram
 - `+` **Cost Efficiency** - One Plan serves many subscribers
 - `+` **Trust Through Immutability** - Terms fixed at creation prevent price changes
 - `+` **Discoverability** - Plans can be published and discovered via marketplaces
-- `+` **Flexible Control** - Whititelist vs permissionless pull, sunset mechanism
+- `+` **Flexible Control** - Pullers array for authorization, status and end_ts for lifecycle
 - `+` **Reuses ADR-001** - Shares MDA infrastructure, minimal code duplication
 - `+` **Complementary** - Subscriptions and direct delegations can coexist
 - `+` **Marketplace Enabling** - Standard structure for subscription services
@@ -511,9 +502,9 @@ This enables incremental rollout (start with direct, add subscriptions later) wi
 
 ## Future Enhancements
 
-- Implement `pull` instruction with whitelist validation
+- Implement `pull` instruction with puller authorization
 - Plan marketplace/aggregator protocol for discovery
-- Merkle tree for whitelists (scale beyond 4 addresses)
+- Merkle tree for pullers (scale beyond 4 addresses)
 - Event logs for subscription lifecycle (subscribe, renew, expire)
 - Subscription UI/SDK templates for frontend
 - Analytics for merchants (active subscribers, total volume)

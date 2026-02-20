@@ -13,26 +13,38 @@ import {
   getBase64Encoder,
   signTransactionMessageWithSigners,
 } from 'gill';
-import { DELEGATOR_OFFSET, DISCRIMINATOR_OFFSET } from './constants.js';
+import {
+  DELEGATOR_OFFSET,
+  DISCRIMINATOR_OFFSET,
+  MAX_PLAN_DESTINATIONS,
+  MAX_PLAN_PULLERS,
+  METADATA_URI_LEN,
+  PLAN_OWNER_OFFSET,
+  PLAN_SIZE,
+  ZERO_ADDRESS,
+} from './constants.js';
 import {
   AccountDiscriminator,
   decodeFixedDelegation,
+  decodePlan,
   decodeRecurringDelegation,
   decodeSubscriptionDelegation,
   type FixedDelegation,
   fetchMaybeMultiDelegate,
   getCloseMultiDelegateInstruction,
   getCreateFixedDelegationInstruction,
+  getCreatePlanInstruction,
   getCreateRecurringDelegationInstruction,
   getInitMultiDelegateInstruction,
   getRevokeDelegationInstruction,
   getTransferFixedInstruction,
   getTransferRecurringInstruction,
   MULTI_DELEGATOR_PROGRAM_ADDRESS,
+  type Plan,
   type RecurringDelegation,
   type SubscriptionDelegation,
 } from './generated/index.js';
-import { getDelegationPDA, getMultiDelegatePDA } from './pdas.js';
+import { getDelegationPDA, getMultiDelegatePDA, getPlanPDA } from './pdas.js';
 
 type SolanaClient = {
   rpc: Rpc<GetAccountInfoApi & GetLatestBlockhashApi & GetProgramAccountsApi>;
@@ -307,27 +319,34 @@ export class MultiDelegatorClient {
         space: account.account.space,
       };
 
-      if (kind === AccountDiscriminator.FixedDelegation) {
-        const decoded = decodeFixedDelegation(encodedAccount);
-        delegations.push({
-          kind: 'fixed',
-          address: account.pubkey,
-          data: decoded.data,
-        });
-      } else if (kind === AccountDiscriminator.RecurringDelegation) {
-        const decoded = decodeRecurringDelegation(encodedAccount);
-        delegations.push({
-          kind: 'recurring',
-          address: account.pubkey,
-          data: decoded.data,
-        });
-      } else if (kind === AccountDiscriminator.SubscriptionDelegation) {
-        const decoded = decodeSubscriptionDelegation(encodedAccount);
-        delegations.push({
-          kind: 'subscription',
-          address: account.pubkey,
-          data: decoded.data,
-        });
+      switch (kind) {
+        case AccountDiscriminator.FixedDelegation: {
+          const decoded = decodeFixedDelegation(encodedAccount);
+          delegations.push({
+            kind: 'fixed',
+            address: account.pubkey,
+            data: decoded.data,
+          });
+          break;
+        }
+        case AccountDiscriminator.RecurringDelegation: {
+          const decoded = decodeRecurringDelegation(encodedAccount);
+          delegations.push({
+            kind: 'recurring',
+            address: account.pubkey,
+            data: decoded.data,
+          });
+          break;
+        }
+        case AccountDiscriminator.SubscriptionDelegation: {
+          const decoded = decodeSubscriptionDelegation(encodedAccount);
+          delegations.push({
+            kind: 'subscription',
+            address: account.pubkey,
+            data: decoded.data,
+          });
+          break;
+        }
       }
     }
 
@@ -350,5 +369,93 @@ export class MultiDelegatorClient {
     const [pda] = await getMultiDelegatePDA(user, tokenMint);
     const account = await fetchMaybeMultiDelegate(this.client.rpc, pda);
     return { initialized: account !== null, pda };
+  }
+
+  async createPlan(
+    owner: TransactionSigner,
+    planId: number | bigint,
+    mint: Address,
+    amount: number | bigint,
+    periodHours: number | bigint,
+    endTs: number | bigint,
+    destinations: Address[],
+    pullers: Address[],
+    metadataUri: string,
+  ): Promise<{ signature: string; planPda: Address }> {
+    if (destinations.length > MAX_PLAN_DESTINATIONS)
+      throw new Error(
+        `destinations must have at most ${MAX_PLAN_DESTINATIONS} entries`,
+      );
+    if (pullers.length > MAX_PLAN_PULLERS)
+      throw new Error(`pullers must have at most ${MAX_PLAN_PULLERS} entries`);
+
+    const uriBytes = new TextEncoder().encode(metadataUri);
+    if (uriBytes.length > METADATA_URI_LEN)
+      throw new Error(`metadataUri exceeds ${METADATA_URI_LEN} bytes`);
+
+    const paddedDestinations: Address[] = Array.from(
+      { length: MAX_PLAN_DESTINATIONS },
+      (_, i) => destinations[i] || ZERO_ADDRESS,
+    );
+
+    const paddedPullers: Address[] = Array.from(
+      { length: MAX_PLAN_PULLERS },
+      (_, i) => pullers[i] || ZERO_ADDRESS,
+    );
+
+    const [planPda] = await getPlanPDA(owner.address, planId);
+
+    const instruction = getCreatePlanInstruction({
+      merchant: owner,
+      planPda,
+      tokenMint: mint,
+      planData: {
+        planId,
+        mint,
+        amount,
+        periodHours,
+        endTs,
+        destinations: paddedDestinations,
+        pullers: paddedPullers,
+        metadataUri,
+      },
+    });
+
+    const sig = await this.buildAndSendTransaction([instruction], [owner]);
+    return { signature: sig, planPda };
+  }
+
+  async getPlansForOwner(
+    owner: Address,
+  ): Promise<Array<{ address: Address; data: Plan }>> {
+    const response = await this.client.rpc
+      .getProgramAccounts(MULTI_DELEGATOR_PROGRAM_ADDRESS, {
+        encoding: 'base64',
+        filters: [
+          { dataSize: BigInt(PLAN_SIZE) },
+          {
+            memcmp: {
+              offset: BigInt(PLAN_OWNER_OFFSET),
+              bytes: owner as string as Base58EncodedBytes,
+              encoding: 'base58',
+            },
+          },
+        ],
+      })
+      .send();
+
+    const base64Encoder = getBase64Encoder();
+    return response.map((account) => {
+      const data = base64Encoder.encode(account.account.data[0]);
+      const decoded = decodePlan({
+        address: account.pubkey,
+        data,
+        executable: account.account.executable,
+        lamports: account.account.lamports,
+        programAddress: account.account.owner,
+        space: account.account.space,
+      });
+      return { address: account.pubkey, data: decoded.data };
+    });
   }
 }

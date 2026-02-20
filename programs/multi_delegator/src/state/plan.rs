@@ -4,23 +4,18 @@ use pinocchio::{error::ProgramError, Address};
 
 use crate::{state::common::AccountDiscriminator, MultiDelegatorError};
 
+pub use crate::instructions::create_plan::PlanData;
+
 pub const PLAN_DISCRIMINATOR_OFFSET: usize = 0;
 
 #[repr(C, packed)]
-#[derive(Debug, CodamaAccount)]
+#[derive(CodamaAccount)]
 pub struct Plan {
     pub discriminator: u8,
     pub owner: Address,
     pub bump: u8,
     pub status: u8,
-    pub plan_id: u64,
-    pub mint: Address,
-    pub amount: u64,
-    pub period_hours: u64,
-    pub end_ts: i64,
-    pub destinations: [Address; 4],
-    pub pullers: [Address; 4],
-    pub metadata_uri: [u8; 128],
+    pub data: PlanData,
 }
 
 impl Plan {
