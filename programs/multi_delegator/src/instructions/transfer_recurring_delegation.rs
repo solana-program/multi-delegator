@@ -624,4 +624,38 @@ mod tests {
             .recurring()
             .assert_ok();
     }
+
+    #[test]
+    fn test_recurring_transfer_to_third_party() {
+        let amount_per_period: u64 = 50_000_000;
+        let period_length_s: u64 = hours(1);
+        let start_ts: i64 = current_ts();
+        let expiry_ts: i64 = current_ts() + days(1) as i64;
+        let nonce = 0;
+
+        // Alice delegates to Bob
+        let (mut litesvm, alice, bob, delegation_pda, mint, _, _, _) = setup_recurring_delegation(
+            amount_per_period,
+            period_length_s,
+            start_ts,
+            expiry_ts,
+            nonce,
+        );
+
+        // Charlie is a third party
+        let charlie = Keypair::new();
+        let charlie_ata = init_ata(&mut litesvm, mint, charlie.pubkey(), 0);
+
+        let transfer_amount: u64 = 10_000_000;
+
+        // Bob transfers from Alice -> Charlie
+        TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+            .amount(transfer_amount)
+            .to(charlie_ata)
+            .recurring()
+            .assert_ok();
+
+        // Verify Charlie received funds
+        assert_eq!(get_ata_balance(&litesvm, &charlie_ata), 10_000_000);
+    }
 }
