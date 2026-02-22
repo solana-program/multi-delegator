@@ -35,12 +35,15 @@ import {
   getCreateFixedDelegationInstruction,
   getCreatePlanInstruction,
   getCreateRecurringDelegationInstruction,
+  getDeletePlanInstruction,
   getInitMultiDelegateInstruction,
   getRevokeDelegationInstruction,
   getTransferFixedInstruction,
   getTransferRecurringInstruction,
+  getUpdatePlanInstruction,
   MULTI_DELEGATOR_PROGRAM_ADDRESS,
   type Plan,
+  type PlanStatus,
   type RecurringDelegation,
   type SubscriptionDelegation,
 } from './generated/index.js';
@@ -423,6 +426,48 @@ export class MultiDelegatorClient {
 
     const sig = await this.buildAndSendTransaction([instruction], [owner]);
     return { signature: sig, planPda };
+  }
+
+  async updatePlan(
+    owner: TransactionSigner,
+    planPda: Address,
+    status: PlanStatus,
+    endTs: number | bigint,
+    metadataUri: string,
+  ): Promise<{ signature: string }> {
+    const uriBytes = new TextEncoder().encode(metadataUri);
+    if (uriBytes.length > METADATA_URI_LEN)
+      throw new Error(`metadataUri exceeds ${METADATA_URI_LEN} bytes`);
+
+    if (endTs !== 0 && endTs !== BigInt(0)) {
+      const endTsNum = typeof endTs === 'bigint' ? Number(endTs) : endTs;
+      if (endTsNum <= Math.floor(Date.now() / 1000))
+        throw new Error('endTs must be in the future');
+    }
+
+    const instruction = getUpdatePlanInstruction({
+      owner,
+      planPda,
+      updatePlanData: { status, endTs, metadataUri },
+    });
+
+    const signature = await this.buildAndSendTransaction(
+      [instruction],
+      [owner],
+    );
+    return { signature };
+  }
+
+  async deletePlan(
+    owner: TransactionSigner,
+    planPda: Address,
+  ): Promise<{ signature: string }> {
+    const instruction = getDeletePlanInstruction({ owner, planPda });
+    const signature = await this.buildAndSendTransaction(
+      [instruction],
+      [owner],
+    );
+    return { signature };
   }
 
   async getPlansForOwner(

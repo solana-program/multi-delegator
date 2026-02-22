@@ -76,6 +76,10 @@ impl TryFrom<u32> for MultiDelegatorError {
             60 => Ok(Self::InvalidEventTag),
             61 => Ok(Self::InvalidEventDiscriminator),
             62 => Ok(Self::InvalidEndTs),
+            63 => Ok(Self::InvalidPlanStatus),
+            64 => Ok(Self::PlanImmutableAfterSunset),
+            65 => Ok(Self::SunsetRequiresEndTs),
+            66 => Ok(Self::PlanNotExpired),
             _ => Err(code),
         }
     }
@@ -209,4 +213,12 @@ pub enum MultiDelegatorError {
     InvalidEventDiscriminator,
     #[error("End timestamp must be zero or in the future")]
     InvalidEndTs,
+    #[error("Invalid plan status value")]
+    InvalidPlanStatus,
+    #[error("Plan cannot be updated after sunset")]
+    PlanImmutableAfterSunset,
+    #[error("Sunset requires a non-zero end timestamp")]
+    SunsetRequiresEndTs,
+    #[error("Plan must be expired to delete")]
+    PlanNotExpired,
 }

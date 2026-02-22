@@ -31,19 +31,19 @@ use solana_instruction::AccountMeta;
 
 use crate::{
     instructions::create_plan::{PlanData, MAX_DESTINATIONS, MAX_PULLERS},
+    instructions::update_plan::UpdatePlanData,
     instructions::{
-        close_multidelegate, create_fixed_delegation, create_recurring_delegation,
-        initialize_multidelegate, revoke_delegation, transfer_fixed_delegation,
-        transfer_recurring_delegation,
+        close_multidelegate, create_fixed_delegation, create_plan, create_recurring_delegation,
+        delete_plan, initialize_multidelegate, revoke_delegation, transfer_fixed_delegation,
+        transfer_recurring_delegation, update_plan,
     },
+    state::common::PlanStatus,
     tests::{
         constants::{PROGRAM_ID, SYSTEM_PROGRAM_ID},
         cu_tracker::record_transaction,
         pda::{get_delegation_pda, get_multidelegate_pda, get_plan_pda},
     },
 };
-
-const CREATE_PLAN_DISCRIMINATOR: u8 = 7;
 
 /// Converts number of minutes into seconds
 pub fn minutes(mins: u64) -> u64 {
@@ -715,7 +715,7 @@ impl<'a> CreatePlan<'a> {
             std::slice::from_raw_parts(&self.data as *const PlanData as *const u8, PlanData::LEN)
         };
 
-        let mut data = vec![CREATE_PLAN_DISCRIMINATOR];
+        let mut data = vec![*create_plan::DISCRIMINATOR];
         data.extend_from_slice(plan_data_bytes);
 
         let mint_pubkey = Pubkey::new_from_array(self.data.mint.to_bytes());
@@ -743,5 +743,108 @@ impl<'a> CreatePlan<'a> {
             build_and_send_transaction(self.litesvm, &[self.owner], &self.owner.pubkey(), &ix),
             plan_pda,
         )
+    }
+}
+
+pub struct UpdatePlan<'a> {
+    litesvm: &'a mut LiteSVM,
+    owner: &'a Keypair,
+    plan_pda: Pubkey,
+    data: UpdatePlanData,
+}
+
+impl<'a> UpdatePlan<'a> {
+    pub fn new(litesvm: &'a mut LiteSVM, owner: &'a Keypair, plan_pda: Pubkey) -> Self {
+        Self {
+            litesvm,
+            owner,
+            plan_pda,
+            data: UpdatePlanData {
+                status: PlanStatus::Active as u8,
+                end_ts: 0,
+                metadata_uri: [0u8; 128],
+            },
+        }
+    }
+
+    pub fn status(mut self, status: PlanStatus) -> Self {
+        self.data.status = status as u8;
+        self
+    }
+
+    pub fn status_raw(mut self, status: u8) -> Self {
+        self.data.status = status;
+        self
+    }
+
+    pub fn end_ts(mut self, end_ts: i64) -> Self {
+        self.data.end_ts = end_ts;
+        self
+    }
+
+    pub fn metadata_uri(mut self, uri: &str) -> Self {
+        let bytes = uri.as_bytes();
+        let len = bytes.len().min(128);
+        self.data.metadata_uri = [0u8; 128];
+        self.data.metadata_uri[..len].copy_from_slice(&bytes[..len]);
+        self
+    }
+
+    #[allow(clippy::result_large_err)]
+    pub fn execute(self) -> TransactionResult {
+        let data_bytes = unsafe {
+            std::slice::from_raw_parts(
+                &self.data as *const UpdatePlanData as *const u8,
+                UpdatePlanData::LEN,
+            )
+        };
+
+        let mut data = vec![*update_plan::DISCRIMINATOR];
+        data.extend_from_slice(data_bytes);
+
+        let accounts = vec![
+            AccountMeta::new(self.owner.pubkey(), true),
+            AccountMeta::new(self.plan_pda, false),
+        ];
+
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts,
+            data,
+        };
+
+        build_and_send_transaction(self.litesvm, &[self.owner], &self.owner.pubkey(), &ix)
+    }
+}
+
+pub struct DeletePlan<'a> {
+    litesvm: &'a mut LiteSVM,
+    owner: &'a Keypair,
+    plan_pda: Pubkey,
+}
+
+impl<'a> DeletePlan<'a> {
+    pub fn new(litesvm: &'a mut LiteSVM, owner: &'a Keypair, plan_pda: Pubkey) -> Self {
+        Self {
+            litesvm,
+            owner,
+            plan_pda,
+        }
+    }
+
+    #[allow(clippy::result_large_err)]
+    pub fn execute(self) -> TransactionResult {
+        let accounts = vec![
+            AccountMeta::new(self.owner.pubkey(), true),
+            AccountMeta::new(self.plan_pda, false),
+        ];
+
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts,
+            data: vec![*delete_plan::DISCRIMINATOR],
+        };
+
+        build_and_send_transaction(self.litesvm, &[self.owner], &self.owner.pubkey(), &ix)
     }
 }

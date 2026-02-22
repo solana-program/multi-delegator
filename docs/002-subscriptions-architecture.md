@@ -79,7 +79,7 @@ graph TB
 1. **Add-On, Not Replacement**: ADR-002 extends ADR-001 without modifying core flows
 2. **Mutual Agreement**: Plans enable both parties to verify and agree on terms before commitment
 3. **Immutable Terms**: Once published, Plan terms cannot change (prevents mid-stream price hikes)
-4. **Separate Controls vs Terms**: `update_plan` can modify metadata, pullers, status, end_ts - but NOT core terms
+4. **Separate Controls vs Terms**: `update_plan` can modify status, end_ts, metadata_uri - but NOT core terms (mint, amount, period_hours, destinations, pullers)
 5. **Unified Execution**: Subscriptions and direct delegations share the same MDA and transfer flows
 6. **Coexistence**: Direct delegations (ADR-001) and subscriptions (ADR-002) operate simultaneously
 
@@ -113,10 +113,11 @@ ADR-001 provides the core delegation infrastructure. Plans add a subscription mo
 
 5. **Management Flexibility**
    - `update_plan` allows:
-      - Set status to Sunset (stop accepting new subscribers)
-      - Configure pullers array (for controlled execution)
-      - Set end_ts (graceful discontinuation)
-   - Without modifying core terms (mint, amount, period_hours, destinations)
+      - Set status to Sunset (stop accepting new subscribers, terminal and irreversible, requires non-zero end_ts)
+      - Set end_ts (graceful discontinuation, or 0 to remove expiry; cannot be 0 when sunsetting)
+      - Update metadata_uri (change plan description/branding)
+   - Without modifying core terms (mint, amount, period_hours, destinations, pullers)
+   - `delete_plan` allows the owner to reclaim rent after a plan has expired (end_ts has passed)
 
 6. **Zero Breaking Changes to ADR-001**
    - All direct delegation flows continue working unchanged
@@ -213,7 +214,7 @@ The Plan serves as a **source of truth** for terms. When a delegator subscribes,
 
 **Flows Remain Available:**
 - All ADR-001 instructions (`initialize_multidelegate`, `create_fixed_delegation`, `create_recurring_delegation`) continue to work unchanged
-- New ADR-002 instructions (`create_plan`, `update_plan`, `subscribe`, `pull`) add subscription capability
+- New ADR-002 instructions (`create_plan`, `update_plan`, `delete_plan`, `subscribe`, `pull`) add subscription capability
 - Direct delegations and subscriptions can be created and withdrawn independently
 - Transfer validation code is shared and identical for both models
 
@@ -288,25 +289,52 @@ Merchant publishes a Plan with subscription terms.
 4. Set `discriminator = Plan (1)`, `owner = merchant`, `bump`, `status = Active (1)`
 5. Copy PlanData into the account
 
-### `update_plan` (Discriminator: TBD)
+### `update_plan` (Discriminator: 8)
 
-Merchant updates Plan controls (status, end_ts, metadata), NOT core terms.
+Plan owner updates mutable admin fields (status, end_ts, metadata_uri). Core terms (mint, amount, period_hours, destinations, pullers, plan_id) are immutable.
 
 | Account | Type     | Description        |
 | ------- | -------- | ------------------ |
 | 0       | signer   | Plan owner         |
 | 1       | writable | Plan PDA to update |
 
-**Parameters (TBD):**
+**Parameters (UpdatePlanData, 137 bytes):**
 - `status: u8` - PlanStatus (Sunset=0, Active=1)
-- `end_ts: i64` - Plan expiration timestamp
-- `pullers: [Address; 4]` - Authorized pullers
-- `metadata_uri: [u8; 128]` - Update metadata
+- `end_ts: i64` - Plan expiration timestamp (0 = remove expiry, cannot be 0 when status=Sunset)
+- `metadata_uri: [u8; 128]` - Metadata URI
 
 **Process:**
-1. Verify caller is Plan owner
-2. Update provided fields (immutable: plan_id, owner, mint, amount, period_hours, destinations)
-3. Rejected if trying to modify immutable fields
+1. Load Plan account, verify discriminator and size
+2. Verify caller is Plan owner (else `NotPlanOwner`)
+3. Reject if plan is already in Sunset status (else `PlanImmutableAfterSunset`) - Sunset is a terminal state
+4. Reject if status=Sunset and end_ts=0 (else `SunsetRequiresEndTs`) - sunsetting requires a finite expiration
+5. Validate input data: `PlanStatus::try_from(status)` must succeed (else `InvalidPlanStatus`), `end_ts == 0` or `end_ts > current_time` (else `InvalidEndTs`)
+6. Reject if plan has expired: `plan.end_ts != 0 && current_ts > plan.end_ts` (else `PlanExpired`)
+7. Write status, end_ts, and metadata_uri from input data
+
+**Immutable fields (never modified by update_plan):**
+`plan_id`, `owner`, `bump`, `mint`, `amount`, `period_hours`, `destinations`, `pullers`
+
+### `delete_plan` (Discriminator: 9)
+
+Plan owner deletes an expired plan, closing the account and reclaiming rent. Does NOT require Sunset status, only that the plan has expired.
+
+| Account | Type             | Description                              |
+| ------- | ---------------- | ---------------------------------------- |
+| 0       | signer, writable | Plan owner (receives rent)               |
+| 1       | writable         | Plan PDA to delete                       |
+
+**Parameters:** None (only discriminator byte)
+
+**Process:**
+1. Verify caller is Plan owner (else `NotPlanOwner`)
+2. Verify plan is expired: `end_ts != 0 && current_ts > end_ts` (else `PlanNotExpired`)
+3. Close account: zero all data, transfer lamports to owner
+
+**Lifecycle paths to deletion:**
+- **Active + expired:** Plan created with end_ts, time passes, owner deletes. Natural lifecycle.
+- **Sunset + expired:** Owner sunsets plan (sets end_ts), time passes, owner deletes. Early termination.
+- **Perpetual plans (end_ts=0):** Cannot be deleted directly. Owner must first `update_plan` to set an end_ts, then wait for expiration.
 
 ### `subscribe` (Discriminator: 5)
 
@@ -427,7 +455,7 @@ sequenceDiagram
     Note over P: Rejected (not Active)
 ```
 
-### Merchant Sunsets Plan
+### Merchant Sunsets and Deletes Plan
 
 ```mermaid
 sequenceDiagram
@@ -435,11 +463,16 @@ sequenceDiagram
     participant P as Program
     participant X as Anyone/Whitelist
 
-    M->>P: update_plan(status=Sunset)
-    Note over P: Plan status set to Sunset
+    M->>P: update_plan(status=Sunset, end_ts=future)
+    Note over P: Plan status set to Sunset<br/>(terminal, no further updates allowed)<br/>Requires non-zero end_ts
 
     X->>P: pull(delegation_pda, amount)
     Note over P: If plan status == Sunset:<br/>reject new subscriptions<br/>existing subscriptions honored until end_ts
+
+    Note over M,P: After end_ts passes...
+
+    M->>P: delete_plan(plan_pda)
+    Note over P: Verify owner + expired<br/>Close account, return rent
 ```
 
 ---
@@ -448,11 +481,12 @@ sequenceDiagram
 
 | Attack | Prevention |
 |--------|------------|
-| Merchant changes terms mid-subscription | `update_plan` cannot modify terms field; rejects changes |
+| Merchant changes terms mid-subscription | `update_plan` only modifies status, end_ts, metadata_uri; core terms (mint, amount, period_hours, destinations, pullers) are immutable |
 | Delegator can't verify terms | Terms stored in immutable Plan PDA; delegator verifies before subscribing |
 | Unauthorized pull on Plans | Owner is always authorized, plus explicit pullers array |
 | Delegator hijacks subscription | Delegation PDA seeds include plan_pda; can't be recreated |
-| Plan expiration handling | `end_ts` field; 0 means no expiry, otherwise must be in the future at creation |
+| Plan expiration handling | `end_ts` field; 0 means no expiry, otherwise must be in the future at creation. Sunset requires non-zero end_ts (`SunsetRequiresEndTs`) |
+| Unauthorized plan deletion | `delete_plan` requires owner signature and expired end_ts (`PlanNotExpired`). Does not require Sunset status. |
 | Plan with invalid data | Validated: amount>0, period_hours in (0,8760], destinations optional (0-4), end_ts=0 or future |
 | Orphaned Delegation reference | Delegation tracks state; pull instruction checks Plan reference |
 | MDA spends without Plan constraint | Pull must validate Plan terms and Delegation constraints |

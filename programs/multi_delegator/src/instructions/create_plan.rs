@@ -65,6 +65,8 @@ impl PlanData {
     }
 }
 
+pub const DISCRIMINATOR: &u8 = &7;
+
 pub fn process(accounts: &[AccountView], data: &PlanData) -> ProgramResult {
     data.validate(Clock::get()?.unix_timestamp)?;
 

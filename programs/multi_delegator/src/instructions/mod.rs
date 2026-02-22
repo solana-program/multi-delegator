@@ -3,6 +3,8 @@ pub mod create_fixed_delegation;
 pub use create_fixed_delegation::CreateFixedDelegationData;
 pub mod create_plan;
 pub mod create_recurring_delegation;
+pub mod delete_plan;
+pub mod update_plan;
 pub use create_recurring_delegation::CreateRecurringDelegationData;
 pub mod emit_event;
 pub mod helpers;
@@ -20,6 +22,7 @@ use pinocchio::error::ProgramError;
 
 use crate::event_engine::EMIT_EVENT_IX_DISC;
 use crate::instructions::create_plan::PlanData;
+use crate::instructions::update_plan::UpdatePlanData;
 use crate::MultiDelegatorError;
 
 #[derive(Debug, CodamaInstructions)]
@@ -196,6 +199,19 @@ pub enum MultiDelegatorInstruction {
     ))]
     CreatePlan(#[codama(name = "plan_data")] PlanData) = 7,
 
+    #[codama(account(name = "owner", signer, docs = "The plan owner updating the plan"))]
+    #[codama(account(name = "plan_pda", writable, docs = "The plan PDA being updated"))]
+    UpdatePlan(#[codama(name = "update_plan_data")] UpdatePlanData) = 8,
+
+    #[codama(account(
+        name = "owner",
+        signer,
+        writable,
+        docs = "The plan owner deleting the plan (receives rent)"
+    ))]
+    #[codama(account(name = "plan_pda", writable, docs = "The plan PDA being deleted"))]
+    DeletePlan = 9,
+
     #[codama(account(name = "event_authority", signer, docs = "The event authority PDA"))]
     EmitEvent = 228,
 }
@@ -209,31 +225,34 @@ impl MultiDelegatorInstruction {
             .ok_or(MultiDelegatorError::InvalidInstruction)?;
 
         match discriminator {
-            0 => Ok(Self::InitMultiDelegate),
-            1 => {
+            initialize_multidelegate::DISCRIMINATOR => Ok(Self::InitMultiDelegate),
+            create_fixed_delegation::DISCRIMINATOR => {
                 let loaded = CreateFixedDelegationData::load(rest)?;
-                // Found that this clones to only add 300cus, much lower than expected.
-                // Will come back to this to see if we can still keep nice interface plus less CUs
                 Ok(Self::CreateFixedDelegation(loaded.clone()))
             }
-            2 => {
+            create_recurring_delegation::DISCRIMINATOR => {
                 let loaded = CreateRecurringDelegationData::load(rest)?;
                 Ok(Self::CreateRecurringDelegation(loaded.clone()))
             }
-            3 => Ok(Self::RevokeDelegation),
-            4 => {
+            revoke_delegation::DISCRIMINATOR => Ok(Self::RevokeDelegation),
+            transfer_fixed_delegation::DISCRIMINATOR => {
                 let loaded = TransferData::load(rest)?;
                 Ok(Self::TransferFixed(loaded.clone()))
             }
-            5 => {
+            transfer_recurring_delegation::DISCRIMINATOR => {
                 let loaded = TransferData::load(rest)?;
                 Ok(Self::TransferRecurring(loaded.clone()))
             }
-            6 => Ok(Self::CloseMultiDelegate),
-            7 => {
+            close_multidelegate::DISCRIMINATOR => Ok(Self::CloseMultiDelegate),
+            create_plan::DISCRIMINATOR => {
                 let loaded = PlanData::load(rest)?;
                 Ok(Self::CreatePlan(loaded.clone()))
             }
+            update_plan::DISCRIMINATOR => {
+                let loaded = UpdatePlanData::load(rest)?;
+                Ok(Self::UpdatePlan(loaded.clone()))
+            }
+            delete_plan::DISCRIMINATOR => Ok(Self::DeletePlan),
             &EMIT_EVENT_IX_DISC => Ok(Self::EmitEvent),
             _ => Err(MultiDelegatorError::InvalidInstruction.into()),
         }
@@ -251,6 +270,8 @@ impl fmt::Display for MultiDelegatorInstruction {
             Self::TransferRecurring(_) => write!(f, "transfer_recurring"),
             Self::CloseMultiDelegate => write!(f, "close_multi_delegate"),
             Self::CreatePlan(_) => write!(f, "create_plan"),
+            Self::UpdatePlan(_) => write!(f, "update_plan"),
+            Self::DeletePlan => write!(f, "delete_plan"),
             Self::EmitEvent => write!(f, "emit_event"),
         }
     }

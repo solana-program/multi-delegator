@@ -45,6 +45,8 @@ fn process_instruction(
         }
         MultiDelegatorInstruction::CloseMultiDelegate => close_multidelegate::process(accounts),
         MultiDelegatorInstruction::CreatePlan(data) => create_plan::process(accounts, &data),
+        MultiDelegatorInstruction::UpdatePlan(data) => update_plan::process(accounts, &data),
+        MultiDelegatorInstruction::DeletePlan => delete_plan::process(accounts),
         MultiDelegatorInstruction::EmitEvent => emit_event::process(program_id, accounts),
     }
 }

@@ -3,6 +3,7 @@ use pinocchio::{cpi::Seed, error::ProgramError, AccountView};
 use crate::{
     find_plan_pda, state::plan::Plan, AccountCheck, MintInterface, MultiDelegatorError,
     ProgramAccount, ProgramAccountInit, SignerAccount, SystemAccount, TokenProgramInterface,
+    WritableAccount,
 };
 
 pub struct CreatePlanAccounts<'a> {
@@ -22,6 +23,8 @@ impl<'a> TryFrom<&'a [AccountView]> for CreatePlanAccounts<'a> {
         };
 
         SignerAccount::check(merchant)?;
+        WritableAccount::check(merchant)?;
+        WritableAccount::check(plan_pda)?;
         MintInterface::check_with_program(token_mint, token_program)?;
         TokenProgramInterface::check(token_program)?;
         SystemAccount::check(system_program)?;
