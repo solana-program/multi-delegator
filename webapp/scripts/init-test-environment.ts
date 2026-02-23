@@ -1,4 +1,3 @@
-#!/usr/bin/env bun
 /**
  * Initializes test environment for webapp development
  * Idempotent - checks on-chain state before creating resources

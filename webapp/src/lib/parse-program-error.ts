@@ -1,10 +1,20 @@
 import idl from '@idl'
+import { MULTI_DELEGATOR_PROGRAM_ADDRESS } from '@multidelegator/client'
 
-type IdlError = { code: number; name: string; msg: string }
+type IdlError = { code: number; name: string; message: string }
 
-const ERROR_MESSAGES: Record<number, string> = Object.fromEntries(
-  (idl.errors as IdlError[]).map(e => [e.code, e.msg])
+const errors = (idl.program?.errors ?? []) as IdlError[]
+const PROGRAM_ERRORS: Record<number, string> = Object.fromEntries(
+  errors.map(e => [e.code, e.message])
 )
+
+const SPL_TOKEN_ERRORS: Record<number, string> = {
+  0: 'Account not rent exempt',
+  1: 'Insufficient funds',
+  2: 'Invalid mint',
+  3: 'Mint mismatch',
+  4: 'Owner mismatch',
+}
 
 export function parseProgramError(error: unknown): string {
   if (!(error instanceof Error)) return 'Unknown error'
@@ -20,5 +30,12 @@ export function parseProgramError(error: unknown): string {
 
   if (code === null) return error.message
 
-  return ERROR_MESSAGES[code] ?? `Unknown error code: ${code}`
+  const failLineMatch = error.message.match(/Program (\w+) failed: custom program error:/)
+  const failedProgram = failLineMatch?.[1] ?? ''
+
+  if (failedProgram === MULTI_DELEGATOR_PROGRAM_ADDRESS) {
+    return PROGRAM_ERRORS[code] ?? `Program error ${code}`
+  }
+
+  return SPL_TOKEN_ERRORS[code] ?? `Program error ${code}`
 }

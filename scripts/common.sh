@@ -26,7 +26,10 @@ check_program_so() {
   if [ ! -f "$PROGRAM_SO" ]; then
     if [ "$build_if_missing" = true ]; then
       echo -e "${YELLOW}Program SO file not found. Building...${NC}"
-      just build-program
+      SCRIPT_DIR_COMMON="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+      PROJECT_ROOT_COMMON="$( cd "$SCRIPT_DIR_COMMON/.." && pwd )"
+      cd "$PROJECT_ROOT_COMMON/programs/multi_delegator" && cargo build-sbf
+      cd "$PROJECT_ROOT_COMMON"
     else
       echo -e "${YELLOW}Warning: Program SO file not found: $PROGRAM_SO${NC}"
       echo -e "${YELLOW}Run 'just build-program' first to build the program.${NC}"
@@ -45,73 +48,39 @@ is_validator_running() {
     -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' 2>/dev/null | grep -q '"result":"ok"'
 }
 
-handle_ledger() {
-  local reset_ledger="$1"
-  local set_skip_init="${2:-false}"
-
-  if [ "$reset_ledger" = true ]; then
-    if [ -d "$LEDGER_DIR" ]; then
-      echo -e "${YELLOW}Cleaning old ledger directory (--reset flag)...${NC}"
-      rm -rf "$LEDGER_DIR"
-    fi
-  elif [ -d "$LEDGER_DIR" ]; then
-    echo -e "${GREEN}Reusing existing ledger (use --reset to start fresh)${NC}"
-    if [ "$set_skip_init" = true ]; then
-      SKIP_INIT=true
-    fi
-  fi
-}
-
-build_validator_args() {
-  local program_id="$1"
-  local reset_ledger="$2"
-
-  VALIDATOR_ARGS=(
-    --bpf-program "$program_id" "$PROGRAM_SO"
-    --clone TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
-    --clone TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb
-    --clone ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL
-    --url https://api.mainnet-beta.solana.com
-    --ledger "$LEDGER_DIR"
-    --rpc-port "$RPC_PORT"
-    --account-index program-id
-    --account-index spl-token-owner
-    --account-index spl-token-mint
+build_surfpool_args() {
+  SURFPOOL_ARGS=(
+    --no-tui
+    --port "$RPC_PORT"
+    --offline
   )
-
-  if [ "$reset_ledger" = true ]; then
-    VALIDATOR_ARGS+=(--reset)
-  fi
 }
 
 start_validator_foreground() {
   local program_id="$1"
-  local reset_ledger="$2"
 
-  build_validator_args "$program_id" "$reset_ledger"
+  build_surfpool_args
 
-  echo -e "${GREEN}Starting solana-test-validator...${NC}"
+  echo -e "${GREEN}Starting surfpool...${NC}"
   echo -e "  - Program ID: $program_id"
   echo -e "  - Program SO: $PROGRAM_SO"
-  echo -e "  - Ledger: $LEDGER_DIR"
   echo -e "  - RPC Port: $RPC_PORT"
-  echo -e "  - Fresh start: $reset_ledger"
   echo ""
 
-  solana-test-validator "${VALIDATOR_ARGS[@]}"
+  surfpool start "${SURFPOOL_ARGS[@]}"
 }
 
 start_validator_background() {
   local program_id="$1"
-  local reset_ledger="$2"
 
-  build_validator_args "$program_id" "$reset_ledger"
+  build_surfpool_args
 
-  solana-test-validator "${VALIDATOR_ARGS[@]}" > /tmp/validator.log 2>&1 &
+  surfpool start "${SURFPOOL_ARGS[@]}" > /tmp/validator.log 2>&1 &
   VALIDATOR_PID=$!
   echo "  Validator PID: $VALIDATOR_PID"
 }
 
+# Waits for RPC to respond to getHealth. Returns 1 on timeout.
 wait_for_validator() {
   local timeout="${1:-30}"
 
@@ -122,26 +91,59 @@ wait_for_validator() {
       return 0
     fi
     if [ $i -eq $timeout ]; then
-      echo -e "  ${RED}Validator failed to start within $timeout seconds${NC}"
+      echo -e "  ${RED}Validator failed to start within ${timeout}s${NC}"
       echo "  Check /tmp/validator.log for details"
-      cat /tmp/validator.log
+      cat /tmp/validator.log 2>/dev/null || true
       return 1
     fi
     sleep 1
   done
 }
 
-verify_program_deployed() {
+# Polls until program account is executable. Returns 1 on timeout.
+wait_for_program() {
   local program_id="$1"
+  local timeout="${2:-30}"
 
-  if curl -s -X POST http://127.0.0.1:$RPC_PORT \
-    -H "Content-Type: application/json" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getAccountInfo\",\"params\":[\"$program_id\",{\"encoding\":\"base64\"}]}" \
-    | grep -q '"executable":true'; then
-    echo -e "  ${GREEN}Program deployed successfully${NC}"
-    return 0
-  else
-    echo -e "  ${RED}Program not found on validator${NC}"
-    return 1
-  fi
+  echo -e "${YELLOW}  Waiting for program deployment...${NC}"
+  for i in $(seq 1 $timeout); do
+    if curl -s -X POST http://127.0.0.1:$RPC_PORT \
+      -H "Content-Type: application/json" \
+      -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getAccountInfo\",\"params\":[\"$program_id\",{\"encoding\":\"base64\"}]}" \
+      | grep -q '"executable":true'; then
+      echo -e "  ${GREEN}Program deployed successfully${NC}"
+      return 0
+    fi
+    if [ $i -eq $timeout ]; then
+      echo -e "  ${RED}Program not found after ${timeout}s${NC}"
+      echo "  Check /tmp/validator.log for details"
+      cat /tmp/validator.log 2>/dev/null | tail -20 || true
+      return 1
+    fi
+    sleep 1
+  done
+}
+
+# Polls a local HTTP endpoint until it responds. Returns 1 on timeout.
+wait_for_http() {
+  local url="$1"
+  local label="$2"
+  local timeout="${3:-15}"
+  local match="${4:-}"
+
+  echo -e "${YELLOW}  Waiting for ${label}...${NC}"
+  for i in $(seq 1 $timeout); do
+    if [ -n "$match" ]; then
+      curl -s "$url" 2>/dev/null | grep -q "$match" && break
+    else
+      curl -sf "$url" >/dev/null 2>&1 && break
+    fi
+    if [ $i -eq $timeout ]; then
+      echo -e "  ${RED}${label} failed to start within ${timeout}s${NC}"
+      return 1
+    fi
+    sleep 1
+  done
+  echo -e "  ${GREEN}${label} is ready!${NC}"
+  return 0
 }

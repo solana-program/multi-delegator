@@ -12,19 +12,30 @@ import {
   getRevokeDelegationInstruction,
   getTransferFixedInstruction,
   getTransferRecurringInstruction,
+  getCreatePlanInstruction,
+  getUpdatePlanInstruction,
+  getDeletePlanInstruction,
   getMultiDelegatePDA,
   getDelegationPDA,
+  getPlanPDA,
+  MAX_PLAN_DESTINATIONS,
+  MAX_PLAN_PULLERS,
+  ZERO_ADDRESS,
+  PlanStatus,
 } from "@multidelegator/client";
+import { useClusterConfig } from "@/hooks/use-cluster-config";
 import { useWalletUiSigner } from "../components/solana/use-wallet-ui-signer";
 import { useWalletTransactionSignAndSend } from "../components/solana/use-wallet-transaction-sign-and-send";
 import { useTransactionToast } from "../components/use-transaction-toast";
 import { invalidateWithDelay } from "@/lib/utils";
+import { getBlockTimestamp } from "@/hooks/use-time-travel";
 
 export function useMultiDelegatorMutations() {
   const signer = useWalletUiSigner();
   const signAndSend = useWalletTransactionSignAndSend();
   const queryClient = useQueryClient();
   const toast = useTransactionToast();
+  const { url: rpcUrl } = useClusterConfig();
 
   const initMultiDelegate = useMutation({
     mutationFn: async ({
@@ -100,9 +111,7 @@ export function useMultiDelegatorMutations() {
         multiDelegate,
         delegationAccount,
         delegatee: address(delegatee),
-        nonce,
-        amount,
-        expiryTs,
+        fixedDelegation: { nonce, amount, expiryTs },
       });
 
       const signature = await signAndSend(instruction, signer);
@@ -152,11 +161,13 @@ export function useMultiDelegatorMutations() {
         multiDelegate,
         delegationAccount,
         delegatee: address(delegatee),
-        nonce,
-        amountPerPeriod,
-        periodLengthS,
-        startTs: startTs ?? Math.floor(Date.now() / 1000),
-        expiryTs,
+        recurringDelegation: {
+          nonce,
+          amountPerPeriod,
+          periodLengthS,
+          startTs: startTs ?? await getBlockTimestamp(rpcUrl),
+          expiryTs,
+        },
       });
 
       const signature = await signAndSend(instruction, signer);
@@ -284,6 +295,115 @@ export function useMultiDelegatorMutations() {
     onError: (error) => toast.onError(error),
   });
 
+  const createPlan = useMutation({
+    mutationFn: async ({
+      planId,
+      mint,
+      amount,
+      periodHours,
+      endTs,
+      destinations,
+      pullers,
+      metadataUri,
+    }: {
+      planId: bigint;
+      mint: string;
+      amount: bigint;
+      periodHours: number;
+      endTs: number;
+      destinations: string[];
+      pullers: string[];
+      metadataUri: string;
+    }) => {
+      if (!signer) throw new Error("Wallet not connected");
+
+      const paddedDestinations = Array.from(
+        { length: MAX_PLAN_DESTINATIONS },
+        (_, i) => address(destinations[i] || ZERO_ADDRESS),
+      );
+      const paddedPullers = Array.from(
+        { length: MAX_PLAN_PULLERS },
+        (_, i) => address(pullers[i] || ZERO_ADDRESS),
+      );
+
+      const [planPda] = await getPlanPDA(signer.address, planId);
+
+      const instruction = getCreatePlanInstruction({
+        merchant: signer,
+        planPda,
+        tokenMint: address(mint),
+        tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+        planData: {
+          planId,
+          mint: address(mint),
+          amount,
+          periodHours: BigInt(periodHours),
+          endTs: BigInt(endTs),
+          destinations: paddedDestinations,
+          pullers: paddedPullers,
+          metadataUri,
+        },
+      });
+
+      const signature = await signAndSend(instruction, signer);
+      return { signature };
+    },
+    onSuccess: (res) => {
+      toast.onSuccess(res.signature);
+      queryClient.invalidateQueries({ queryKey: ["plans"] });
+    },
+    onError: (error) => toast.onError(error),
+  });
+
+  const updatePlan = useMutation({
+    mutationFn: async ({
+      planPda,
+      status,
+      endTs,
+      metadataUri,
+    }: {
+      planPda: string;
+      status: PlanStatus;
+      endTs: number;
+      metadataUri: string;
+    }) => {
+      if (!signer) throw new Error("Wallet not connected");
+
+      const instruction = getUpdatePlanInstruction({
+        owner: signer,
+        planPda: address(planPda),
+        updatePlanData: { status, endTs: BigInt(endTs), metadataUri },
+      });
+
+      const signature = await signAndSend(instruction, signer);
+      return { signature };
+    },
+    onSuccess: (res) => {
+      toast.onSuccess(res.signature);
+      queryClient.invalidateQueries({ queryKey: ["plans"] });
+    },
+    onError: (error) => toast.onError(error),
+  });
+
+  const deletePlan = useMutation({
+    mutationFn: async ({ planPda }: { planPda: string }) => {
+      if (!signer) throw new Error("Wallet not connected");
+
+      const instruction = getDeletePlanInstruction({
+        owner: signer,
+        planPda: address(planPda),
+      });
+
+      const signature = await signAndSend(instruction, signer);
+      return { signature };
+    },
+    onSuccess: (res) => {
+      toast.onSuccess(res.signature);
+      queryClient.invalidateQueries({ queryKey: ["plans"] });
+    },
+    onError: (error) => toast.onError(error),
+  });
+
   return {
     initMultiDelegate,
     createFixedDelegation,
@@ -291,5 +411,8 @@ export function useMultiDelegatorMutations() {
     revokeDelegation,
     transferFixed,
     transferRecurring,
+    createPlan,
+    updatePlan,
+    deletePlan,
   };
 }

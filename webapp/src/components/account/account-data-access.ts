@@ -6,19 +6,16 @@ import { TOKEN_PROGRAM_ADDRESS, TOKEN_2022_PROGRAM_ADDRESS } from 'gill/programs
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api-client'
-import type { ClusterWithUrl } from '@/lib/types'
+import { useClusterConfig } from '@/hooks/use-cluster-config'
 import { invalidateWithDelay } from '@/lib/utils'
 
-// Create a memoized RPC hook to avoid recreating on every render
 function useRpc() {
-  const { cluster } = useWalletUi()
-  const clusterConfig = cluster as unknown as ClusterWithUrl
+  const clusterConfig = useClusterConfig()
   return useMemo(() => createSolanaRpc(clusterConfig.url), [clusterConfig.url])
 }
 
 export function useGetBalanceQuery({ address: addr }: { address: Address }) {
-  const { cluster } = useWalletUi()
-  const clusterConfig = cluster as unknown as ClusterWithUrl
+  const clusterConfig = useClusterConfig()
   const rpc = useRpc()
 
   return useQuery({
@@ -41,8 +38,7 @@ async function getTokenAccountsByOwner(
 }
 
 export function useGetTokenAccountsQuery({ address: addr }: { address: Address }) {
-  const { cluster } = useWalletUi()
-  const clusterConfig = cluster as unknown as ClusterWithUrl
+  const clusterConfig = useClusterConfig()
   const rpc = useRpc()
 
   return useQuery({
@@ -62,9 +58,8 @@ export function useGetTokenAccountsQuery({ address: addr }: { address: Address }
 const LAMPORTS_PER_SOL = 1_000_000_000
 
 export function useRequestAirdropMutation({ address: addr }: { address: Address }) {
-  const { cluster } = useWalletUi()
-  const clusterConfig = cluster as unknown as ClusterWithUrl
-  const rpc = createSolanaRpc(clusterConfig.url)
+  const clusterConfig = useClusterConfig()
+  const rpc = useMemo(() => createSolanaRpc(clusterConfig.url), [clusterConfig.url])
   const queryClient = useQueryClient()
 
   return useMutation({

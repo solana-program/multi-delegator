@@ -3,10 +3,13 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "init": "bun init-test-environment.ts",
-    "mint-usdc": "bun mint-usdc.ts"
+    "init": "tsx init-test-environment.ts",
+    "mint-usdc": "tsx mint-usdc.ts"
   },
   "dependencies": {
     "gill": "^0.14.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
   }
 }

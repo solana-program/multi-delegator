@@ -1,5 +1,4 @@
 import { useMemo } from 'react'
-import { useWalletUi } from '@wallet-ui/react'
 import type { Instruction, TransactionSendingSigner } from 'gill'
 import {
   createSolanaRpc,
@@ -9,7 +8,7 @@ import {
   signAndSendTransactionMessageWithSigners,
   getBase58Decoder,
 } from 'gill'
-import type { ClusterWithUrl } from '@/lib/types'
+import { useClusterConfig } from '@/hooks/use-cluster-config'
 
 /**
  * Hook to build, sign via wallet, and send transactions.
@@ -19,8 +18,7 @@ import type { ClusterWithUrl } from '@/lib/types'
  * - request wallet sign+send
  */
 export function useWalletTransactionSignAndSend() {
-  const { cluster } = useWalletUi()
-  const clusterConfig = cluster as unknown as ClusterWithUrl
+  const clusterConfig = useClusterConfig()
   const rpc = useMemo(() => createSolanaRpc(clusterConfig.url), [clusterConfig.url])
 
   return async (ix: Instruction | Instruction[], signer: TransactionSendingSigner): Promise<string> => {

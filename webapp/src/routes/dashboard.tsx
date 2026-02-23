@@ -1,15 +1,15 @@
 import { useWalletUi } from '@wallet-ui/react'
 import { address } from 'gill'
 import { WalletBalanceCards } from '../components/account/account-ui'
-import { DelegationManagementPanel } from '../components/delegation/delegation-management-panel'
+import { SummaryCards } from '@/components/dashboard/summary-cards'
 
 function DashboardConnected() {
   const { account } = useWalletUi()
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 max-w-5xl mx-auto">
       {account && <WalletBalanceCards address={address(account.address)} />}
-      <DelegationManagementPanel />
+      <SummaryCards />
     </div>
   )
 }

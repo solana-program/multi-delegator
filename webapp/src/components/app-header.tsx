@@ -2,9 +2,11 @@ import { useState } from 'react'
 import { Button } from './ui/button'
 import { Menu, X } from 'lucide-react'
 import { ClusterButton, WalletButton } from './solana/solana-provider'
+import { TimeTravelButton } from './time-travel/time-travel-button'
 import { Link, useLocation } from 'react-router'
+import { NAV_ITEMS } from './nav-items'
 
-export function AppHeader({ links = [] }: { links: { label: string; path: string }[] }) {
+export function AppHeader() {
   const { pathname } = useLocation()
   const [showMenu, setShowMenu] = useState(false)
 
@@ -15,31 +17,14 @@ export function AppHeader({ links = [] }: { links: { label: string; path: string
   return (
     <header className="relative z-50 px-4 py-2 bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-400">
       <div className="mx-auto flex justify-between items-center">
-        <div className="flex items-baseline gap-4">
-          <Link to="/" className="text-xl hover:text-neutral-500 dark:hover:text-white">
-            <span>MultiDelegator</span>
-          </Link>
-          <div className="hidden md:flex items-center">
-            <ul className="flex gap-4 flex-nowrap items-center">
-              {links.map(({ label, path }) => (
-                <li key={path}>
-                  <Link
-                    className={`hover:text-neutral-500 dark:hover:text-white ${isActive(path) ? 'text-neutral-500 dark:text-white' : ''}`}
-                    to={path}
-                  >
-                    {label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
+        <span className="text-xl md:hidden">MultiDelegator</span>
 
         <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setShowMenu(!showMenu)}>
           {showMenu ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
         </Button>
 
-        <div className="hidden md:flex items-center gap-4">
+        <div className="hidden md:flex items-center gap-4 ml-auto">
+          <TimeTravelButton />
           <WalletButton />
           <ClusterButton />
         </div>
@@ -48,19 +33,21 @@ export function AppHeader({ links = [] }: { links: { label: string; path: string
           <div className="md:hidden fixed inset-x-0 top-[52px] bottom-0 bg-neutral-100/95 dark:bg-neutral-900/95 backdrop-blur-sm">
             <div className="flex flex-col p-4 gap-4 border-t dark:border-neutral-800">
               <ul className="flex flex-col gap-4">
-                {links.map(({ label, path }) => (
+                {NAV_ITEMS.map(({ label, path, icon: Icon }) => (
                   <li key={path}>
                     <Link
-                      className={`hover:text-neutral-500 dark:hover:text-white block text-lg py-2  ${isActive(path) ? 'text-neutral-500 dark:text-white' : ''} `}
+                      className={`flex items-center gap-3 hover:text-neutral-500 dark:hover:text-white text-lg py-2 ${isActive(path) ? 'text-neutral-500 dark:text-white' : ''}`}
                       to={path}
                       onClick={() => setShowMenu(false)}
                     >
+                      <Icon className="h-5 w-5" />
                       {label}
                     </Link>
                   </li>
                 ))}
               </ul>
               <div className="flex flex-col gap-4">
+                <TimeTravelButton />
                 <WalletButton />
                 <ClusterButton />
               </div>

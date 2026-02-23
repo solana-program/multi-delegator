@@ -7,8 +7,9 @@ export const USDC_DECIMALS = 6
 export const USDC_MULTIPLIER = 10 ** USDC_DECIMALS
 export const SECONDS_PER_DAY = 86400
 
-export function isExpired(expiryTs: bigint): boolean {
-  return Number(expiryTs) < Math.floor(Date.now() / 1000)
+export function isExpired(expiryTs: bigint, nowSec?: number): boolean {
+  const now = nowSec ?? Math.floor(Date.now() / 1000)
+  return Number(expiryTs) < now
 }
 
 export function cn(...inputs: ClassValue[]) {
@@ -31,8 +32,20 @@ export function ellipsify(str = '', len = 4, delimiter = '..') {
   return strLen >= limit ? str.substring(0, len) + delimiter + str.substring(strLen - len, strLen) : str
 }
 
-export function toDecimals(amount: bigint, decimals: number): string {
-  return (Number(amount) / 10 ** decimals).toFixed(decimals)
+export function recurringAvailable(
+  amountPerPeriod: bigint,
+  amountPulledInPeriod: bigint,
+  currentPeriodStartTs: bigint | null,
+  periodLengthS: bigint,
+  blockTime?: number,
+): bigint {
+  if (currentPeriodStartTs != null && blockTime != null) {
+    const periodEnd = Number(currentPeriodStartTs) + Number(periodLengthS)
+    if (blockTime >= periodEnd) return amountPerPeriod
+  }
+  const pulled = amountPulledInPeriod ?? 0n
+  const remaining = amountPerPeriod - pulled
+  return remaining > 0n ? remaining : 0n
 }
 
 export type InvalidateQueryKeys = readonly (readonly string[])[]

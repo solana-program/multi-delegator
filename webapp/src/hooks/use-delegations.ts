@@ -3,15 +3,15 @@ import { useWalletUi } from '@wallet-ui/react'
 import { createSolanaRpc, address } from 'gill'
 import {
   MULTI_DELEGATOR_PROGRAM_ADDRESS,
+  DISCRIMINATOR_OFFSET,
   DELEGATOR_OFFSET,
   DELEGATEE_OFFSET,
   decodeFixedDelegation,
   decodeRecurringDelegation,
-  getMultiDelegatePDA,
-  fetchMaybeMultiDelegate,
   AccountDiscriminator,
 } from '@multidelegator/client'
-import type { ClusterWithUrl, DelegationAccountRaw } from '@/lib/types'
+import { useClusterConfig } from '@/hooks/use-cluster-config'
+import type { DelegationAccountRaw } from '@/lib/types'
 import { decodeBase64ToUint8Array } from '@/lib/utils'
 
 export interface DelegationData {
@@ -24,6 +24,7 @@ export interface DelegationData {
   periodLengthS: bigint
   expiryTs: bigint
   amountPulledInPeriod: bigint
+  currentPeriodStartTs: bigint | null
 }
 
 export interface DelegationItem {
@@ -39,22 +40,6 @@ export interface GroupedDelegations {
 }
 
 export type DelegationRole = 'delegator' | 'delegatee'
-
-export function useMultiDelegate(tokenMint: string) {
-  const { account, cluster } = useWalletUi()
-  const clusterConfig = cluster as unknown as ClusterWithUrl
-  const rpc = createSolanaRpc(clusterConfig.url)
-
-  return useQuery({
-    queryKey: ['multiDelegate', account?.address, tokenMint, cluster.id],
-    queryFn: async () => {
-      if (!account?.address) return null
-      const [pda] = await getMultiDelegatePDA(address(account.address), address(tokenMint))
-      return fetchMaybeMultiDelegate(rpc, pda)
-    },
-    enabled: !!account?.address && !!tokenMint,
-  })
-}
 
 async function fetchDelegationsByRole(
   rpcUrl: string,
@@ -84,39 +69,44 @@ async function fetchDelegationsByRole(
   const all: DelegationItem[] = []
 
   for (const accountEntry of accounts) {
-    const [base64Data] = accountEntry.account.data
-    const data = decodeBase64ToUint8Array(base64Data)
-    const kind = data[1]
+    try {
+      const [base64Data] = accountEntry.account.data
+      const data = decodeBase64ToUint8Array(base64Data)
+      const kind = data[DISCRIMINATOR_OFFSET]
 
-    const encodedAccount = {
-      address: accountEntry.pubkey,
-      data: data,
-      executable: accountEntry.account.executable,
-      lamports: accountEntry.account.lamports,
-      owner: accountEntry.account.owner,
-      rentEpoch: accountEntry.account.rentEpoch,
-      programAddress: address(MULTI_DELEGATOR_PROGRAM_ADDRESS),
-      space: BigInt(data.length),
-    }
+      const encodedAccount = {
+        address: accountEntry.pubkey,
+        data: data,
+        executable: accountEntry.account.executable,
+        lamports: accountEntry.account.lamports,
+        owner: accountEntry.account.owner,
+        rentEpoch: accountEntry.account.rentEpoch,
+        programAddress: address(MULTI_DELEGATOR_PROGRAM_ADDRESS),
+        space: BigInt(data.length),
+      }
 
-    if (kind === AccountDiscriminator.FixedDelegation) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const decoded = decodeFixedDelegation(encodedAccount as any)
-      all.push({
-        address: accountEntry.pubkey,
-        type: 'Fixed',
+      if (kind === AccountDiscriminator.FixedDelegation) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        data: (decoded as any).data as DelegationData,
-      })
-    } else if (kind === AccountDiscriminator.RecurringDelegation) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const decoded = decodeRecurringDelegation(encodedAccount as any)
-      all.push({
-        address: accountEntry.pubkey,
-        type: 'Recurring',
+        const decoded = decodeFixedDelegation(encodedAccount as any)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        data: (decoded as any).data as DelegationData,
-      })
+        const decodedData = (decoded as any).data
+        all.push({
+          address: accountEntry.pubkey,
+          type: 'Fixed',
+          data: { ...decodedData, currentPeriodStartTs: null } as DelegationData,
+        })
+      } else if (kind === AccountDiscriminator.RecurringDelegation) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const decoded = decodeRecurringDelegation(encodedAccount as any)
+        all.push({
+          address: accountEntry.pubkey,
+          type: 'Recurring',
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          data: (decoded as any).data as DelegationData,
+        })
+      }
+    } catch {
+      console.warn('Failed to decode delegation account:', accountEntry.pubkey)
     }
   }
 
@@ -127,9 +117,9 @@ async function fetchDelegationsByRole(
   }
 }
 
-function useDelegationsByRole(role: DelegationRole, _tokenMint?: string | null) {
+function useDelegationsByRole(role: DelegationRole) {
   const { account, cluster } = useWalletUi()
-  const clusterConfig = cluster as unknown as ClusterWithUrl
+  const clusterConfig = useClusterConfig()
   const queryClient = useQueryClient()
 
   const query = useQuery({
@@ -164,14 +154,14 @@ function useDelegationsByRole(role: DelegationRole, _tokenMint?: string | null) 
  * Hook to fetch delegations where the connected wallet is the DELEGATOR.
  * These are delegations the user has created (outgoing).
  */
-export function useDelegations(tokenMint?: string | null) {
-  return useDelegationsByRole('delegator', tokenMint)
+export function useDelegations() {
+  return useDelegationsByRole('delegator')
 }
 
 /**
  * Hook to fetch delegations where the connected wallet is the DELEGATEE.
  * These are delegations others have created for the user (incoming).
  */
-export function useIncomingDelegations(tokenMint?: string | null) {
-  return useDelegationsByRole('delegatee', tokenMint)
+export function useIncomingDelegations() {
+  return useDelegationsByRole('delegatee')
 }

@@ -70,8 +70,8 @@ needs-rebuild target source:
         exit 1
     fi
 
-# Build everything (program + clients + webapp)
-build: prepare-deploy-keys build-program build-client build-webapp
+# Build everything (program + clients)
+build: prepare-deploy-keys build-program build-client
 
 # Compile Solana program to .so
 build-program: prepare-deploy-keys
@@ -109,11 +109,6 @@ build-client: generate-client
         pnpm run build
         echo "✓ TypeScript client built"
     fi
-
-# Build webapp
-build-webapp: generate-idl
-    cd {{webapp_dir}} && npm install && npm run build
-    @echo "✓ Webapp built"
 
 # ============================================
 # Test recipes
@@ -173,78 +168,80 @@ ensure-surfpool:
     echo "Error: Program deployment failed"
     echo "Surfpool logs:"
     cat /tmp/surfpool.log
-    just kill-surfpool
+    just kill-validator
     exit 1
 
-# Stop surfpool validator
-kill-surfpool:
+# Stop all validators
+kill-validator:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    if [[ ! -f .surfpool/pid.txt ]]; then
-        echo "No surfpool validator running"
-        exit 0
+    if [[ -f .surfpool/pid.txt ]]; then
+        pid=$(cat .surfpool/pid.txt)
+        kill -9 "$pid" 2>/dev/null || true
     fi
 
-    pid=$(cat .surfpool/pid.txt)
-    if kill -9 "$pid" 2>/dev/null; then
-        echo "✓ Killed surfpool validator (PID: $pid)"
-        rm -f .surfpool/pid.txt
-    else
-        echo "Warning: Could not kill process $pid (may already be stopped)"
-        rm -f .surfpool/pid.txt
-    fi
-
-# Stop all validators
-kill-validator: kill-surfpool
-    @killall -9 solana-test-validator 2>/dev/null || true
-    @killall -9 surfpool 2>/dev/null || true
-    @rm -f .surfpool/pid.txt 2>/dev/null || true
-    @rm -rf .validator-ledger 2>/dev/null || true
-    @echo "✓ All validators stopped"
+    killall -9 solana-test-validator 2>/dev/null || true
+    killall -9 surfpool 2>/dev/null || true
+    rm -f .surfpool/pid.txt 2>/dev/null || true
+    rm -rf .validator-ledger 2>/dev/null || true
+    echo "✓ All validators stopped"
 
 # ============================================
 # Webapp recipes
 # ============================================
 
-# Start webapp development stack with optional flags
-webapp reset="false" skip_init="false": build-program
+# Start full webapp stack (builds program, installs deps, starts all services)
+webapp-run:
+    ./scripts/start-webapp.sh
+
+# Kill all webapp processes and remove all generated state
+webapp-clean:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    args=()
-    [[ "{{reset}}" == "true" ]] && args+=(--reset)
-    [[ "{{skip_init}}" == "true" ]] && args+=(--skip-init)
+    echo "Stopping webapp processes..."
+    pkill -f "surfpool" 2>/dev/null || true
+    pkill -f "solana-test-validator" 2>/dev/null || true
+    pkill -f "tsx.*server.ts" 2>/dev/null || true
+    pkill -f "vite" 2>/dev/null || true
 
-    ./scripts/start-webapp.sh "${args[@]}"
+    echo "Removing generated state..."
+    rm -rf target/deploy/
+    rm -rf {{webapp_dir}}/{dist,node_modules,api/node_modules,scripts/node_modules}
+    rm -rf {{webapp_dir}}/config.json
+    rm -rf .validator-ledger .surfpool
+    rm -f /tmp/{surfpool,api,webapp,validator}.log
+
+    echo "Done"
 
 # ============================================
 # Clean recipes
 # ============================================
 
-# Clean all build artifacts
-clean: clean-program clean-client
+# Clean everything: build artifacts, deps, validators, ledger
+clean:
+    #!/usr/bin/env bash
+    set -euo pipefail
 
-# Clean Rust build artifacts and IDL
-clean-program:
+    echo "Stopping services..."
+    pkill -f "solana-test-validator" 2>/dev/null || true
+    pkill -f "surfpool" 2>/dev/null || true
+
+    echo "Cleaning program..."
     cargo clean
     rm -f {{idl_file}}
-    @echo "✓ Program cleaned"
 
-# Clean TypeScript client artifacts
-clean-client:
-    cd {{ts_client_dir}} && pnpm run clean
-    @echo "✓ Client cleaned"
+    echo "Cleaning client..."
+    cd {{ts_client_dir}} && pnpm run clean || true
+    cd -
 
-# Clean webapp and validator files
-clean-webapp:
-    @echo "Cleaning webapp..."
-    @pkill -f "solana-test-validator" 2>/dev/null || true
-    @pkill -f "surfpool" 2>/dev/null || true
-    @rm -rf {{webapp_dir}}/{node_modules,dist,api/node_modules,scripts/node_modules}
-    @rm -rf .{validator-ledger,surfpool}
-    @rm -f /tmp/surfpool.log
-    @echo "✓ Webapp cleaned"
+    echo "Cleaning webapp..."
+    rm -rf {{webapp_dir}}/{node_modules,dist,api/node_modules,scripts/node_modules}
+    rm -rf .{validator-ledger,surfpool}
+    rm -f /tmp/{surfpool,api,webapp}.log
+
+    echo "✓ Clean complete"
 
 # ============================================
 # Format and lint recipes

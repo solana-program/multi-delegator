@@ -1,0 +1,550 @@
+import { useEffect, useMemo, useState } from 'react'
+import {
+  ExternalLink, Clock, Infinity as InfinityIcon, Pencil, Trash2, Sunset,
+  ChevronDown, Lock, Star,
+} from 'lucide-react'
+import { Card, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog'
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+} from '@/components/ui/dropdown-menu'
+import { ZERO_ADDRESS, PlanStatus } from '@multidelegator/client'
+import { cn, ellipsify, USDC_MULTIPLIER } from '@/lib/utils'
+import { useMultiDelegatorMutations } from '@/hooks/use-multi-delegator'
+import { useTimeTravel } from '@/hooks/use-time-travel'
+import type { PlanItem } from '@/hooks/use-plans'
+import { PLAN_ICONS, ICON_MAP, parsePlanMeta, type PlanMeta } from '@/lib/plan-constants'
+
+function formatPeriod(hours: bigint): string {
+  const h = Number(hours)
+  if (h === 24) return 'daily'
+  if (h === 168) return 'weekly'
+  if (h === 720) return 'monthly'
+  if (h === 8760) return 'yearly'
+  if (h > 24 && h % 24 === 0) return `every ${h / 24} days`
+  return `every ${h} hours`
+}
+
+function formatPeriodLabel(hours: bigint): string {
+  const h = Number(hours)
+  if (h === 24) return '1 Day'
+  if (h === 168) return '1 Week'
+  if (h === 720) return '1 Month'
+  if (h === 8760) return '1 Year'
+  if (h > 24 && h % 24 === 0) return `${h / 24} Days`
+  return `${h} Hours`
+}
+
+function ImmutableField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid gap-2">
+      <Label className="flex items-center gap-1.5 text-muted-foreground">
+        <Lock className="h-3 w-3" />
+        {label}
+      </Label>
+      <Input value={value} disabled className="opacity-50 cursor-not-allowed" />
+    </div>
+  )
+}
+
+function EditPlanDialog({ plan, meta, open, onOpenChange }: {
+  plan: PlanItem
+  meta: PlanMeta
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const { updatePlan } = useMultiDelegatorMutations()
+  const { getCurrentTimestamp } = useTimeTravel()
+  const isSunset = plan.status === PlanStatus.Sunset
+  const [blockTime, setBlockTime] = useState<number | undefined>()
+
+  useEffect(() => {
+    if (open) getCurrentTimestamp().then(setBlockTime).catch(() => {})
+  }, [open, getCurrentTimestamp])
+
+  const blockDate = blockTime ? new Date(blockTime * 1000) : new Date()
+
+  const [planName, setPlanName] = useState(meta.n || '')
+  const [description, setDescription] = useState(meta.d || '')
+  const [selectedIcon, setSelectedIcon] = useState(meta.i || '')
+  const [website, setWebsite] = useState(meta.w || '')
+  const [endDate, setEndDate] = useState(() => {
+    const ts = Number(plan.data.endTs)
+    if (ts === 0) return ''
+    return new Date(ts * 1000).toISOString().slice(0, 10)
+  })
+  const [endHour, setEndHour] = useState(() => {
+    const ts = Number(plan.data.endTs)
+    if (ts === 0) return '12'
+    return new Date(ts * 1000).getHours().toString()
+  })
+  const [sunsetMode, setSunsetMode] = useState(false)
+
+  const selectedIconEntry = PLAN_ICONS.find((i) => i.name === selectedIcon)
+  const SelectedIconComponent = selectedIconEntry?.icon
+
+  const amount = Number(plan.data.amount) / USDC_MULTIPLIER
+  const activeDestinations = plan.data.destinations.filter((d) => d !== ZERO_ADDRESS)
+  const activePullers = plan.data.pullers.filter((p) => p !== ZERO_ADDRESS)
+
+  const metadataJson = useMemo(() => {
+    const m: Record<string, string> = { n: planName, d: description }
+    if (selectedIcon) m.i = selectedIcon
+    if (website) m.w = website
+    return JSON.stringify(m)
+  }, [planName, description, selectedIcon, website])
+
+  const metadataBytes = useMemo(
+    () => new TextEncoder().encode(metadataJson).length,
+    [metadataJson],
+  )
+
+  const handleUpdate = () => {
+    const endTs = endDate
+      ? Math.floor(new Date(`${endDate}T${endHour.padStart(2, '0')}:00:00`).getTime() / 1000)
+      : 0
+    const status = sunsetMode ? PlanStatus.Sunset : PlanStatus.Active
+
+    updatePlan.mutate({
+      planPda: plan.address,
+      status,
+      endTs,
+      metadataUri: metadataJson,
+    }, { onSuccess: () => onOpenChange(false) })
+  }
+
+  const isFormValid =
+    planName.length > 0 &&
+    description.length > 0 &&
+    metadataBytes <= 128 &&
+    !(sunsetMode && !endDate)
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[750px] border-emerald-500/30">
+        <DialogHeader>
+          <DialogTitle>Edit Plan: {meta.n || 'Unnamed'}</DialogTitle>
+          <DialogDescription>
+            Editable fields are highlighted. Greyed out fields are immutable on-chain.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="max-h-[70vh] overflow-y-auto pr-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+            <div className="sm:col-span-2">
+              <p className="text-xs font-medium uppercase tracking-wider text-emerald-400">Metadata (editable)</p>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="edit-name">Plan Name</Label>
+              <Input
+                id="edit-name"
+                value={planName}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPlanName(e.target.value)}
+                disabled={isSunset}
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="edit-desc">Description</Label>
+              <Input
+                id="edit-desc"
+                value={description}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDescription(e.target.value)}
+                disabled={isSunset}
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Icon</Label>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild disabled={isSunset}>
+                  <Button variant="outline" className="w-full justify-between" disabled={isSunset}>
+                    {SelectedIconComponent ? (
+                      <span className="flex items-center gap-2">
+                        <SelectedIconComponent className="h-4 w-4 text-emerald-400" />
+                        {selectedIconEntry.label}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">Select an icon</span>
+                    )}
+                    <ChevronDown className="h-4 w-4 opacity-50" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="max-h-60 overflow-y-auto w-56">
+                  {PLAN_ICONS.map(({ name, label, icon: Icon }) => (
+                    <DropdownMenuItem
+                      key={name}
+                      onClick={() => setSelectedIcon(name)}
+                      className={cn(
+                        'flex items-center gap-2 cursor-pointer',
+                        selectedIcon === name && 'text-emerald-400',
+                      )}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="edit-website">Website URL</Label>
+              <Input
+                id="edit-website"
+                value={website}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setWebsite(e.target.value)}
+                placeholder="https://example.com"
+                disabled={isSunset}
+              />
+            </div>
+
+            <div className="sm:col-span-2">
+              <p className={cn(
+                'text-xs text-right',
+                metadataBytes > 128 ? 'text-destructive' : 'text-muted-foreground',
+              )}>
+                {metadataBytes}/128 bytes
+              </p>
+            </div>
+
+            <div className="sm:col-span-2 h-px bg-border" />
+
+            <div className="sm:col-span-2">
+              <p className="text-xs font-medium uppercase tracking-wider text-emerald-400">Plan Parameters</p>
+            </div>
+
+            <ImmutableField label="Amount (USDC)" value={`$${amount}`} />
+            <ImmutableField label="Billing Period" value={formatPeriodLabel(plan.data.periodHours)} />
+
+            <div className="sm:col-span-2 grid gap-2">
+              <Label>End Date/Time</Label>
+              <div className="flex gap-2">
+                <Input
+                  type="date"
+                  value={endDate}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEndDate(e.target.value)}
+                  min={blockDate.toLocaleDateString('en-CA')}
+                  className="flex-1"
+                  disabled={isSunset}
+                />
+                <select
+                  value={endHour}
+                  onChange={(e) => setEndHour(e.target.value)}
+                  disabled={isSunset}
+                  className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {Array.from({ length: 24 }, (_, i) => (
+                    <option key={i} value={i.toString()}>
+                      {i.toString().padStart(2, '0')}:00
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <p className="text-xs text-muted-foreground">Leave empty for no end date</p>
+            </div>
+
+            <div className="sm:col-span-2 grid gap-2">
+              <Label className="flex items-center gap-1.5 text-muted-foreground">
+                <Lock className="h-3 w-3" />
+                Destinations
+              </Label>
+              {activeDestinations.length > 0 ? (
+                activeDestinations.map((d, i) => (
+                  <Input key={i} value={ellipsify(d, 8)} disabled className="font-mono text-sm opacity-50 cursor-not-allowed" />
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground/60 italic">Any destination (not restricted)</p>
+              )}
+            </div>
+
+            <div className="sm:col-span-2 grid gap-2">
+              <Label className="flex items-center gap-1.5 text-muted-foreground">
+                <Lock className="h-3 w-3" />
+                Pullers
+              </Label>
+              {activePullers.length > 0 ? (
+                activePullers.map((p, i) => (
+                  <Input key={i} value={ellipsify(p, 8)} disabled className="font-mono text-sm opacity-50 cursor-not-allowed" />
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground/60 italic">Owner only</p>
+              )}
+            </div>
+
+            <div className="sm:col-span-2 h-px bg-border" />
+
+            {!isSunset && (
+              <div className="sm:col-span-2 flex items-center gap-2 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
+                <input
+                  type="checkbox"
+                  id="sunset-check"
+                  checked={sunsetMode}
+                  onChange={(e) => setSunsetMode(e.target.checked)}
+                  className="accent-amber-500"
+                />
+                <Label htmlFor="sunset-check" className="text-amber-400 text-sm cursor-pointer">
+                  Sunset this plan (terminal, stops new subscriptions)
+                </Label>
+              </div>
+            )}
+            {sunsetMode && !endDate && (
+              <div className="sm:col-span-2">
+                <p className="text-xs text-red-400">Sunset requires an end date.</p>
+              </div>
+            )}
+            {isSunset && (
+              <div className="sm:col-span-2 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
+                <p className="text-sm text-amber-400">This plan is in Sunset status. No further edits are allowed.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter className="mt-4">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button
+            onClick={handleUpdate}
+            disabled={updatePlan.isPending || isSunset || !isFormValid}
+            className="bg-emerald-600 hover:bg-emerald-500 text-white"
+          >
+            {updatePlan.isPending ? 'Updating...' : 'Update Plan'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function DeletePlanDialog({ plan, meta, open, onOpenChange }: {
+  plan: PlanItem
+  meta: PlanMeta
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const { deletePlan } = useMultiDelegatorMutations()
+  const { getCurrentTimestamp } = useTimeTravel()
+  const endTs = Number(plan.data.endTs)
+  const [canDelete, setCanDelete] = useState(false)
+
+  useEffect(() => {
+    if (!open || endTs === 0) return
+    getCurrentTimestamp().then((bt) => {
+      setCanDelete(bt > endTs)
+    }).catch(() => {})
+  }, [open, endTs, getCurrentTimestamp])
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="border-red-500/30 bg-slate-950">
+        <DialogHeader>
+          <DialogTitle className="text-red-400">Delete Plan: {meta.n || 'Unnamed'}</DialogTitle>
+          <DialogDescription>
+            {canDelete
+              ? 'This plan has expired. Deleting will close the account and return rent to your wallet.'
+              : 'This plan cannot be deleted yet. A plan must have an end date that has passed before it can be deleted.'}
+          </DialogDescription>
+        </DialogHeader>
+        {!canDelete && (
+          <div className="text-sm text-gray-400 space-y-1 p-3 rounded-lg border border-gray-700 bg-gray-900/50">
+            {endTs === 0 ? (
+              <p>This plan has no expiry. Set an end date via Edit first, then wait for it to expire.</p>
+            ) : (
+              <p>This plan expires on {new Date(endTs * 1000).toLocaleString()}. You can delete it after that.</p>
+            )}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button
+            variant="destructive"
+            onClick={() => deletePlan.mutate({ planPda: plan.address }, { onSuccess: () => onOpenChange(false) })}
+            disabled={!canDelete || deletePlan.isPending}
+          >
+            {deletePlan.isPending ? 'Deleting...' : 'Delete Plan'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export function PlanCard({ plan, variant = 'owner' }: { plan: PlanItem; variant?: 'owner' | 'marketplace' }) {
+  const [editOpen, setEditOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+
+  const meta = useMemo(() => parsePlanMeta(plan.data.metadataUri), [plan.data.metadataUri])
+
+  const Icon = (meta.i && ICON_MAP[meta.i]) || Star
+  const amount = Number(plan.data.amount) / USDC_MULTIPLIER
+  const period = formatPeriod(plan.data.periodHours)
+  const activeDestinations = plan.data.destinations.filter((d) => d !== ZERO_ADDRESS).length
+  const activePullers = plan.data.pullers.filter((p) => p !== ZERO_ADDRESS).length
+  const { getCurrentTimestamp } = useTimeTravel()
+  const hasExpiry = Number(plan.data.endTs) > 0
+  const expiryDate = hasExpiry ? new Date(Number(plan.data.endTs) * 1000) : null
+  const isSunset = plan.status === PlanStatus.Sunset
+  const [planExpired, setIsExpired] = useState(false)
+
+  const [sunsetIntensity, setSunsetIntensity] = useState(0)
+
+  useEffect(() => {
+    if (!hasExpiry) return
+    const endTs = Number(plan.data.endTs)
+    getCurrentTimestamp().then((blockTime) => {
+      setIsExpired(blockTime > endTs)
+      if (isSunset) {
+        const totalWindow = 30 * 24 * 3600
+        const remaining = endTs - blockTime
+        setSunsetIntensity(remaining <= 0 ? 1 : Math.max(0, Math.min(1, 1 - remaining / totalWindow)))
+      }
+    }).catch(() => {})
+  }, [hasExpiry, isSunset, plan.data.endTs, getCurrentTimestamp])
+
+  const overlayStyle = planExpired
+    ? { background: 'linear-gradient(to bottom, rgba(239, 68, 68, 0.18) 0%, rgba(185, 28, 28, 0.10) 40%, transparent 75%)' }
+    : isSunset
+      ? { background: `linear-gradient(to bottom, rgba(245, 158, 11, ${0.08 + sunsetIntensity * 0.2}) 0%, rgba(234, 88, 12, ${sunsetIntensity * 0.12}) 40%, transparent 75%)` }
+      : undefined
+
+  const borderClass = planExpired
+    ? 'border-red-500/40 hover:border-red-500/60 shadow-red-500/10'
+    : isSunset
+      ? sunsetIntensity > 0.6
+        ? 'border-orange-500/40 hover:border-orange-500/60 shadow-orange-500/10'
+        : 'border-amber-500/30 hover:border-amber-500/50 shadow-amber-500/5'
+      : 'border-emerald-500/25 hover:border-emerald-500/45 shadow-emerald-500/5'
+
+  return (
+    <>
+      <Card className={cn(
+        'w-full bg-gradient-to-br from-slate-900/80 via-emerald-900/20 to-slate-900/80 backdrop-blur-xl shadow-xl hover:shadow-2xl transition-all duration-500 rounded-2xl relative overflow-hidden',
+        borderClass,
+      )}>
+        {overlayStyle && <div className="absolute inset-0 pointer-events-none rounded-2xl" style={overlayStyle} />}
+        <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/5 to-transparent pointer-events-none" />
+        <CardContent className="p-6 space-y-5 relative z-10">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-start gap-3.5 min-w-0">
+              <div className="rounded-xl bg-emerald-500/15 p-3 shrink-0 ring-1 ring-emerald-500/20">
+                <Icon className="h-6 w-6 text-emerald-400" />
+              </div>
+              <div className="min-w-0">
+                <p className="font-bold text-lg text-white tracking-tight truncate">{meta.n || 'Unnamed Plan'}</p>
+                <p className="text-sm text-gray-400 truncate mt-0.5">{meta.d || 'No description'}</p>
+              </div>
+            </div>
+            {isSunset && (
+              <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 shrink-0">
+                <Sunset className="h-3 w-3 mr-1" />
+                Sunset
+              </Badge>
+            )}
+          </div>
+
+          <div>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-3xl font-black text-emerald-400 tracking-tight">${amount}</span>
+              <span className="text-base font-medium text-emerald-400/60">/{period}</span>
+            </div>
+            <div className="flex items-center gap-1.5 mt-2">
+              {hasExpiry ? (
+                planExpired ? (
+                <div className="flex items-center gap-1.5 text-sm text-red-300 bg-red-500/10 px-3 py-1 rounded-lg border border-red-500/25">
+                  <Clock className="h-3.5 w-3.5 text-red-400" />
+                  <span>Expired {expiryDate!.toLocaleDateString()}</span>
+                </div>
+                ) : (
+                <div className="flex items-center gap-1.5 text-sm text-gray-300 bg-slate-800/60 px-3 py-1 rounded-lg border border-emerald-500/15">
+                  <Clock className="h-3.5 w-3.5 text-emerald-400/70" />
+                  <span>Expires {expiryDate!.toLocaleDateString()}</span>
+                </div>
+                )
+              ) : (
+                <div className="flex items-center gap-1.5 text-sm font-semibold text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-lg border border-emerald-500/20">
+                  <InfinityIcon className="h-4 w-4" />
+                  <span>No expiry</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {variant === 'owner' && (
+            <div className="flex items-center gap-4 text-sm text-gray-400">
+              <span><span className="font-semibold text-emerald-300">{activeDestinations}</span> dest.</span>
+              <span className="text-emerald-800">|</span>
+              <span><span className="font-semibold text-emerald-300">{activePullers}</span> puller{activePullers !== 1 ? 's' : ''}</span>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-2 pt-2 border-t border-emerald-500/10">
+            <span className="font-mono text-xs text-gray-500 break-all leading-relaxed">{plan.address}</span>
+            {meta.w && (
+              <a
+                href={meta.w}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-sm text-emerald-400 hover:text-emerald-300 transition-colors shrink-0"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                Website
+              </a>
+            )}
+          </div>
+
+          {variant === 'marketplace' && (
+            <div className="flex justify-center pt-2 border-t border-emerald-500/10">
+              <Button
+                size="sm"
+                onClick={() => {}}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white"
+              >
+                Subscribe
+              </Button>
+            </div>
+          )}
+
+          {variant === 'owner' && (
+            <div className="flex items-center gap-2 pt-2 border-t border-emerald-500/10">
+              {!planExpired && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setEditOpen(true)}
+                  disabled={isSunset}
+                  className="flex-1 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
+                >
+                  <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                  Edit
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setDeleteOpen(true)}
+                className="flex-1 border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                Delete
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {variant === 'owner' && (
+        <>
+          <EditPlanDialog plan={plan} meta={meta} open={editOpen} onOpenChange={setEditOpen} />
+          <DeletePlanDialog plan={plan} meta={meta} open={deleteOpen} onOpenChange={setDeleteOpen} />
+        </>
+      )}
+    </>
+  )
+}

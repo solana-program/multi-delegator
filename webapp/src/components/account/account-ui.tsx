@@ -6,9 +6,8 @@ import { Button } from '@/components/ui/button'
 import { AppAlert } from '@/components/app-alert'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
-import { RefreshCw, Wallet, DollarSign, Coins } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { RefreshCw, Wallet, DollarSign } from 'lucide-react'
 import { toast } from 'sonner'
 import type { TokenAccountEntry } from '@/lib/types'
 import {
@@ -17,6 +16,11 @@ import {
   useAirdropSol,
   useAirdropUsdc,
 } from './account-data-access'
+import { useDelegations, useIncomingDelegations } from '@/hooks/use-delegations'
+import { useUsdcMint } from '@/hooks/use-token-config'
+import { USDC_MULTIPLIER, recurringAvailable } from '@/lib/utils'
+import { getBlockTimestamp } from '@/hooks/use-time-travel'
+import { useClusterConfig } from '@/hooks/use-cluster-config'
 
 export function AccountChecker() {
   const { account } = useWalletUi()
@@ -62,74 +66,140 @@ export function AccountBalance({ address: addr }: { address: Address }) {
 export function WalletBalanceCards({ address: addr }: { address: Address }) {
   const solQuery = useGetBalanceQuery({ address: addr })
   const tokenQuery = useGetTokenAccountsQuery({ address: addr })
+  const { url: rpcUrl } = useClusterConfig()
+  const usdcMint = useUsdcMint()
+  const outgoing = useDelegations()
+  const incoming = useIncomingDelegations()
+  const [blockTime, setBlockTime] = useState<number | undefined>()
+
+  useEffect(() => {
+    getBlockTimestamp(rpcUrl).then(setBlockTime).catch(() => {})
+  }, [rpcUrl, incoming.all])
+
+  const reservedAmount = useMemo(() => {
+    let total = 0
+    for (const d of outgoing.fixed) total += Number(d.data.amount) / USDC_MULTIPLIER
+    for (const d of outgoing.recurring) total += Number(d.data.amountPerPeriod) / USDC_MULTIPLIER
+    return total
+  }, [outgoing.fixed, outgoing.recurring])
+
+  const incomingAmount = useMemo(() => {
+    let total = 0
+    for (const d of incoming.all) {
+      if (d.type === 'Fixed') {
+        total += Number(d.data.amount) / USDC_MULTIPLIER
+      } else {
+        total += Number(recurringAvailable(d.data.amountPerPeriod, d.data.amountPulledInPeriod, d.data.currentPeriodStartTs, d.data.periodLengthS, blockTime)) / USDC_MULTIPLIER
+      }
+    }
+    return total
+  }, [incoming.all, blockTime])
 
   const usdcAccount = useMemo(() => {
     return (tokenQuery.data as TokenAccountEntry[] | undefined)?.find((entry) => {
-      return entry.account?.data?.parsed?.info?.tokenAmount?.uiAmount > 0
+      return entry.account?.data?.parsed?.info?.mint === usdcMint
     })
-  }, [tokenQuery.data])
+  }, [tokenQuery.data, usdcMint])
 
   const usdcBalance = usdcAccount?.account?.data?.parsed?.info?.tokenAmount?.uiAmount ?? 0
 
+  const [spinning, setSpinning] = useState(false)
+  const isFetching = solQuery.isFetching || tokenQuery.isFetching
+  const isRefreshing = isFetching || spinning
+
   const handleRefresh = async () => {
-    await Promise.all([solQuery.refetch(), tokenQuery.refetch()])
+    setSpinning(true)
+    const minSpin = new Promise((r) => setTimeout(r, 600))
+    await Promise.all([solQuery.refetch(), tokenQuery.refetch(), minSpin])
+    setSpinning(false)
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">Wallet Overview</h2>
+        <h2 className="text-[28px] font-bold tracking-tight text-white">Wallet Overview</h2>
         <Button
           variant="outline"
           size="sm"
           onClick={handleRefresh}
-          disabled={solQuery.isLoading || tokenQuery.isLoading}
+          disabled={isRefreshing}
+          className="rounded-full bg-white/5 border-white/10 hover:bg-white/10 text-white"
         >
-          <RefreshCw className={`h-4 w-4 ${solQuery.isLoading || tokenQuery.isLoading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
         </Button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card className="relative overflow-hidden border border-purple-500/20 bg-gradient-to-br from-purple-950/40 via-purple-900/20 to-transparent hover:border-purple-500/40 transition-all duration-300">
+        <Card className="relative overflow-hidden border border-purple-500/30 bg-gradient-to-br from-purple-900/40 to-black/60 backdrop-blur-xl shadow-[0_0_30px_rgba(168,85,247,0.15)] rounded-2xl">
           <CardHeader className="relative pb-2">
             <CardTitle className="flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-400">Solana Balance</span>
-              <Wallet className="h-5 w-5 text-purple-400" />
+              <span className="text-sm font-medium text-gray-300">Solana Balance</span>
+              <div className="p-2 bg-purple-500/20 rounded-lg">
+                <Wallet className="h-5 w-5 text-purple-400" />
+              </div>
             </CardTitle>
           </CardHeader>
-          <CardContent className="relative pt-2">
+          <CardContent className="relative pt-4">
             <div className="space-y-1">
-              <div className="text-5xl font-bold tracking-tight">
+              <div className="text-[28px] sm:text-[40px] leading-tight font-bold tracking-tight text-purple-300">
                 {solQuery.data?.value ? (
-                  <span className="text-purple-400">{Number(lamportsToSol(solQuery.data.value)).toFixed(4)}</span>
+                  <span className="drop-shadow-[0_0_10px_rgba(168,85,247,0.5)]">{Number(lamportsToSol(solQuery.data.value)).toFixed(4)}</span>
                 ) : (
                   <span className="text-muted-foreground">...</span>
                 )}
               </div>
-              <div className="text-sm font-medium text-gray-500">SOL</div>
+              <div className="text-sm font-medium text-gray-500 tracking-wide">SOL</div>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="relative overflow-hidden border border-green-500/20 bg-gradient-to-br from-green-950/40 via-green-900/20 to-transparent hover:border-green-500/40 transition-all duration-300">
+        <Card className="relative overflow-hidden border border-emerald-500/30 bg-gradient-to-br from-emerald-900/40 to-black/60 backdrop-blur-xl shadow-[0_0_30px_rgba(16,185,129,0.15)] rounded-2xl">
           <CardHeader className="relative pb-2">
             <CardTitle className="flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-400">USDC Balance</span>
-              <DollarSign className="h-5 w-5 text-green-400" />
+              <span className="text-sm font-medium text-gray-300">USDC Balance</span>
+              <div className="p-2 bg-emerald-500/20 rounded-lg">
+                <DollarSign className="h-5 w-5 text-emerald-400" />
+              </div>
             </CardTitle>
           </CardHeader>
-          <CardContent className="relative pt-2">
-            <div className="space-y-1">
-              <div className="text-5xl font-bold tracking-tight">
-                {tokenQuery.isLoading ? (
-                  <span className="text-muted-foreground">...</span>
-                ) : (
-                  <span className="text-green-400">
-                    {usdcBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                )}
-              </div>
-              <div className="text-sm font-medium text-gray-500">USDC</div>
+          <CardContent className="relative pt-4">
+            <div className="space-y-3">
+              {tokenQuery.isLoading ? (
+                <div className="text-[28px] sm:text-[40px] leading-tight font-bold text-muted-foreground">...</div>
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-[24px] sm:text-[36px] leading-tight font-bold tracking-tight text-emerald-400 drop-shadow-[0_0_10px_rgba(16,185,129,0.5)]">
+                      {usdcBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-sm font-medium text-gray-500 tracking-wide">Wallet</div>
+                  </div>
+                  <div>
+                    <div className="text-[24px] sm:text-[36px] leading-tight font-bold tracking-tight text-emerald-400 drop-shadow-[0_0_10px_rgba(16,185,129,0.5)]">
+                      {(usdcBalance - reservedAmount + incomingAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-sm font-medium text-gray-500 tracking-wide">Spendable</div>
+                    {(reservedAmount > 0 || incomingAmount > 0) && (
+                      <div className="text-xs text-gray-600">incl. delegations</div>
+                    )}
+                  </div>
+                </div>
+              )}
+              {(reservedAmount > 0 || incomingAmount > 0) && (
+                <div className="flex items-center gap-3 text-sm">
+                  {reservedAmount > 0 && (
+                    <span className="text-amber-400/80">
+                      {reservedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} delegated
+                    </span>
+                  )}
+                  {reservedAmount > 0 && incomingAmount > 0 && <span className="text-gray-600">|</span>}
+                  {incomingAmount > 0 && (
+                    <span className="text-emerald-400/80">
+                      {incomingAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} from delegations
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -138,87 +208,113 @@ export function WalletBalanceCards({ address: addr }: { address: Address }) {
   )
 }
 
-export function DevFaucet() {
-  const { account, cluster } = useWalletUi()
-  const queryClient = useQueryClient()
-  const [solAmount, setSolAmount] = useState('1')
-  const [usdcAmount, setUsdcAmount] = useState('1000')
+export function SolFaucetCard() {
+  const [amount, setAmount] = useState('1')
+  const airdrop = useAirdropSol()
 
-  const airdropSol = useAirdropSol()
-  const airdropUsdc = useAirdropUsdc()
-
-  const handleRefreshTokenAccounts = async () => {
-    await queryClient.invalidateQueries({ queryKey: ['get-token-accounts'] })
-    await queryClient.invalidateQueries({ queryKey: ['get-balance'] })
-    toast.success('Balances refreshed!')
-  }
-
-  if (!account || cluster.id === 'solana:mainnet') {
-    return null
-  }
-
-  const handleAirdropSol = async () => {
-    if (!solAmount || parseFloat(solAmount) <= 0) {
+  const handleAirdrop = async () => {
+    const val = parseFloat(amount)
+    if (!amount || val <= 0) {
       toast.error('Please enter a valid SOL amount')
       return
     }
-    await airdropSol.mutateAsync(parseFloat(solAmount))
-  }
-
-  const handleAirdropUsdc = async () => {
-    if (!usdcAmount || parseFloat(usdcAmount) <= 0) {
-      toast.error('Please enter a valid USDC amount')
-      return
-    }
-    await airdropUsdc.mutateAsync(parseFloat(usdcAmount))
+    await airdrop.mutateAsync(val)
   }
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2">
-          <Coins className="h-5 w-5 text-blue-500" />
-          Development Faucet
+    <Card className="relative overflow-hidden border border-purple-500/20 bg-gradient-to-br from-purple-950/40 via-purple-900/20 to-transparent hover:border-purple-500/40 transition-all duration-300">
+      <CardHeader className="relative pb-2">
+        <CardTitle className="flex items-center justify-between">
+          <span className="text-sm font-medium text-gray-400">SOL Airdrop</span>
+          <Wallet className="h-5 w-5 text-purple-400" />
         </CardTitle>
       </CardHeader>
-      <CardContent>
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="flex gap-2 items-center">
-            <Input
-              type="number"
-              placeholder="SOL"
-              value={solAmount}
-              onChange={(e) => setSolAmount(e.target.value)}
-              min="0.1"
-              step="0.1"
-              className="w-24"
-            />
-            <Button onClick={handleAirdropSol} disabled={airdropSol.isPending} size="sm" variant="outline">
-              <Coins className="h-4 w-4 mr-1" />
-              Get SOL
+      <CardContent className="relative space-y-4">
+        <Input
+          type="number"
+          placeholder="0"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          min="0.1"
+          step="0.1"
+          className="text-3xl font-bold h-14 border-purple-500/20 focus-visible:ring-purple-500/40"
+        />
+        <div className="flex flex-wrap gap-2">
+          {[1, 2, 5, 10].map((v) => (
+            <Button
+              key={v}
+              variant="outline"
+              size="sm"
+              className="rounded-full text-xs border-purple-500/30 hover:bg-purple-500/10"
+              onClick={() => setAmount(String(v))}
+            >
+              {v} SOL
             </Button>
-          </div>
-
-          <div className="flex gap-2 items-center">
-            <Input
-              type="number"
-              placeholder="USDC"
-              value={usdcAmount}
-              onChange={(e) => setUsdcAmount(e.target.value)}
-              min="1"
-              step="100"
-              className="w-24"
-            />
-            <Button onClick={handleAirdropUsdc} disabled={airdropUsdc.isPending} size="sm" variant="outline">
-              <DollarSign className="h-4 w-4 mr-1" />
-              Get USDC
-            </Button>
-          </div>
-
-          <Button onClick={handleRefreshTokenAccounts} size="sm" variant="ghost">
-            <RefreshCw className="h-4 w-4" />
-          </Button>
+          ))}
         </div>
+        <Button
+          onClick={handleAirdrop}
+          disabled={airdrop.isPending}
+          className="w-full rounded-full bg-purple-600 hover:bg-purple-500 text-white"
+        >
+          {airdrop.isPending ? 'Requesting...' : 'Request Airdrop'}
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+export function UsdcFaucetCard() {
+  const [amount, setAmount] = useState('1000')
+  const airdrop = useAirdropUsdc()
+
+  const handleAirdrop = async () => {
+    const val = parseFloat(amount)
+    if (!amount || val <= 0) {
+      toast.error('Please enter a valid USDC amount')
+      return
+    }
+    await airdrop.mutateAsync(val)
+  }
+
+  return (
+    <Card className="relative overflow-hidden border border-green-500/20 bg-gradient-to-br from-green-950/40 via-green-900/20 to-transparent hover:border-green-500/40 transition-all duration-300">
+      <CardHeader className="relative pb-2">
+        <CardTitle className="flex items-center justify-between">
+          <span className="text-sm font-medium text-gray-400">USDC Airdrop</span>
+          <DollarSign className="h-5 w-5 text-green-400" />
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="relative space-y-4">
+        <Input
+          type="number"
+          placeholder="0"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          min="1"
+          step="100"
+          className="text-3xl font-bold h-14 border-green-500/20 focus-visible:ring-green-500/40"
+        />
+        <div className="flex flex-wrap gap-2">
+          {[100, 1000, 5000, 10000].map((v) => (
+            <Button
+              key={v}
+              variant="outline"
+              size="sm"
+              className="rounded-full text-xs border-green-500/30 hover:bg-green-500/10"
+              onClick={() => setAmount(String(v))}
+            >
+              {v.toLocaleString()}
+            </Button>
+          ))}
+        </div>
+        <Button
+          onClick={handleAirdrop}
+          disabled={airdrop.isPending}
+          className="w-full rounded-full bg-green-600 hover:bg-green-500 text-white"
+        >
+          {airdrop.isPending ? 'Requesting...' : 'Request Airdrop'}
+        </Button>
       </CardContent>
     </Card>
   )

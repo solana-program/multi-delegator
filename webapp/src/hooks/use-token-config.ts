@@ -18,6 +18,14 @@ export function useTokenConfig() {
  * Hook to get the USDC mint address from the token configuration.
  * Returns null if USDC is not configured or config is still loading.
  */
+export function useUsdcMintRaw() {
+  const { data: tokens, isLoading } = useTokenConfig()
+  return {
+    mint: tokens?.find((t) => t.symbol === 'USDC')?.mint ?? null,
+    isLoading
+  }
+}
+
 export function useUsdcMint(): string | null {
   const { data: tokens } = useTokenConfig()
   return tokens?.find((t) => t.symbol === 'USDC')?.mint ?? null

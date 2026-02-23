@@ -1,16 +1,14 @@
-#!/usr/bin/env bun
-/**
- * Multi-Delegator API Server
- * Provides endpoints for SOL and USDC airdrops in development
- */
-
 import { spawn } from 'child_process'
-import { join } from 'path'
+import { createServer } from 'node:http'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { readFile } from 'fs/promises'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const PORT = 3001
 const RPC_URL = 'http://127.0.0.1:8899'
-const CONFIG_PATH = join(import.meta.dir, '../config.json')
+const CONFIG_PATH = join(__dirname, '../config.json')
 
 const MIN_SOL_AIRDROP = 0.1
 const MAX_SOL_AIRDROP = 10
@@ -98,8 +96,8 @@ async function handleUsdcAirdrop(recipient: string, amount: number): Promise<Res
   }
 
   return new Promise((resolve) => {
-    const scriptPath = join(import.meta.dir, '../scripts/mint-usdc.ts')
-    const child = spawn('bun', [scriptPath, recipient, String(amount)])
+    const scriptPath = join(__dirname, '../scripts/mint-usdc.ts')
+    const child = spawn('tsx', [scriptPath, recipient, String(amount)])
 
     let stdout = ''
     let stderr = ''
@@ -138,69 +136,82 @@ async function parseJsonBody(req: Request): Promise<{ success: true; data: unkno
   }
 }
 
-Bun.serve({
-  port: PORT,
-  async fetch(req) {
-    const url = new URL(req.url)
-    const startTime = Date.now()
+async function handleRequest(req: Request): Promise<Response> {
+  const url = new URL(req.url)
+  const startTime = Date.now()
 
-    // Handle CORS preflight
-    if (req.method === 'OPTIONS') {
-      return new Response(null, { headers: corsHeaders() })
-    }
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders() })
+  }
 
-    let response: Response
+  let response: Response
 
-    // Health check
-    if (url.pathname === '/api/health') {
-      response = jsonResponse({ status: 'ok' })
+  if (url.pathname === '/api/health') {
+    response = jsonResponse({ status: 'ok' })
+  } else if (url.pathname === '/api/config' && req.method === 'GET') {
+    const config = await readConfig()
+    response = jsonResponse(config)
+  } else if (url.pathname === '/api/tokens' && req.method === 'GET') {
+    const config = await readConfig()
+    response = jsonResponse(config.tokens)
+  } else if (url.pathname === '/api/airdrop/sol' && req.method === 'POST') {
+    const parseResult = await parseJsonBody(req)
+    if (!parseResult.success) {
+      response = jsonResponse({ error: parseResult.error }, 400)
+    } else {
+      const body = parseResult.data as { recipient?: string; amount?: number }
+      response = await handleSolAirdrop(body.recipient ?? '', body.amount ?? 0)
     }
-    // Get config
-    else if (url.pathname === '/api/config' && req.method === 'GET') {
-      const config = await readConfig()
-      response = jsonResponse(config)
+  } else if (url.pathname === '/api/airdrop/usdc' && req.method === 'POST') {
+    const parseResult = await parseJsonBody(req)
+    if (!parseResult.success) {
+      response = jsonResponse({ error: parseResult.error }, 400)
+    } else {
+      const body = parseResult.data as { recipient?: string; amount?: number }
+      response = await handleUsdcAirdrop(body.recipient ?? '', body.amount ?? 0)
     }
-    // Get tokens
-    else if (url.pathname === '/api/tokens' && req.method === 'GET') {
-      const config = await readConfig()
-      response = jsonResponse(config.tokens)
-    }
-    // SOL Airdrop
-    else if (url.pathname === '/api/airdrop/sol' && req.method === 'POST') {
-      const parseResult = await parseJsonBody(req)
-      if (!parseResult.success) {
-        response = jsonResponse({ error: parseResult.error }, 400)
-      } else {
-        const body = parseResult.data as { recipient?: string; amount?: number }
-        response = await handleSolAirdrop(body.recipient ?? '', body.amount ?? 0)
-      }
-    }
-    // USDC Airdrop
-    else if (url.pathname === '/api/airdrop/usdc' && req.method === 'POST') {
-      const parseResult = await parseJsonBody(req)
-      if (!parseResult.success) {
-        response = jsonResponse({ error: parseResult.error }, 400)
-      } else {
-        const body = parseResult.data as { recipient?: string; amount?: number }
-        response = await handleUsdcAirdrop(body.recipient ?? '', body.amount ?? 0)
-      }
-    }
-    else {
-      response = jsonResponse({ error: 'Not found' }, 404)
-    }
+  } else {
+    response = jsonResponse({ error: 'Not found' }, 404)
+  }
 
-    const duration = Date.now() - startTime
-    log('info', `${req.method} ${url.pathname}`, { status: response.status, duration: `${duration}ms` })
+  const duration = Date.now() - startTime
+  log('info', `${req.method} ${url.pathname}`, { status: response.status, duration: `${duration}ms` })
 
-    return response
-  },
+  return response
+}
+
+const server = createServer(async (req, res) => {
+  const url = `http://localhost:${PORT}${req.url}`
+  const headers = new Headers()
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (value) headers.set(key, Array.isArray(value) ? value.join(', ') : value)
+  }
+
+  let body: string | undefined
+  if (req.method === 'POST' || req.method === 'PUT') {
+    body = await new Promise<string>((resolve) => {
+      let data = ''
+      req.on('data', (chunk) => (data += chunk))
+      req.on('end', () => resolve(data))
+    })
+  }
+
+  const request = new Request(url, { method: req.method ?? 'GET', headers, body })
+  const response = await handleRequest(request)
+
+  const respHeaders: Record<string, string> = {}
+  response.headers.forEach((v, k) => { respHeaders[k] = v })
+  res.writeHead(response.status, respHeaders)
+  res.end(await response.text())
 })
 
-console.log(`Multi-Delegator API server running on port ${PORT}`)
-console.log('')
-console.log('Endpoints:')
-console.log(`  GET  http://localhost:${PORT}/api/health`)
-console.log(`  GET  http://localhost:${PORT}/api/config`)
-console.log(`  GET  http://localhost:${PORT}/api/tokens`)
-console.log(`  POST http://localhost:${PORT}/api/airdrop/sol`)
-console.log(`  POST http://localhost:${PORT}/api/airdrop/usdc`)
+server.listen(PORT, () => {
+  console.log(`Multi-Delegator API server running on port ${PORT}`)
+  console.log('')
+  console.log('Endpoints:')
+  console.log(`  GET  http://localhost:${PORT}/api/health`)
+  console.log(`  GET  http://localhost:${PORT}/api/config`)
+  console.log(`  GET  http://localhost:${PORT}/api/tokens`)
+  console.log(`  POST http://localhost:${PORT}/api/airdrop/sol`)
+  console.log(`  POST http://localhost:${PORT}/api/airdrop/usdc`)
+})

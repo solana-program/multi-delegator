@@ -14,10 +14,13 @@ export class ApiError extends Error {
 
 export async function apiClient<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 15_000)
 
   try {
     const response = await fetch(url, {
       ...options,
+      signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
         ...options?.headers,
@@ -32,7 +35,12 @@ export async function apiClient<T>(endpoint: string, options?: RequestInit): Pro
     return await response.json()
   } catch (error) {
     if (error instanceof ApiError) throw error
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new ApiError('Request timed out', 408)
+    }
     throw new ApiError('Network request failed', undefined, error)
+  } finally {
+    clearTimeout(timeout)
   }
 }
 

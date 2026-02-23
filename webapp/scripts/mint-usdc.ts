@@ -1,7 +1,6 @@
-#!/usr/bin/env bun
 /**
  * Mints mock USDC to a recipient wallet
- * Usage: bun scripts/mint-usdc.ts <recipient-address> <amount>
+ * Usage: tsx scripts/mint-usdc.ts <recipient-address> <amount>
  */
 
 import { address } from 'gill'
@@ -12,8 +11,8 @@ async function main() {
   const args = process.argv.slice(2)
 
   if (args.length < 2) {
-    console.error('Usage: bun scripts/mint-usdc.ts <recipient-address> <amount>')
-    console.error('Example: bun scripts/mint-usdc.ts 7xyz... 1000')
+    console.error('Usage: tsx scripts/mint-usdc.ts <recipient-address> <amount>')
+    console.error('Example: tsx scripts/mint-usdc.ts 7xyz... 1000')
     process.exit(1)
   }
 

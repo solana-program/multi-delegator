@@ -1,6 +1,5 @@
-import { RefreshCw, Coins, FileX, ArrowUpRight, ArrowDownLeft } from 'lucide-react'
+import { RefreshCw, FileX, Coins, ShieldAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
 import {
   Table,
   TableBody,
@@ -20,12 +19,21 @@ import {
 } from '@/components/ui/dialog'
 import { useDelegations, useIncomingDelegations, type DelegationItem } from '@/hooks/use-delegations'
 import { useMultiDelegatorMutations } from '@/hooks/use-multi-delegator'
-import { DELEGATION_KINDS } from '@multidelegator/client'
-import { useMemo, useState } from 'react'
-import { USDC_MULTIPLIER, SECONDS_PER_DAY, isExpired } from '@/lib/utils'
+import { useGetTokenAccountsQuery } from '@/components/account/account-data-access'
+import { useWalletUi } from '@wallet-ui/react'
+import { address } from 'gill'
+import { useEffect, useMemo, useState } from 'react'
+import { USDC_MULTIPLIER, isExpired, invalidateWithDelay, recurringAvailable } from '@/lib/utils'
+import { useQueryClient } from '@tanstack/react-query'
+import { CreateDelegationDialog } from './create-delegation-dialog'
+import type { TokenAccountEntry } from '@/lib/types'
+import { useClusterConfig } from '@/hooks/use-cluster-config'
+import { getBlockTimestamp } from '@/hooks/use-time-travel'
 
 interface ActiveDelegationsProps {
   tokenMint: string
+  isApproved: boolean
+  onInitSuccess?: () => void
 }
 
 type TabType = 'outgoing' | 'incoming'
@@ -39,13 +47,35 @@ function formatAddress(addr: string): string {
   return `${addr.slice(0, ADDRESS_VISIBLE_CHARS)}...${addr.slice(-ADDRESS_VISIBLE_CHARS)}`
 }
 
-function formatExpiry(expiryTs: bigint | number): string {
-  const date = new Date(Number(expiryTs) * 1000)
-  return date.toLocaleDateString('en-US', {
+function formatDateTime(ts: bigint | number): string {
+  const date = new Date(Number(ts) * 1000)
+  return date.toLocaleString('en-US', {
     month: 'short',
     day: 'numeric',
-    year: '2-digit',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
   })
+}
+
+function formatDuration(seconds: bigint | number): string {
+  const s = Number(seconds)
+  const days = Math.floor(s / 86400)
+  const hours = Math.floor((s % 86400) / 3600)
+  if (days > 0) return `${days}d${hours > 0 ? ` ${hours}h` : ''}`
+  if (hours > 0) return `${hours}h`
+  return `${Math.floor(s / 60)}m`
+}
+
+function formatTimeRemaining(expiryTs: bigint, blockTime?: number): string | null {
+  if (blockTime == null) return null
+  const remaining = Number(expiryTs) - blockTime
+  if (remaining <= 0) return null
+  const days = Math.floor(remaining / 86400)
+  const hours = Math.floor((remaining % 86400) / 3600)
+  if (days > 0) return `${days}d ${hours}h left`
+  if (hours > 0) return `${hours}h left`
+  return `${Math.floor(remaining / 60)}m left`
 }
 
 function formatAmount(amount: bigint | number): string {
@@ -56,16 +86,6 @@ function formatAmount(amount: bigint | number): string {
   })
 }
 
-function formatPeriod(periodS: bigint | number): string {
-  const seconds = Number(periodS)
-  const days = Math.floor(seconds / SECONDS_PER_DAY)
-  const hours = Math.floor((seconds % SECONDS_PER_DAY) / 3600)
-
-  if (days > 0) {
-    return `${days} day${days > 1 ? 's' : ''}`
-  }
-  return `${hours} hour${hours > 1 ? 's' : ''}`
-}
 
 interface RevokeDelegationButtonProps {
   delegation: DelegationItem
@@ -76,16 +96,20 @@ function RevokeDelegationButton({ delegation }: RevokeDelegationButtonProps) {
   const { revokeDelegation } = useMultiDelegatorMutations()
 
   const handleRevoke = async () => {
-    await revokeDelegation.mutateAsync({
-      delegationAccount: delegation.address,
-    })
-    setOpen(false)
+    try {
+      await revokeDelegation.mutateAsync({
+        delegationAccount: delegation.address,
+      })
+      setOpen(false)
+    } catch {
+      // wallet rejection or tx failure - button resets via isPending
+    }
   }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10">
+        <Button variant="outline" size="sm" className="bg-[#2d1b1b] hover:bg-[#3a2020] text-[#f87171] border-[#ef4444]/20 shadow-[0_0_15px_rgba(239,68,68,0.1)] hover:shadow-[0_0_20px_rgba(239,68,68,0.2)] transition-all rounded-full px-6">
           Revoke
         </Button>
       </DialogTrigger>
@@ -122,9 +146,10 @@ interface TransferDelegationButtonProps {
   delegation: DelegationItem
   tokenMint: string
   disabled?: boolean
+  blockTime?: number
 }
 
-function TransferDelegationButton({ delegation, tokenMint, disabled }: TransferDelegationButtonProps) {
+function TransferDelegationButton({ delegation, tokenMint, disabled, blockTime }: TransferDelegationButtonProps) {
   const [open, setOpen] = useState(false)
   const [amount, setAmount] = useState('')
   const { transferFixed, transferRecurring } = useMultiDelegatorMutations()
@@ -132,22 +157,26 @@ function TransferDelegationButton({ delegation, tokenMint, disabled }: TransferD
   const isFixed = delegation.type === 'Fixed'
   const availableRaw = isFixed
     ? delegation.data.amount
-    : delegation.data.amountPerPeriod - (delegation.data.amountPulledInPeriod ?? 0n)
+    : recurringAvailable(delegation.data.amountPerPeriod, delegation.data.amountPulledInPeriod, delegation.data.currentPeriodStartTs, delegation.data.periodLengthS, blockTime)
   const availableAmount = formatAmount(availableRaw)
 
   const handleTransfer = async () => {
-    const amountBigInt = BigInt(Math.floor(parseFloat(amount) * USDC_MULTIPLIER))
-    const mutation = isFixed ? transferFixed : transferRecurring
+    try {
+      const amountBigInt = BigInt(Math.floor(parseFloat(amount) * USDC_MULTIPLIER))
+      const mutation = isFixed ? transferFixed : transferRecurring
 
-    await mutation.mutateAsync({
-      tokenMint,
-      delegationAccount: delegation.address,
-      delegator: delegation.data.header.delegator,
-      amount: amountBigInt,
-    })
+      await mutation.mutateAsync({
+        tokenMint,
+        delegationAccount: delegation.address,
+        delegator: delegation.data.header.delegator,
+        amount: amountBigInt,
+      })
 
-    setOpen(false)
-    setAmount('')
+      setOpen(false)
+      setAmount('')
+    } catch {
+      // wallet rejection or tx failure - button resets via isPending
+    }
   }
 
   const isPending = transferFixed.isPending || transferRecurring.isPending
@@ -166,7 +195,7 @@ function TransferDelegationButton({ delegation, tokenMint, disabled }: TransferD
         <Button
           variant="outline"
           size="sm"
-          className="text-green-500 hover:text-green-500 hover:bg-green-500/10"
+          className="bg-green-500/10 hover:bg-green-500/20 text-green-400 border-green-500/20 shadow-[0_0_15px_rgba(34,197,94,0.15)] hover:shadow-[0_0_20px_rgba(34,197,94,0.3)] transition-all rounded-full px-5"
         >
           Transfer
         </Button>
@@ -213,80 +242,75 @@ function TransferDelegationButton({ delegation, tokenMint, disabled }: TransferD
   )
 }
 
-interface DelegationSectionProps {
-  title: string
-  icon: React.ReactNode
+function formatPeriodRange(startTs: bigint | null, periodLengthS: bigint, blockTime?: number): string {
+  if (startTs == null) return 'Not started'
+  const start = Number(startTs)
+  const end = start + Number(periodLengthS)
+  if (blockTime != null && blockTime >= end) return 'New period (pending pull)'
+  const fmt = (ts: number) => new Date(ts * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  return `${fmt(start)} - ${fmt(end)}`
+}
+
+interface DelegationTableProps {
   delegations: DelegationItem[]
-  type: 'fixed' | 'recurring'
   mode: TabType
   showExpired?: boolean
   tokenMint: string
+  blockTime?: number
 }
 
-function DelegationSection({ title, icon, delegations, type, mode, showExpired, tokenMint }: DelegationSectionProps) {
+function FixedDelegationTable({ delegations, mode, showExpired, tokenMint, blockTime }: DelegationTableProps) {
   if (delegations.length === 0) return null
-
   const isOutgoing = mode === 'outgoing'
   const partyLabel = isOutgoing ? 'Delegatee' : 'Delegator'
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-        {icon}
-        <span>{title}</span>
-        <span className="px-1.5 py-0.5 rounded-full bg-muted text-xs">
-          {delegations.length}
-        </span>
+    <div className="space-y-2 w-full">
+      <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground px-1">
+        <Coins className="h-4 w-4" />
+        <span>Fixed</span>
+        <span className="px-1.5 py-0.5 rounded-full bg-muted text-xs">{delegations.length}</span>
       </div>
-      <Card className="border-border/50">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{partyLabel}</TableHead>
-              {type === 'fixed' ? (
-                <TableHead>Amount</TableHead>
-              ) : (
-                <>
-                  <TableHead>Per Period</TableHead>
-                  <TableHead>Period</TableHead>
-                </>
-              )}
-              <TableHead>Expiry</TableHead>
-              <TableHead className="w-[100px]"></TableHead>
+      <div className="w-full rounded-2xl overflow-hidden bg-gradient-to-br from-[#121629]/80 to-black/60 backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.4)] border border-blue-500/15 overflow-x-auto">
+        <Table className="min-w-[650px] table-fixed">
+          <TableHeader className="bg-blue-900/30 backdrop-blur-md">
+            <TableRow className="border-none hover:bg-blue-900/30 border-b border-white/5">
+              <TableHead className="text-white font-semibold py-4 text-center" style={{ width: '18%' }}>{partyLabel}</TableHead>
+              <TableHead className="text-white font-semibold py-4 text-center" style={{ width: '20%' }}>Amount</TableHead>
+              <TableHead className="text-white/40 font-semibold py-4 text-center" style={{ width: '22%' }}>&mdash;</TableHead>
+              <TableHead className="text-white font-semibold py-4 text-center" style={{ width: '28%' }}>Expiry</TableHead>
+              <TableHead className="text-white font-semibold py-4 text-center" style={{ width: '12%' }}>Action</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {delegations.map((delegation) => {
-              const rowExpired = showExpired || (!isOutgoing && isExpired(delegation.data.expiryTs))
+            {delegations.map((d) => {
+              const rowExpired = showExpired || (!isOutgoing && isExpired(d.data.expiryTs, blockTime))
               return (
-                <TableRow key={delegation.address} className={rowExpired ? 'opacity-60' : ''}>
-                  <TableCell className="font-mono text-xs">
-                    {formatAddress(
-                      isOutgoing
-                        ? delegation.data.header.delegatee
-                        : delegation.data.header.delegator
-                    )}
+                <TableRow key={d.address} className={`border-none hover:bg-white/[0.03] transition-colors ${rowExpired ? 'opacity-60' : ''}`}>
+                  <TableCell className="font-mono text-[15px] text-gray-300 py-5 text-center">
+                    {formatAddress(isOutgoing ? d.data.header.delegatee : d.data.header.delegator)}
                   </TableCell>
-                  {type === 'fixed' ? (
-                    <TableCell>{formatAmount(delegation.data.amount)} USDC</TableCell>
-                  ) : (
-                    <>
-                      <TableCell>{formatAmount(delegation.data.amountPerPeriod)} USDC</TableCell>
-                      <TableCell>{formatPeriod(delegation.data.periodLengthS)}</TableCell>
-                    </>
-                  )}
-                  <TableCell>
+                  <TableCell className="text-emerald-400 py-5 font-medium text-[15px] text-center">
+                    {formatAmount(d.data.amount)} USDC
+                  </TableCell>
+                  <TableCell className="py-5" />
+                  <TableCell className="py-5 text-gray-300 text-[15px] text-center">
                     {rowExpired ? (
-                      <span className="text-destructive font-medium">Expired</span>
+                      <span className="text-red-400 font-medium">Expired</span>
                     ) : (
-                      formatExpiry(delegation.data.expiryTs)
+                      <div>
+                        <div>{formatDateTime(d.data.expiryTs)}</div>
+                        {formatTimeRemaining(d.data.expiryTs, blockTime) && (
+                          <div className="text-xs text-blue-400/70 mt-0.5">{formatTimeRemaining(d.data.expiryTs, blockTime)}</div>
+                        )}
+                      </div>
                     )}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="py-5 text-center">
                     {isOutgoing ? (
-                      <RevokeDelegationButton delegation={delegation} />
+                      <RevokeDelegationButton delegation={d} />
                     ) : (
-                      <TransferDelegationButton delegation={delegation} tokenMint={tokenMint} disabled={rowExpired} />
+                      <TransferDelegationButton delegation={d} tokenMint={tokenMint} disabled={rowExpired} blockTime={blockTime} />
                     )}
                   </TableCell>
                 </TableRow>
@@ -294,7 +318,75 @@ function DelegationSection({ title, icon, delegations, type, mode, showExpired, 
             })}
           </TableBody>
         </Table>
-      </Card>
+      </div>
+    </div>
+  )
+}
+
+function RecurringDelegationTable({ delegations, mode, showExpired, tokenMint, blockTime }: DelegationTableProps) {
+  if (delegations.length === 0) return null
+  const isOutgoing = mode === 'outgoing'
+  const partyLabel = isOutgoing ? 'Delegatee' : 'Delegator'
+
+  return (
+    <div className="space-y-2 w-full">
+      <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground px-1">
+        <RefreshCw className="h-4 w-4" />
+        <span>Recurring</span>
+        <span className="px-1.5 py-0.5 rounded-full bg-muted text-xs">{delegations.length}</span>
+      </div>
+      <div className="w-full rounded-2xl overflow-hidden bg-gradient-to-br from-[#121629]/80 to-black/60 backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.4)] border border-blue-500/15 overflow-x-auto">
+        <Table className="min-w-[650px] table-fixed">
+          <TableHeader className="bg-blue-900/30 backdrop-blur-md">
+            <TableRow className="border-none hover:bg-blue-900/30 border-b border-white/5">
+              <TableHead className="text-white font-semibold py-4 text-center" style={{ width: '18%' }}>{partyLabel}</TableHead>
+              <TableHead className="text-white font-semibold py-4 text-center" style={{ width: '20%' }}>Amount</TableHead>
+              <TableHead className="text-white font-semibold py-4 text-center" style={{ width: '22%' }}>Current Period</TableHead>
+              <TableHead className="text-white font-semibold py-4 text-center" style={{ width: '28%' }}>Expiry</TableHead>
+              <TableHead className="text-white font-semibold py-4 text-center" style={{ width: '12%' }}>Action</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {delegations.map((d) => {
+              const rowExpired = showExpired || (!isOutgoing && isExpired(d.data.expiryTs, blockTime))
+              const available = recurringAvailable(d.data.amountPerPeriod, d.data.amountPulledInPeriod, d.data.currentPeriodStartTs, d.data.periodLengthS, blockTime)
+              return (
+                <TableRow key={d.address} className={`border-none hover:bg-white/[0.03] transition-colors ${rowExpired ? 'opacity-60' : ''}`}>
+                  <TableCell className="font-mono text-[15px] text-gray-300 py-5 text-center">
+                    {formatAddress(isOutgoing ? d.data.header.delegatee : d.data.header.delegator)}
+                  </TableCell>
+                  <TableCell className="text-emerald-400 py-5 font-medium text-[15px] text-center">
+                    {formatAmount(available)} USDC
+                    <span className="text-xs text-emerald-400/60 ml-1">/ {formatDuration(d.data.periodLengthS)}</span>
+                  </TableCell>
+                  <TableCell className="py-5 text-gray-400 text-sm text-center">
+                    {formatPeriodRange(d.data.currentPeriodStartTs, d.data.periodLengthS, blockTime)}
+                  </TableCell>
+                  <TableCell className="py-5 text-gray-300 text-[15px] text-center">
+                    {rowExpired ? (
+                      <span className="text-red-400 font-medium">Expired</span>
+                    ) : (
+                      <div>
+                        <div>{formatDateTime(d.data.expiryTs)}</div>
+                        {formatTimeRemaining(d.data.expiryTs, blockTime) && (
+                          <div className="text-xs text-blue-400/70 mt-0.5">{formatTimeRemaining(d.data.expiryTs, blockTime)}</div>
+                        )}
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="py-5 text-center">
+                    {isOutgoing ? (
+                      <RevokeDelegationButton delegation={d} />
+                    ) : (
+                      <TransferDelegationButton delegation={d} tokenMint={tokenMint} disabled={rowExpired} blockTime={blockTime} />
+                    )}
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   )
 }
@@ -327,82 +419,103 @@ function EmptyState({ mode, isExpiredTab }: { mode: TabType; isExpiredTab?: bool
   )
 }
 
-interface TabButtonProps {
+interface FilterCardProps {
   active: boolean
   onClick: () => void
-  icon: React.ReactNode
   label: string
-  count: number
+  count: number | string
+  subLabel: string
+  isActiveCard?: boolean
 }
 
-function TabButton({ active, onClick, icon, label, count }: TabButtonProps) {
+function FilterCard({ active, onClick, label, count, subLabel, isActiveCard = true }: FilterCardProps) {
+  const borderColors = active 
+    ? isActiveCard ? 'border-blue-500/50 shadow-[0_0_20px_rgba(59,130,246,0.2)]' : 'border-gray-500/50 shadow-[0_0_20px_rgba(107,114,128,0.2)]'
+    : 'border-white/5 hover:border-white/10'
+
+  const textGlow = active && isActiveCard ? 'drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]' : ''
+
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-        active
-          ? 'bg-primary text-primary-foreground'
-          : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-      }`}
+      className={`flex flex-col flex-1 p-4 rounded-xl bg-gradient-to-br from-[#1c2136]/80 to-[#121629]/90 backdrop-blur-md border transition-all duration-300 text-left ${borderColors}`}
     >
-      {icon}
-      {label}
-      <span
-        className={`px-1.5 py-0.5 rounded-full text-xs ${
-          active ? 'bg-primary-foreground/20' : 'bg-muted'
-        }`}
-      >
-        {count}
-      </span>
+      <span className="text-sm text-gray-400 mb-1">{label}</span>
+      <div className="flex items-baseline gap-1">
+        <span className={`text-xl font-semibold text-white ${textGlow}`}>{count}</span>
+        <span className="text-sm font-medium text-white">{subLabel}</span>
+      </div>
     </button>
   )
 }
 
-interface SubTabButtonProps {
-  active: boolean
-  onClick: () => void
-  label: string
-  count: number
-  variant?: 'default' | 'warning'
-}
+function InitPrompt({ tokenMint, onSuccess }: { tokenMint: string; onSuccess?: () => void }) {
+  const { account } = useWalletUi()
+  const { initMultiDelegate } = useMultiDelegatorMutations()
+  const queryClient = useQueryClient()
 
-function SubTabButton({ active, onClick, label, count, variant = 'default' }: SubTabButtonProps) {
-  const isWarning = variant === 'warning' && count > 0
+  const { data: tokenAccounts, isLoading: tokenAccountsLoading } = useGetTokenAccountsQuery({
+    address: address(account?.address ?? ''),
+  })
+
+  const userAta = (tokenAccounts as TokenAccountEntry[] | undefined)?.find((entry) => {
+    return entry.account?.data?.parsed?.info?.mint === tokenMint
+  })
+  const userAtaAddress = userAta?.pubkey ?? null
+  const tokenProgram = userAta?.account?.owner ?? null
+
+  const handleInitialize = async () => {
+    if (!userAtaAddress || !tokenProgram) return
+    await initMultiDelegate.mutateAsync(
+      { tokenMint, userAta: userAtaAddress, tokenProgram },
+      {
+        onSuccess: () => {
+          invalidateWithDelay(queryClient, [['multiDelegateStatus'], ['get-token-accounts']])
+          onSuccess?.()
+        },
+      }
+    )
+  }
+
+  const hasAta = !!userAtaAddress
+
   return (
-    <button
-      onClick={onClick}
-      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-        active
-          ? 'bg-muted text-foreground'
-          : 'text-muted-foreground hover:text-foreground'
-      }`}
-    >
-      {label}
-      <span
-        className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${
-          isWarning
-            ? 'bg-destructive/20 text-destructive'
-            : active
-              ? 'bg-background'
-              : 'bg-muted'
-        }`}
+    <div className="flex flex-col items-center justify-center py-8 text-center space-y-3">
+      <ShieldAlert className="h-10 w-10 text-amber-500/60" />
+      <div>
+        <p className="text-sm font-medium text-muted-foreground">Approval required to create delegations</p>
+        <p className="text-xs text-muted-foreground/70 mt-1">One-time setup to enable the delegation program</p>
+      </div>
+      {!hasAta && !tokenAccountsLoading && (
+        <p className="text-xs text-destructive">No token account found. Get some USDC first.</p>
+      )}
+      <Button
+        onClick={handleInitialize}
+        disabled={initMultiDelegate.isPending || !hasAta || tokenAccountsLoading}
+        size="sm"
       >
-        {count}
-      </span>
-    </button>
+        {initMultiDelegate.isPending ? 'Initializing...' : tokenAccountsLoading ? 'Loading...' : 'Enable Delegations'}
+      </Button>
+    </div>
   )
 }
 
-export function ActiveDelegations({ tokenMint }: ActiveDelegationsProps) {
+export function ActiveDelegations({ tokenMint, isApproved, onInitSuccess }: ActiveDelegationsProps) {
   const [activeTab, setActiveTab] = useState<TabType>('outgoing')
   const [outgoingSubTab, setOutgoingSubTab] = useState<OutgoingSubTab>('active')
+  const { url: rpcUrl } = useClusterConfig()
+  const [blockTime, setBlockTime] = useState<number | undefined>()
 
-  const outgoing = useDelegations(tokenMint)
-  const incoming = useIncomingDelegations(tokenMint)
+  useEffect(() => {
+    getBlockTimestamp(rpcUrl).then(setBlockTime).catch(() => {})
+  }, [rpcUrl])
+
+  const outgoing = useDelegations()
+  const incoming = useIncomingDelegations()
 
   const outgoingFiltered = useMemo(() => {
-    const active = outgoing.all.filter((d) => !isExpired(d.data.expiryTs))
-    const expired = outgoing.all.filter((d) => isExpired(d.data.expiryTs))
+    const active = outgoing.all.filter((d) => !isExpired(d.data.expiryTs, blockTime))
+    const expired = outgoing.all.filter((d) => isExpired(d.data.expiryTs, blockTime))
     return {
       active: {
         all: active,
@@ -415,7 +528,7 @@ export function ActiveDelegations({ tokenMint }: ActiveDelegationsProps) {
         recurring: expired.filter((d) => d.type === 'Recurring'),
       },
     }
-  }, [outgoing.all])
+  }, [outgoing.all, blockTime])
 
   const incomingGrouped = useMemo(() => {
     return {
@@ -426,123 +539,94 @@ export function ActiveDelegations({ tokenMint }: ActiveDelegationsProps) {
   }, [incoming.all])
 
   const isLoading = activeTab === 'outgoing' ? outgoing.isLoading : incoming.isLoading
+  const isFetching = activeTab === 'outgoing' ? outgoing.isFetching : incoming.isFetching
+  const [spinning, setSpinning] = useState(false)
+  const isRefreshing = isFetching || spinning
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
+    setSpinning(true)
+    const minSpin = new Promise((r) => setTimeout(r, 600))
+    const refreshBlockTime = getBlockTimestamp(rpcUrl).then(setBlockTime).catch(() => {})
     if (activeTab === 'outgoing') {
-      outgoing.refetch()
+      await Promise.all([outgoing.refetch(), refreshBlockTime, minSpin])
     } else {
-      incoming.refetch()
+      await Promise.all([incoming.refetch(), refreshBlockTime, minSpin])
     }
+    setSpinning(false)
   }
 
   const renderOutgoingContent = () => {
+    if (!isApproved) {
+      return <InitPrompt tokenMint={tokenMint} onSuccess={onInitSuccess} />
+    }
+
     const data = outgoingSubTab === 'active' ? outgoingFiltered.active : outgoingFiltered.expired
     const isEmpty = data.all.length === 0
     const showExpired = outgoingSubTab === 'expired'
 
-    if (isEmpty) {
-      return <EmptyState mode="outgoing" isExpiredTab={showExpired} />
-    }
+    if (isEmpty) return <EmptyState mode="outgoing" isExpiredTab={showExpired} />
 
     return (
       <div className="space-y-6">
-        <DelegationSection
-          title={DELEGATION_KINDS.fixed.label}
-          icon={<Coins className="h-4 w-4" />}
-          delegations={data.fixed}
-          type="fixed"
-          mode="outgoing"
-          showExpired={showExpired}
-          tokenMint={tokenMint}
-        />
-        <DelegationSection
-          title={DELEGATION_KINDS.recurring.label}
-          icon={<RefreshCw className="h-4 w-4" />}
-          delegations={data.recurring}
-          type="recurring"
-          mode="outgoing"
-          showExpired={showExpired}
-          tokenMint={tokenMint}
-        />
+        <FixedDelegationTable delegations={data.fixed} mode="outgoing" showExpired={showExpired} tokenMint={tokenMint} blockTime={blockTime} />
+        <RecurringDelegationTable delegations={data.recurring} mode="outgoing" showExpired={showExpired} tokenMint={tokenMint} blockTime={blockTime} />
       </div>
     )
   }
 
   const renderIncomingContent = () => {
-    const isEmpty = incomingGrouped.all.length === 0
-
-    if (isEmpty) {
-      return <EmptyState mode="incoming" />
-    }
+    if (incomingGrouped.all.length === 0) return <EmptyState mode="incoming" />
 
     return (
       <div className="space-y-6">
-        <DelegationSection
-          title={DELEGATION_KINDS.fixed.label}
-          icon={<Coins className="h-4 w-4" />}
-          delegations={incomingGrouped.fixed}
-          type="fixed"
-          mode="incoming"
-          tokenMint={tokenMint}
-        />
-        <DelegationSection
-          title={DELEGATION_KINDS.recurring.label}
-          icon={<RefreshCw className="h-4 w-4" />}
-          delegations={incomingGrouped.recurring}
-          type="recurring"
-          mode="incoming"
-          tokenMint={tokenMint}
-        />
+        <FixedDelegationTable delegations={incomingGrouped.fixed} mode="incoming" tokenMint={tokenMint} blockTime={blockTime} />
+        <RecurringDelegationTable delegations={incomingGrouped.recurring} mode="incoming" tokenMint={tokenMint} blockTime={blockTime} />
       </div>
     )
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Delegations</h3>
+    <div className="space-y-6">
+      <div className="flex items-center justify-end">
         <Button
           variant="ghost"
           size="sm"
           onClick={handleRefresh}
-          disabled={isLoading}
+          disabled={isRefreshing}
         >
-          <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
         </Button>
       </div>
 
-      <div className="flex gap-2">
-        <TabButton
-          active={activeTab === 'outgoing'}
-          onClick={() => setActiveTab('outgoing')}
-          icon={<ArrowUpRight className="h-4 w-4" />}
+      <div className="flex flex-col sm:flex-row gap-4">
+        <FilterCard
+          active={activeTab === 'outgoing' && outgoingSubTab === 'active'}
+          onClick={() => { setActiveTab('outgoing'); setOutgoingSubTab('active') }}
           label="My Delegations"
-          count={outgoing.all.length}
+          count={outgoingFiltered.active.all.length}
+          subLabel="Active"
         />
-        <TabButton
+        <FilterCard
           active={activeTab === 'incoming'}
           onClick={() => setActiveTab('incoming')}
-          icon={<ArrowDownLeft className="h-4 w-4" />}
           label="Delegated to Me"
           count={incomingGrouped.all.length}
+          subLabel="Active"
+        />
+        <FilterCard
+          active={activeTab === 'outgoing' && outgoingSubTab === 'expired'}
+          onClick={() => { setActiveTab('outgoing'); setOutgoingSubTab('expired') }}
+          label="Expired"
+          count={`(${outgoingFiltered.expired.all.length})`}
+          subLabel=""
+          isActiveCard={false}
         />
       </div>
 
-      {activeTab === 'outgoing' && (
-        <div className="flex gap-1 border-b border-border pb-2">
-          <SubTabButton
-            active={outgoingSubTab === 'active'}
-            onClick={() => setOutgoingSubTab('active')}
-            label="Active"
-            count={outgoingFiltered.active.all.length}
-          />
-          <SubTabButton
-            active={outgoingSubTab === 'expired'}
-            onClick={() => setOutgoingSubTab('expired')}
-            label="Expired"
-            count={outgoingFiltered.expired.all.length}
-            variant="warning"
-          />
+      {activeTab === 'outgoing' && !isApproved && (
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
+          <ShieldAlert className="h-4 w-4 text-amber-500" />
+          <p className="text-xs text-amber-500">Approval required to create outgoing delegations</p>
         </div>
       )}
 
@@ -555,6 +639,10 @@ export function ActiveDelegations({ tokenMint }: ActiveDelegationsProps) {
       ) : (
         renderIncomingContent()
       )}
+      
+      <div className="flex justify-end">
+        <CreateDelegationDialog tokenMint={tokenMint} disabled={!isApproved} />
+      </div>
     </div>
   )
 }

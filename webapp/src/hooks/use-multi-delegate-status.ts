@@ -3,7 +3,8 @@ import { useWalletUi } from '@wallet-ui/react'
 import { createSolanaRpc, address, type Address } from 'gill'
 import { TOKEN_PROGRAM_ADDRESS, TOKEN_2022_PROGRAM_ADDRESS } from 'gill/programs/token'
 import { getMultiDelegatePDA, fetchMaybeMultiDelegate } from '@multidelegator/client'
-import type { ClusterWithUrl, TokenAccountEntry } from '@/lib/types'
+import { useClusterConfig } from '@/hooks/use-cluster-config'
+import type { TokenAccountEntry } from '@/lib/types'
 
 const TOKEN_PROGRAMS: Address[] = [TOKEN_PROGRAM_ADDRESS, TOKEN_2022_PROGRAM_ADDRESS]
 
@@ -29,7 +30,7 @@ export interface MultiDelegateStatus {
  */
 export function useMultiDelegateStatus(tokenMint: string | null) {
   const { account, cluster } = useWalletUi()
-  const clusterConfig = cluster as unknown as ClusterWithUrl
+  const clusterConfig = useClusterConfig()
   const queryClient = useQueryClient()
 
   const query = useQuery({

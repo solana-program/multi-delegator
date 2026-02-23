@@ -1,3 +1,4 @@
+use codama::CodamaErrors;
 use pinocchio::error::ProgramError;
 use thiserror::Error;
 
@@ -83,7 +84,7 @@ impl TryFrom<u32> for MultiDelegatorError {
     }
 }
 
-#[derive(Debug, Copy, Clone, Error)]
+#[derive(Debug, Copy, Clone, Error, CodamaErrors)]
 pub enum MultiDelegatorError {
     // Generic errors
     // Starts with 100

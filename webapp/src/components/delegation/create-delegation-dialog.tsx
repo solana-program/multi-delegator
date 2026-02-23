@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Coins, RefreshCw, Plus, ArrowLeft } from 'lucide-react'
 import {
   Dialog,
@@ -14,6 +14,8 @@ import { Label } from '@/components/ui/label'
 import { useMultiDelegatorMutations } from '@/hooks/use-multi-delegator'
 import { DELEGATION_KINDS, type DelegationKindId } from '@multidelegator/client'
 import { cn, USDC_MULTIPLIER, SECONDS_PER_DAY } from '@/lib/utils'
+import { getBlockTimestamp } from '@/hooks/use-time-travel'
+import { useClusterConfig } from '@/hooks/use-cluster-config'
 
 interface CreateDelegationDialogProps {
   tokenMint: string
@@ -35,14 +37,14 @@ function KindCard({ kind, selected, onClick }: KindCardProps) {
       onClick={onClick}
       className={cn(
         'flex flex-col items-center p-4 rounded-lg border-2 transition-all duration-200',
-        'hover:border-blue-500/50',
+        'hover:border-emerald-500/50',
         selected
-          ? 'border-blue-500 bg-blue-500/10'
+          ? 'border-emerald-500 bg-emerald-500/10'
           : 'border-border bg-card hover:bg-accent/50'
       )}
     >
-      <Icon className={cn('h-8 w-8 mb-2', selected ? 'text-blue-500' : 'text-muted-foreground')} />
-      <span className={cn('font-medium', selected ? 'text-blue-500' : 'text-foreground')}>
+      <Icon className={cn('h-8 w-8 mb-2', selected ? 'text-emerald-400' : 'text-muted-foreground')} />
+      <span className={cn('font-medium', selected ? 'text-emerald-400' : 'text-foreground')}>
         {config.label}
       </span>
       <span className="text-xs text-muted-foreground text-center mt-1">{config.description}</span>
@@ -63,6 +65,16 @@ export function CreateDelegationDialog({ tokenMint, disabled }: CreateDelegation
   const [periodDays, setPeriodDays] = useState('')
 
   const { createFixedDelegation, createRecurringDelegation } = useMultiDelegatorMutations()
+  const { url: rpcUrl } = useClusterConfig()
+  const [blockTime, setBlockTime] = useState<number | undefined>()
+
+  useEffect(() => {
+    if (open) {
+      getBlockTimestamp(rpcUrl).then(setBlockTime).catch(() => {})
+    }
+  }, [rpcUrl, open])
+
+  const blockDate = blockTime ? new Date(blockTime * 1000) : new Date()
 
   const resetForm = () => {
     setDelegatee('')
@@ -101,6 +113,7 @@ export function CreateDelegationDialog({ tokenMint, disabled }: CreateDelegation
     const nonce = generateNonce()
     const expiryDateTime = new Date(`${expiryDate}T${expiryHour.padStart(2, '0')}:00:00`)
     const expiryTimestamp = Math.floor(expiryDateTime.getTime() / 1000)
+    if (Number.isNaN(expiryTimestamp)) return
     const amountInSmallestUnits = BigInt(Math.round(Number(amount) * USDC_MULTIPLIER))
 
     if (selectedKind === 'fixed') {
@@ -144,11 +157,12 @@ export function CreateDelegationDialog({ tokenMint, disabled }: CreateDelegation
   const isExpiryValid = () => {
     if (!expiryDate) return false
     const expiryDateTime = new Date(`${expiryDate}T${expiryHour.padStart(2, '0')}:00:00`)
-    return expiryDateTime > new Date()
+    return expiryDateTime > blockDate
   }
 
   const isFormValid =
-    delegatee.length > 0 &&
+    delegatee.length >= 32 &&
+    delegatee.length <= 44 &&
     amount.length > 0 &&
     Number(amount) > 0 &&
     expiryDate.length > 0 &&
@@ -158,8 +172,8 @@ export function CreateDelegationDialog({ tokenMint, disabled }: CreateDelegation
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button disabled={disabled} className="gap-2">
-          <Plus className="h-4 w-4" />
+        <Button disabled={disabled} className="gap-2 rounded-full px-6 h-11 bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_20px_rgba(16,185,129,0.5)] transition-all hover:shadow-[0_0_25px_rgba(16,185,129,0.7)] border border-emerald-500/50">
+          <Plus className="h-5 w-5" />
           Create Delegation
         </Button>
       </DialogTrigger>
@@ -172,8 +186,8 @@ export function CreateDelegationDialog({ tokenMint, disabled }: CreateDelegation
 
         {step === 'kind' ? (
           <>
-            <p className="text-sm text-muted-foreground mb-4">
-              Choose the type of delegation you want to create:
+            <p className="text-xs font-medium uppercase tracking-wider text-emerald-400 mb-4">
+              Choose Delegation Type
             </p>
             <div className="grid grid-cols-2 gap-4">
               <KindCard
@@ -188,7 +202,7 @@ export function CreateDelegationDialog({ tokenMint, disabled }: CreateDelegation
               />
             </div>
             <DialogFooter className="mt-6">
-              <Button onClick={handleContinue} className="w-full">
+              <Button onClick={handleContinue} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white">
                 Continue
               </Button>
             </DialogFooter>
@@ -250,7 +264,7 @@ export function CreateDelegationDialog({ tokenMint, disabled }: CreateDelegation
                     type="date"
                     value={expiryDate}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setExpiryDate(e.target.value)}
-                    min={new Date().toISOString().slice(0, 10)}
+                    min={blockDate.toLocaleDateString('en-CA')}
                     className="flex-1"
                   />
                   <select
@@ -285,7 +299,7 @@ export function CreateDelegationDialog({ tokenMint, disabled }: CreateDelegation
               <Button
                 onClick={handleSubmit}
                 disabled={isPending || !isFormValid}
-                className="flex-1"
+                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white"
               >
                 {isPending ? 'Creating...' : 'Create Delegation'}
               </Button>

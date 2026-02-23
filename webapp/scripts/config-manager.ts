@@ -1,8 +1,10 @@
 import { readFile, writeFile } from 'fs/promises'
 import { existsSync } from 'fs'
-import { join } from 'path'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const CONFIG_PATH = join(import.meta.dir, '../config.json')
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const CONFIG_PATH = join(__dirname, '../config.json')
 
 export interface TokenConfig {
   symbol: string

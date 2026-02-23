@@ -5,6 +5,11 @@
   "workspaces": [
     "clients/*"
   ],
+  "pnpm": {
+    "patchedDependencies": {
+      "@wallet-standard/react-core@1.0.1": "patches/@wallet-standard__react-core@1.0.1.patch"
+    }
+  },
   "scripts": {
     "generate": "codama run js rust"
   },
