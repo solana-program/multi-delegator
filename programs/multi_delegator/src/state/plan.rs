@@ -41,4 +41,27 @@ impl Plan {
         }
         Ok(unsafe { &mut *transmute::<*mut u8, *mut Self>(bytes.as_mut_ptr()) })
     }
+
+    /// Check that the caller is authorized to pull from this plan.
+    /// The caller must be the plan owner or listed in the pullers array.
+    pub fn can_pull(&self, caller: &Address) -> Result<(), ProgramError> {
+        if *caller == self.owner {
+            return Ok(());
+        }
+        if self.data.pullers.contains(caller) {
+            return Ok(());
+        }
+        Err(MultiDelegatorError::Unauthorized.into())
+    }
+
+    /// Validate that the receiver owner is an allowed destination.
+    /// If no destinations are configured (all zero), any receiver is valid.
+    pub fn check_destination(&self, receiver_owner: &Address) -> Result<(), ProgramError> {
+        let zero = Address::default();
+        let has_destinations = self.data.destinations.iter().any(|d| *d != zero);
+        if has_destinations && !self.data.destinations.contains(receiver_owner) {
+            return Err(MultiDelegatorError::UnauthorizedDestination.into());
+        }
+        Ok(())
+    }
 }

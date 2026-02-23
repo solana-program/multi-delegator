@@ -35,7 +35,7 @@ use crate::{
     instructions::{
         close_multidelegate, create_fixed_delegation, create_plan, create_recurring_delegation,
         delete_plan, initialize_multidelegate, revoke_delegation, transfer_fixed_delegation,
-        transfer_recurring_delegation, update_plan,
+        transfer_recurring_delegation, transfer_subscription, update_plan,
     },
     state::common::PlanStatus,
     tests::{
@@ -846,5 +846,173 @@ impl<'a> DeletePlan<'a> {
         };
 
         build_and_send_transaction(self.litesvm, &[self.owner], &self.owner.pubkey(), &ix)
+    }
+}
+
+pub struct CreateSubscription<'a> {
+    litesvm: &'a mut LiteSVM,
+    plan_pda: Pubkey,
+    subscriber: Pubkey,
+    period_start_ts: i64,
+    amount_pulled: u64,
+    revoked_ts: i64,
+}
+
+impl<'a> CreateSubscription<'a> {
+    pub fn new(
+        litesvm: &'a mut LiteSVM,
+        plan_pda: Pubkey,
+        subscriber: Pubkey,
+        period_start_ts: i64,
+    ) -> Self {
+        Self {
+            litesvm,
+            plan_pda,
+            subscriber,
+            period_start_ts,
+            amount_pulled: 0,
+            revoked_ts: 0,
+        }
+    }
+
+    pub fn amount_pulled(mut self, amount_pulled: u64) -> Self {
+        self.amount_pulled = amount_pulled;
+        self
+    }
+
+    pub fn revoked_ts(mut self, revoked_ts: i64) -> Self {
+        self.revoked_ts = revoked_ts;
+        self
+    }
+
+    pub fn execute(self) -> Pubkey {
+        use crate::{
+            state::{common::AccountDiscriminator, header::CURRENT_VERSION},
+            tests::pda::get_subscription_pda,
+            Header, SubscriptionDelegation,
+        };
+
+        let (subscription_pda, bump) = get_subscription_pda(&self.plan_pda, &self.subscriber);
+
+        let subscription = SubscriptionDelegation {
+            header: Header {
+                discriminator: AccountDiscriminator::SubscriptionDelegation as u8,
+                version: CURRENT_VERSION,
+                bump,
+                delegator: self.subscriber.to_bytes().into(),
+                delegatee: self.plan_pda.to_bytes().into(),
+                payer: self.subscriber.to_bytes().into(),
+            },
+            amount_pulled_in_period: self.amount_pulled,
+            current_period_start_ts: self.period_start_ts,
+            revoked_ts: self.revoked_ts,
+        };
+
+        let data = unsafe {
+            std::slice::from_raw_parts(
+                &subscription as *const SubscriptionDelegation as *const u8,
+                SubscriptionDelegation::LEN,
+            )
+        };
+
+        let lamports = self.litesvm.minimum_balance_for_rent_exemption(data.len());
+        self.litesvm
+            .set_account(
+                subscription_pda,
+                Account {
+                    lamports,
+                    data: data.to_vec(),
+                    owner: PROGRAM_ID,
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+            .unwrap();
+
+        subscription_pda
+    }
+}
+
+pub struct TransferSubscription<'a> {
+    litesvm: &'a mut LiteSVM,
+    caller: &'a Keypair,
+    delegator: Pubkey,
+    mint: Pubkey,
+    subscription_pda: Pubkey,
+    plan_pda: Pubkey,
+    amount: u64,
+    receiver: Option<Pubkey>,
+}
+
+impl<'a> TransferSubscription<'a> {
+    pub fn new(
+        litesvm: &'a mut LiteSVM,
+        caller: &'a Keypair,
+        delegator: Pubkey,
+        mint: Pubkey,
+        subscription_pda: Pubkey,
+        plan_pda: Pubkey,
+    ) -> Self {
+        Self {
+            litesvm,
+            caller,
+            delegator,
+            mint,
+            subscription_pda,
+            plan_pda,
+            amount: 0,
+            receiver: None,
+        }
+    }
+
+    pub fn amount(mut self, amount: u64) -> Self {
+        self.amount = amount;
+        self
+    }
+
+    pub fn to(mut self, receiver: Pubkey) -> Self {
+        self.receiver = Some(receiver);
+        self
+    }
+
+    #[allow(clippy::result_large_err)]
+    pub fn execute(self) -> TransactionResult {
+        let token_program = self.litesvm.get_account(&self.mint).unwrap().owner;
+        let (multi_delegate_pda, _) = get_multidelegate_pda(&self.delegator, &self.mint);
+        let delegator_ata = get_associated_token_address_with_program_id(
+            &self.delegator,
+            &self.mint,
+            &token_program,
+        );
+
+        let receiver_ata = self.receiver.unwrap_or_else(|| {
+            get_associated_token_address_with_program_id(
+                &self.caller.pubkey(),
+                &self.mint,
+                &token_program,
+            )
+        });
+
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: vec![
+                AccountMeta::new(self.subscription_pda, false),
+                AccountMeta::new_readonly(self.plan_pda, false),
+                AccountMeta::new_readonly(multi_delegate_pda, false),
+                AccountMeta::new(delegator_ata, false),
+                AccountMeta::new(receiver_ata, false),
+                AccountMeta::new_readonly(self.caller.pubkey(), true),
+                AccountMeta::new_readonly(token_program, false),
+            ],
+            data: [
+                vec![*transfer_subscription::DISCRIMINATOR],
+                self.amount.to_le_bytes().to_vec(),
+                self.delegator.to_bytes().to_vec(),
+                self.mint.to_bytes().to_vec(),
+            ]
+            .concat(),
+        };
+
+        build_and_send_transaction(self.litesvm, &[self.caller], &self.caller.pubkey(), &ix)
     }
 }

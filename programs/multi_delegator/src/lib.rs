@@ -47,6 +47,9 @@ fn process_instruction(
         MultiDelegatorInstruction::CreatePlan(data) => create_plan::process(accounts, &data),
         MultiDelegatorInstruction::UpdatePlan(data) => update_plan::process(accounts, &data),
         MultiDelegatorInstruction::DeletePlan => delete_plan::process(accounts),
+        MultiDelegatorInstruction::TransferSubscription(data) => {
+            transfer_subscription::process(accounts, &data)
+        }
         MultiDelegatorInstruction::EmitEvent => emit_event::process(program_id, accounts),
     }
 }

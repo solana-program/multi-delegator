@@ -12,6 +12,7 @@ pub mod initialize_multidelegate;
 pub mod revoke_delegation;
 pub mod transfer_fixed_delegation;
 pub mod transfer_recurring_delegation;
+pub mod transfer_subscription;
 
 pub use helpers::*;
 
@@ -212,6 +213,31 @@ pub enum MultiDelegatorInstruction {
     #[codama(account(name = "plan_pda", writable, docs = "The plan PDA being deleted"))]
     DeletePlan = 9,
 
+    #[codama(account(
+        name = "subscription_pda",
+        writable,
+        docs = "The subscription delegation PDA"
+    ))]
+    #[codama(account(name = "plan_pda", docs = "The plan PDA"))]
+    #[codama(account(name = "multi_delegate", docs = "The multi delegate PDA"))]
+    #[codama(account(
+        name = "delegator_ata",
+        writable,
+        docs = "The delegator's ATA to transfer from"
+    ))]
+    #[codama(account(
+        name = "receiver_ata",
+        writable,
+        docs = "The receiver's ATA to transfer to"
+    ))]
+    #[codama(account(
+        name = "caller",
+        signer,
+        docs = "The authorized puller (plan owner or whitelisted)"
+    ))]
+    #[codama(account(name = "token_program", docs = "Token program"))]
+    TransferSubscription(#[codama(name = "transfer_data")] TransferData) = 10,
+
     #[codama(account(name = "event_authority", signer, docs = "The event authority PDA"))]
     EmitEvent = 228,
 }
@@ -253,6 +279,10 @@ impl MultiDelegatorInstruction {
                 Ok(Self::UpdatePlan(loaded.clone()))
             }
             delete_plan::DISCRIMINATOR => Ok(Self::DeletePlan),
+            transfer_subscription::DISCRIMINATOR => {
+                let loaded = TransferData::load(rest)?;
+                Ok(Self::TransferSubscription(loaded.clone()))
+            }
             &EMIT_EVENT_IX_DISC => Ok(Self::EmitEvent),
             _ => Err(MultiDelegatorError::InvalidInstruction.into()),
         }
@@ -272,6 +302,7 @@ impl fmt::Display for MultiDelegatorInstruction {
             Self::CreatePlan(_) => write!(f, "create_plan"),
             Self::UpdatePlan(_) => write!(f, "update_plan"),
             Self::DeletePlan => write!(f, "delete_plan"),
+            Self::TransferSubscription(_) => write!(f, "transfer_subscription"),
             Self::EmitEvent => write!(f, "emit_event"),
         }
     }

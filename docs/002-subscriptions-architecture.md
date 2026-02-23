@@ -140,7 +140,7 @@ ADR-001 provides the core delegation infrastructure. Plans add a subscription mo
 | **Term Mutability** | Per delegation | None (immutable after creation) |
 | **Discoverability** | Manual PDA sharing | Plans can be discovered/marketplace |
 | **Use Cases** | P2P, custom, one-off | Subscription services, SaaS, platforms |
-| **Pull Authorization** | N/A (delegatee-only) | Owner + configurable pullers array |
+| **Pull Authorization** | Delegatee-only (`transfer_fixed`/`transfer_recurring`) | Owner + configurable pullers array (`transfer_subscription`) |
 | **Cancellability** | Not implemented (add later) | Delegator can revoke, Plan can sunset |
 
 ### Integration With ADR-001
@@ -187,7 +187,8 @@ The Plan serves as a **source of truth** for terms. When a delegator subscribes,
 | `transfer_fixed` instruction | ✓ Reads from Delegation | ✓ Reads from Delegation (same) |
 | `transfer_recurring` instruction | ✓ Reads from Delegation | ✓ Reads from Delegation (same) |
 | **NEW** | - | `Plan` PDA (source of terms) |
-| **NEW** | - | `subscribe` instruction (copies terms to Delegation) |
+| **NEW** | - | `subscribe` instruction (creates SubscriptionDelegation) |
+| **NEW** | - | `transfer_subscription` instruction (pull with Plan validation) |
 
 **Seeded Separation for Coexistence:**
 - **Direct Delegations**: Seeds `["delegation", multi_delegate, delegator, delegatee, nonce]`
@@ -214,7 +215,7 @@ The Plan serves as a **source of truth** for terms. When a delegator subscribes,
 
 **Flows Remain Available:**
 - All ADR-001 instructions (`initialize_multidelegate`, `create_fixed_delegation`, `create_recurring_delegation`) continue to work unchanged
-- New ADR-002 instructions (`create_plan`, `update_plan`, `delete_plan`, `subscribe`, `pull`) add subscription capability
+- New ADR-002 instructions (`create_plan`, `update_plan`, `delete_plan`, `subscribe`, `transfer_subscription`) add subscription capability
 - Direct delegations and subscriptions can be created and withdrawn independently
 - Transfer validation code is shared and identical for both models
 
@@ -252,6 +253,10 @@ Plans are always recurring; there is no one-time variant.
 - If all 4 puller slots are zero, only the plan owner can pull
 - Up to 4 additional puller addresses can be specified in the `pullers` array
 - Zero-filled entries are ignored
+
+**Destination Whitelist:**
+
+The `destinations` array controls where pulled funds can be sent. If the array is empty (all zeros), funds can be transferred to any wallet. If any addresses are set, the receiver must match one of them (else `UnauthorizedDestination`). Destinations are immutable after plan creation.
 
 ---
 
@@ -363,25 +368,43 @@ Delegator subscribes to a Plan, **copying the Plan's terms to a new Delegation P
 
 ---
 
-## Pull Instruction Design
+### `transfer_subscription` (Discriminator: 10)
 
-**Note:** ADR-002 subscriptions use the same transfer instructions as ADR-001 (`transfer_fixed`, `transfer_recurring`). The only addition is a new `pull` instruction that validates Plan whitelist before delegating to the type-specific transfer.
+Authorized caller (plan owner or whitelisted puller) pulls tokens from a subscriber's account through their SubscriptionDelegation, validated against the Plan's terms.
 
-**Process:**
-1. Load the subscription Delegation PDA
-2. Retrieve the associated Plan PDA
-3. Verify caller is authorized: Plan owner is always authorized, plus any non-zero address in the `pullers[4]` array
-4. Load terms from Delegation PDA (same as ADR-001 direct delegations)
-5. Validate and execute transfer using same logic as ADR-001
+| Account | Type             | Description                                      |
+| ------- | ---------------- | ------------------------------------------------ |
+| 0       | writable         | SubscriptionDelegation PDA                       |
+| 1       |                  | Plan PDA                                         |
+| 2       |                  | MultiDelegate PDA                                |
+| 3       | writable         | Delegator's ATA (source of funds)                |
+| 4       | writable         | Receiver's ATA (destination)                     |
+| 5       | signer           | Caller (plan owner or whitelisted puller)         |
+| 6       |                  | Token program                                    |
+
+**Parameters (TransferData):**
+- `amount: u64` - Amount to transfer
+- `delegator: Address` - Subscriber's public key
+- `mint: Address` - Token mint
+
+**Validation:**
+1. Verify plan account is program-owned (else `PlanClosed`)
+2. Load Plan and verify `mint` matches `transfer_data.mint` (else `MintMismatch`)
+3. Check plan not expired: `end_ts == 0` or `current_ts <= end_ts` (else `PlanExpired`)
+4. Authorize caller: must be plan owner or listed in `pullers` array (else `Unauthorized`)
+5. Validate destination: if plan has non-zero destinations, receiver ATA owner must match one (else `UnauthorizedDestination`); if all destinations are zero, any receiver is valid
+6. Load SubscriptionDelegation and verify `delegatee == plan_pda` (else `SubscriptionPlanMismatch`)
+7. Verify `delegator` matches `transfer_data.delegator` (else `Unauthorized`)
+8. Check subscription not cancelled: `revoked_ts == 0` or `current_ts <= revoked_ts` (else `SubscriptionCancelled`)
+9. Validate recurring transfer: amount within period limit, handle period rollover
+10. Update subscription state (`current_period_start_ts`, `amount_pulled_in_period`)
+11. Execute transfer via MultiDelegate PDA (CPI to Token Program)
 
 **Authorization Logic:**
 - Direct delegations (ADR-001): Only delegatee can call transfer
 - Subscription delegations (ADR-002): Plan owner is always authorized, plus up to 4 additional addresses in `pullers` array
 
-**Key Points:**
-- The `pull` instruction validates puller authorization, then delegates to the same transfer validation as ADR-001
-- Transfer validation reads terms from Delegation PDA (same for both models)
-- No changes to ADR-001's `transfer_fixed` or `transfer_recurring` logic
+**Sunset behavior:** A plan in Sunset status still allows existing subscription pulls. Sunset only prevents new subscriptions (handled in `subscribe` instruction).
 
 ---
 
@@ -416,25 +439,25 @@ sequenceDiagram
     P->>A: Subscribed through MDA
 ```
 
-### Pull Authorization
+### Transfer Subscription (Pull)
 
 ```mermaid
 sequenceDiagram
     participant X as Caller
     participant P as Program
-    participant DA as Delegation PDA
+    participant SD as SubscriptionDelegation PDA
     participant T as TokenProgram
 
-    Note over P: Check caller is owner<br/>or in pullers[4] array
+    Note over P: Check plan not closed/expired<br/>Verify mint match<br/>Check caller is owner<br/>or in pullers[4] array
 
     alt Caller is owner or in pullers
-        X->>P: pull(delegation_pda, amount)
+        X->>P: transfer_subscription(amount, delegator, mint)
         Note over P: Authorization passed
-        P->>DA: Validate Plan terms
+        P->>SD: Validate subscription state<br/>and recurring period limits
         P->>T: Transfer via MDA
         T->>X: Tokens transferred
     else Caller not authorized
-        X->>P: pull(delegation_pda, amount)
+        X->>P: transfer_subscription(amount, delegator, mint)
         Note over P: Authorization failed
         P->>X: Unauthorized error
     end
@@ -451,8 +474,8 @@ sequenceDiagram
     D->>P: revoke(delegation_pda)
     Note over P: Delegation state -> Revoked/Closed
 
-    X->>P: pull(delegation_pda, amount)
-    Note over P: Rejected (not Active)
+    X->>P: transfer_subscription(amount, delegator, mint)
+    Note over P: Rejected (SubscriptionCancelled)
 ```
 
 ### Merchant Sunsets and Deletes Plan
@@ -466,8 +489,8 @@ sequenceDiagram
     M->>P: update_plan(status=Sunset, end_ts=future)
     Note over P: Plan status set to Sunset<br/>(terminal, no further updates allowed)<br/>Requires non-zero end_ts
 
-    X->>P: pull(delegation_pda, amount)
-    Note over P: If plan status == Sunset:<br/>reject new subscriptions<br/>existing subscriptions honored until end_ts
+    X->>P: transfer_subscription(amount, delegator, mint)
+    Note over P: Plan is Sunset:<br/>new subscriptions rejected<br/>existing subscriptions honored until end_ts
 
     Note over M,P: After end_ts passes...
 
@@ -483,12 +506,14 @@ sequenceDiagram
 |--------|------------|
 | Merchant changes terms mid-subscription | `update_plan` only modifies status, end_ts, metadata_uri; core terms (mint, amount, period_hours, destinations, pullers) are immutable |
 | Delegator can't verify terms | Terms stored in immutable Plan PDA; delegator verifies before subscribing |
-| Unauthorized pull on Plans | Owner is always authorized, plus explicit pullers array |
+| Unauthorized pull on Plans | Owner is always authorized, plus explicit pullers array (`Unauthorized`) |
+| Plan closed/deleted before pull | `transfer_subscription` checks plan ownership before loading; returns `PlanClosed` if account is no longer program-owned |
+| Puller redirects funds to unauthorized wallet | `destinations` whitelist is checked at transfer time; receiver ATA owner must match a whitelisted address (`UnauthorizedDestination`). Destinations are immutable after plan creation. |
 | Delegator hijacks subscription | Delegation PDA seeds include plan_pda; can't be recreated |
 | Plan expiration handling | `end_ts` field; 0 means no expiry, otherwise must be in the future at creation. Sunset requires non-zero end_ts (`SunsetRequiresEndTs`) |
 | Unauthorized plan deletion | `delete_plan` requires owner signature and expired end_ts (`PlanNotExpired`). Does not require Sunset status. |
 | Plan with invalid data | Validated: amount>0, period_hours in (0,8760], destinations optional (0-4), end_ts=0 or future |
-| Orphaned Delegation reference | Delegation tracks state; pull instruction checks Plan reference |
+| Orphaned Delegation reference | Delegation tracks state; `transfer_subscription` checks Plan reference |
 | MDA spends without Plan constraint | Pull must validate Plan terms and Delegation constraints |
 
 ---
@@ -536,7 +561,6 @@ This enables incremental rollout (start with direct, add subscriptions later) wi
 
 ## Future Enhancements
 
-- Implement `pull` instruction with puller authorization
 - Plan marketplace/aggregator protocol for discovery
 - Merkle tree for pullers (scale beyond 4 addresses)
 - Event logs for subscription lifecycle (subscribe, renew, expire)

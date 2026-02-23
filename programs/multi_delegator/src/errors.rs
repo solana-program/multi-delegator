@@ -65,7 +65,7 @@ impl TryFrom<u32> for MultiDelegatorError {
             49 => Ok(Self::InvalidSubscriptionPda),
             50 => Ok(Self::NotPlanOwner),
             51 => Ok(Self::SubscriptionPlanMismatch),
-            52 => Ok(Self::InvalidDestination),
+            52 => Ok(Self::UnauthorizedDestination),
             53 => Ok(Self::MintMismatch),
             54 => Ok(Self::InvalidNumDestinations),
             55 => Ok(Self::SubscriptionCancelled),
@@ -80,6 +80,7 @@ impl TryFrom<u32> for MultiDelegatorError {
             64 => Ok(Self::PlanImmutableAfterSunset),
             65 => Ok(Self::SunsetRequiresEndTs),
             66 => Ok(Self::PlanNotExpired),
+            67 => Ok(Self::PlanClosed),
             _ => Err(code),
         }
     }
@@ -192,7 +193,7 @@ pub enum MultiDelegatorError {
     #[error("Subscription does not belong to this plan")]
     SubscriptionPlanMismatch,
     #[error("Destination not in plan whitelist")]
-    InvalidDestination,
+    UnauthorizedDestination,
     #[error("Token mint mismatch")]
     MintMismatch,
     #[error("No valid destinations provided")]
@@ -221,4 +222,6 @@ pub enum MultiDelegatorError {
     SunsetRequiresEndTs,
     #[error("Plan must be expired to delete")]
     PlanNotExpired,
+    #[error("Plan account has been closed")]
+    PlanClosed,
 }
