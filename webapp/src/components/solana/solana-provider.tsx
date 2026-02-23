@@ -7,6 +7,7 @@ import {
   WalletUiClusterDropdown,
   WalletUiDropdown,
 } from '@wallet-ui/react'
+import { WalletSignerProvider } from './use-wallet-ui-signer'
 
 export { WalletUiDropdown as WalletButton, WalletUiClusterDropdown as ClusterButton }
 
@@ -15,5 +16,9 @@ const config = createWalletUiConfig({
 })
 
 export function SolanaProvider({ children }: { children: ReactNode }) {
-  return <WalletUi config={config}>{children}</WalletUi>
+  return (
+    <WalletUi config={config}>
+      <WalletSignerProvider>{children}</WalletSignerProvider>
+    </WalletUi>
+  )
 }
