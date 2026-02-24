@@ -33,7 +33,7 @@ export function AppHeader() {
           <div className="md:hidden fixed inset-x-0 top-[52px] bottom-0 bg-neutral-100/95 dark:bg-neutral-900/95 backdrop-blur-sm">
             <div className="flex flex-col p-4 gap-4 border-t dark:border-neutral-800">
               <ul className="flex flex-col gap-4">
-                {NAV_ITEMS.map(({ label, path, icon: Icon }) => (
+                {NAV_ITEMS.map(({ label, path, icon: Icon, children }) => (
                   <li key={path}>
                     <Link
                       className={`flex items-center gap-3 hover:text-neutral-500 dark:hover:text-white text-lg py-2 ${isActive(path) ? 'text-neutral-500 dark:text-white' : ''}`}
@@ -43,6 +43,17 @@ export function AppHeader() {
                       <Icon className="h-5 w-5" />
                       {label}
                     </Link>
+                    {children?.map((child) => (
+                      <Link
+                        key={child.path}
+                        className={`flex items-center gap-3 ml-8 hover:text-neutral-500 dark:hover:text-white text-sm py-1.5 ${isActive(child.path) ? 'text-neutral-500 dark:text-white' : 'text-gray-500'}`}
+                        to={child.path}
+                        onClick={() => setShowMenu(false)}
+                      >
+                        <child.icon className="h-4 w-4" />
+                        {child.label}
+                      </Link>
+                    ))}
                   </li>
                 ))}
               </ul>

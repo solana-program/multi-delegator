@@ -1,10 +1,18 @@
 import type { ReactNode } from 'react'
-import { getExplorerLink } from 'gill'
-import type { GetExplorerLinkArgs, SolanaClusterMoniker } from 'gill'
+import type { GetExplorerLinkArgs } from 'gill'
 import { Button } from '@/components/ui/button'
 import { AppAlert } from '@/components/app-alert'
 import { useWalletUi } from '@wallet-ui/react'
 import { useClusterVersion } from './use-cluster-version'
+
+const SURFPOOL_STUDIO = 'http://127.0.0.1:18488'
+
+function getSurfpoolLink(link: Record<string, unknown>): string {
+  if ('transaction' in link && link.transaction) return `${SURFPOOL_STUDIO}/transaction/${link.transaction}`
+  if ('address' in link && link.address) return `${SURFPOOL_STUDIO}/account/${link.address}`
+  if ('block' in link && link.block) return `${SURFPOOL_STUDIO}/block/${link.block}`
+  return SURFPOOL_STUDIO
+}
 
 export function ExplorerLink({
   className,
@@ -14,12 +22,9 @@ export function ExplorerLink({
   className?: string
   label: string
 }) {
-  const { cluster } = useWalletUi()
-  // Extract cluster moniker from cluster id (e.g., "solana:devnet" -> "devnet")
-  const clusterMoniker = cluster.id.split(':')[1] as SolanaClusterMoniker
   return (
     <a
-      href={getExplorerLink({ ...link, cluster: clusterMoniker })}
+      href={getSurfpoolLink(link)}
       target="_blank"
       rel="noopener noreferrer"
       className={className ? className : `link font-mono`}

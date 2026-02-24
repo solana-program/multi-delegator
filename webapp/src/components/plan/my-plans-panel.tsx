@@ -1,15 +1,38 @@
-import { useState } from 'react'
-import { ClipboardPen, Plus } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import { ClipboardPen, Plus, RefreshCw } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { PlanCard } from './plan-card'
 import { CreatePlanDialog } from './create-plan-dialog'
 import { useMyPlans } from '@/hooks/use-plans'
+import { useSubscriberCounts } from '@/hooks/use-subscriptions'
+import { useQueryClient } from '@tanstack/react-query'
 
 export function MyPlansPanel() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const { data: plans, isLoading } = useMyPlans()
+  const planAddresses = useMemo(() => plans?.map((p) => p.address) ?? [], [plans])
+  const { data: subCounts } = useSubscriberCounts(planAddresses)
+  const queryClient = useQueryClient()
+  const [spinning, setSpinning] = useState(false)
+  const [expandedAddress, setExpandedAddress] = useState<string | null>(null)
+
+  const handleRefresh = async () => {
+    setSpinning(true)
+    const minSpin = new Promise((r) => setTimeout(r, 600))
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['plans'] }),
+      queryClient.invalidateQueries({ queryKey: ['subscriberCount'] }),
+      minSpin,
+    ])
+    setSpinning(false)
+  }
+  const sortedPlans = useMemo(() => {
+    if (!plans) return []
+    if (!subCounts) return plans
+    return [...plans].sort((a, b) => (subCounts.get(b.address) ?? 0) - (subCounts.get(a.address) ?? 0))
+  }, [plans, subCounts])
 
   if (isLoading) {
     return (
@@ -31,18 +54,28 @@ export function MyPlansPanel() {
             <ClipboardPen className="h-5 w-5 text-emerald-400" />
             <CardTitle>My Plans</CardTitle>
           </div>
-          {hasPlan && (
-            <Badge variant="outline" className="text-emerald-400 border-emerald-400/30">
-              {plans.length}
-            </Badge>
-          )}
+          <div className="flex items-center gap-2">
+            {hasPlan && (
+              <Badge variant="outline" className="text-emerald-400 border-emerald-400/30">
+                {plans.length}
+              </Badge>
+            )}
+            <Button variant="ghost" size="sm" onClick={handleRefresh} disabled={spinning}>
+              <RefreshCw className={`h-4 w-4 ${spinning ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent>
           {hasPlan ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {plans.map((plan) => (
-                <PlanCard key={plan.address} plan={plan} />
+              {sortedPlans.map((plan) => (
+                <PlanCard
+                  key={plan.address}
+                  plan={plan}
+                  isExpanded={expandedAddress === plan.address}
+                  onToggleExpand={() => setExpandedAddress(expandedAddress === plan.address ? null : plan.address)}
+                />
               ))}
             </div>
           ) : (
@@ -51,9 +84,9 @@ export function MyPlansPanel() {
               <p className="text-sm">No plans yet</p>
             </div>
           )}
-          <div className="flex justify-center pt-2">
+          <div className="flex justify-end pt-2">
             <Button
-              className="gap-2 rounded-full px-6 h-12 bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 transition-all hover:shadow-emerald-500/30"
+              className="gap-2 rounded-full px-6 h-11 bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_20px_rgba(16,185,129,0.5)] transition-all hover:shadow-[0_0_25px_rgba(16,185,129,0.7)] border border-emerald-500/50"
               onClick={() => setDialogOpen(true)}
             >
               <Plus className="h-5 w-5" />

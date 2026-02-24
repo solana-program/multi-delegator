@@ -7,6 +7,7 @@ import { Faucet } from '@/routes/faucet'
 import { Delegations } from '@/routes/delegations'
 import { Subscriptions } from '@/routes/subscriptions'
 import { Plans } from '@/routes/plans'
+import { CollectPayments } from '@/routes/collect-payments'
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
           <Route path="/delegations" element={<Delegations />} />
           <Route path="/subscriptions" element={<Subscriptions />} />
           <Route path="/plans" element={<Plans />} />
+          <Route path="/plans/collect" element={<CollectPayments />} />
           <Route path="/faucet" element={<Faucet />} />
           <Route path="*" element={<Dashboard />} />
         </Routes>

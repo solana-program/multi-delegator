@@ -1,7 +1,7 @@
 import { Users, Calendar, ClipboardPen } from 'lucide-react'
 import { Link } from 'react-router'
 import { useDelegations, useIncomingDelegations } from '@/hooks/use-delegations'
-import { useMySubscriptions } from '@/hooks/use-subscriptions'
+import { useMySubscriptions, useSubscriberCounts } from '@/hooks/use-subscriptions'
 import { useMyPlans } from '@/hooks/use-plans'
 import { useMemo } from 'react'
 import { USDC_MULTIPLIER } from '@/lib/utils'
@@ -17,7 +17,7 @@ export function SummaryCards() {
   
   const subsCounts = useMemo(() => {
     if (!subscriptions || subscriptions.length === 0) return { active: 0, totalAmount: 0 }
-    const active = subscriptions.filter((s) => Number(s.subscription.revokedTs) === 0)
+    const active = subscriptions.filter((s) => Number(s.subscription.expiresAtTs) === 0)
     
     let totalAmount = 0
     for (const sub of active) {
@@ -29,10 +29,17 @@ export function SummaryCards() {
     return { active: active.length, totalAmount }
   }, [subscriptions])
 
+  const planAddresses = useMemo(() => (plans ?? []).map((p) => p.address), [plans])
+  const { data: subscriberCounts } = useSubscriberCounts(planAddresses)
+
   const plansCounts = useMemo(() => {
     if (!plans || plans.length === 0) return { active: 0, subs: 0 }
-    return { active: plans.length, subs: 0 } // Subscriber count requires fetching all subscriptions for these plans
-  }, [plans])
+    let subs = 0
+    if (subscriberCounts) {
+      for (const count of subscriberCounts.values()) subs += count
+    }
+    return { active: plans.length, subs }
+  }, [plans, subscriberCounts])
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6 pt-4">

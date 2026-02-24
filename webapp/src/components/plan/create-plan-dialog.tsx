@@ -50,7 +50,7 @@ export function CreatePlanDialog({ open, onOpenChange }: CreatePlanDialogProps) 
     if (open) getBlockTimestamp(rpcUrl).then(setBlockTime).catch(() => {})
   }, [rpcUrl, open])
 
-  const blockDate = blockTime ? new Date(blockTime * 1000) : new Date()
+  const blockTs = blockTime ?? 0
 
   const UNIT_TO_HOURS = { hours: 1, days: 24, weeks: 168, months: 720 } as const
   const periodHours = Number(periodValue) * UNIT_TO_HOURS[periodUnit]
@@ -113,6 +113,12 @@ export function CreatePlanDialog({ open, onOpenChange }: CreatePlanDialogProps) 
     setPeriodUnit(t.periodUnit)
   }
 
+  const endTsComputed = endDate
+    ? Math.floor(new Date(`${endDate}T${endHour.padStart(2, '0')}:00:00`).getTime() / 1000)
+    : 0
+  const minEndTs = blockTs + periodHours * 3600
+  const isEndDateValid = endTsComputed === 0 || endTsComputed > minEndTs
+
   const isFormValid =
     planName.length > 0 &&
     description.length > 0 &&
@@ -120,7 +126,8 @@ export function CreatePlanDialog({ open, onOpenChange }: CreatePlanDialogProps) 
     Number(amount) > 0 &&
     periodHours >= 1 &&
     metadataBytes <= 128 &&
-    usdcMint !== null
+    usdcMint !== null &&
+    isEndDateValid
 
   const handleSubmit = async () => {
     if (!usdcMint) return
@@ -352,7 +359,7 @@ export function CreatePlanDialog({ open, onOpenChange }: CreatePlanDialogProps) 
                   type="date"
                   value={endDate}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEndDate(e.target.value)}
-                  min={blockDate.toLocaleDateString('en-CA')}
+                  min={new Date(minEndTs * 1000).toLocaleDateString('en-CA')}
                   className="flex-1"
                 />
                 <select
@@ -367,6 +374,11 @@ export function CreatePlanDialog({ open, onOpenChange }: CreatePlanDialogProps) 
                   ))}
                 </select>
               </div>
+              {endDate && !isEndDateValid && (
+                <p className="text-xs text-destructive">
+                  End date must be at least one billing period ({periodHours}h) from now
+                </p>
+              )}
               <p className="text-xs text-muted-foreground">Leave empty for no end date (endTs = 0)</p>
             </div>
 

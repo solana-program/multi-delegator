@@ -15,31 +15,18 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from '@/components/ui/dropdown-menu'
 import { ZERO_ADDRESS, PlanStatus } from '@multidelegator/client'
-import { cn, ellipsify, USDC_MULTIPLIER } from '@/lib/utils'
+import { cn, ellipsify, USDC_MULTIPLIER, fmtDate, fmtDateTime, formatPeriod, formatPeriodLabel } from '@/lib/utils'
 import { useMultiDelegatorMutations } from '@/hooks/use-multi-delegator'
+import { useMultiDelegateStatus } from '@/hooks/use-multi-delegate-status'
 import { useTimeTravel } from '@/hooks/use-time-travel'
+import { useWalletUi } from '@wallet-ui/react'
+import { address } from 'gill'
+import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from 'gill/programs/token'
 import type { PlanItem } from '@/hooks/use-plans'
+import { useMySubscriptions, useSubscriberCount } from '@/hooks/use-subscriptions'
 import { PLAN_ICONS, ICON_MAP, parsePlanMeta, type PlanMeta } from '@/lib/plan-constants'
+import { ExplorerLink } from '@/components/cluster/cluster-ui'
 
-function formatPeriod(hours: bigint): string {
-  const h = Number(hours)
-  if (h === 24) return 'daily'
-  if (h === 168) return 'weekly'
-  if (h === 720) return 'monthly'
-  if (h === 8760) return 'yearly'
-  if (h > 24 && h % 24 === 0) return `every ${h / 24} days`
-  return `every ${h} hours`
-}
-
-function formatPeriodLabel(hours: bigint): string {
-  const h = Number(hours)
-  if (h === 24) return '1 Day'
-  if (h === 168) return '1 Week'
-  if (h === 720) return '1 Month'
-  if (h === 8760) return '1 Year'
-  if (h > 24 && h % 24 === 0) return `${h / 24} Days`
-  return `${h} Hours`
-}
 
 function ImmutableField({ label, value }: { label: string; value: string }) {
   return (
@@ -65,7 +52,7 @@ function EditPlanDialog({ plan, meta, open, onOpenChange }: {
   const [blockTime, setBlockTime] = useState<number | undefined>()
 
   useEffect(() => {
-    if (open) getCurrentTimestamp().then(setBlockTime).catch(() => {})
+    if (open) getCurrentTimestamp().then(setBlockTime).catch((err) => console.error('Failed to fetch block timestamp:', err))
   }, [open, getCurrentTimestamp])
 
   const blockDate = blockTime ? new Date(blockTime * 1000) : new Date()
@@ -338,7 +325,7 @@ function DeletePlanDialog({ plan, meta, open, onOpenChange }: {
     if (!open || endTs === 0) return
     getCurrentTimestamp().then((bt) => {
       setCanDelete(bt > endTs)
-    }).catch(() => {})
+    }).catch((err) => console.error('Failed to fetch block timestamp:', err))
   }, [open, endTs, getCurrentTimestamp])
 
   return (
@@ -357,7 +344,7 @@ function DeletePlanDialog({ plan, meta, open, onOpenChange }: {
             {endTs === 0 ? (
               <p>This plan has no expiry. Set an end date via Edit first, then wait for it to expire.</p>
             ) : (
-              <p>This plan expires on {new Date(endTs * 1000).toLocaleString()}. You can delete it after that.</p>
+              <p>This plan expires on {fmtDateTime(endTs)}. You can delete it after that.</p>
             )}
           </div>
         )}
@@ -376,9 +363,179 @@ function DeletePlanDialog({ plan, meta, open, onOpenChange }: {
   )
 }
 
-export function PlanCard({ plan, variant = 'owner' }: { plan: PlanItem; variant?: 'owner' | 'marketplace' }) {
+function SubscribeDialog({ plan, meta, open, onOpenChange }: {
+  plan: PlanItem
+  meta: PlanMeta
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const { subscribe, initMultiDelegate } = useMultiDelegatorMutations()
+  const { isInitialized, isLoading: statusLoading, refetch: refetchStatus } = useMultiDelegateStatus(plan.data.mint)
+  const { account } = useWalletUi()
+  const amount = Number(plan.data.amount) / USDC_MULTIPLIER
+
+  const handleInit = async () => {
+    if (!account?.address) return
+    const mint = address(plan.data.mint)
+    const [userAta] = await findAssociatedTokenPda({
+      mint,
+      owner: address(account.address),
+      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+    })
+    initMultiDelegate.mutate({
+      tokenMint: plan.data.mint,
+      userAta: userAta,
+      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+    }, { onSuccess: () => refetchStatus() })
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="border-emerald-500/30 bg-slate-950">
+        <DialogHeader>
+          <DialogTitle className="text-emerald-400">Subscribe to: {meta.n || 'Unnamed'}</DialogTitle>
+          <DialogDescription>
+            ${amount} / {formatPeriod(plan.data.periodHours)} from merchant {ellipsify(plan.owner, 4)}
+          </DialogDescription>
+        </DialogHeader>
+
+        {statusLoading ? (
+          <div className="text-sm text-muted-foreground animate-pulse py-4 text-center">Checking wallet status...</div>
+        ) : !isInitialized ? (
+          <div className="space-y-3">
+            <div className="text-sm text-amber-400 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
+              Your MultiDelegate account must be initialized for this token before subscribing.
+            </div>
+            <Button
+              onClick={handleInit}
+              disabled={initMultiDelegate.isPending}
+              className="w-full bg-amber-600 hover:bg-amber-500 text-white"
+            >
+              {initMultiDelegate.isPending ? 'Initializing...' : 'Initialize MultiDelegate'}
+            </Button>
+          </div>
+        ) : (
+          <DialogFooter>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button
+              onClick={() => subscribe.mutate({
+                merchant: plan.owner,
+                planId: plan.data.planId,
+                tokenMint: plan.data.mint,
+              }, { onSuccess: () => onOpenChange(false) })}
+              disabled={subscribe.isPending}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white"
+            >
+              {subscribe.isPending ? 'Subscribing...' : 'Subscribe'}
+            </Button>
+          </DialogFooter>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function PlanExpandedDetails({ plan, isExpanded }: { plan: PlanItem; isExpanded: boolean }) {
+  const activeDestinations = plan.data.destinations.filter((d) => d !== ZERO_ADDRESS)
+  const activePullers = plan.data.pullers.filter((p) => p !== ZERO_ADDRESS)
+
+  return (
+    <div
+      className="overflow-hidden transition-all ease-[cubic-bezier(0.4,0,0.2,1)]"
+      style={{
+        maxHeight: isExpanded ? 600 : 0,
+        opacity: isExpanded ? 1 : 0,
+        transitionDuration: isExpanded ? '700ms' : '500ms',
+      }}
+    >
+      <div
+        className="h-px bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent my-5 transition-all duration-1000 ease-out"
+        style={{ width: isExpanded ? '100%' : '0%', opacity: isExpanded ? 1 : 0 }}
+      />
+
+      <div className={cn(
+        'transition-all duration-700 delay-150 ease-out',
+        isExpanded ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0',
+      )}>
+        <p className="text-[11px] font-semibold text-emerald-400/60 uppercase tracking-[0.15em] mb-2.5">Destinations</p>
+        {activeDestinations.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {activeDestinations.map((d) => (
+              <ExplorerLink
+                key={d}
+                address={d}
+                label={ellipsify(d, 6)}
+                className="bg-emerald-500/8 hover:bg-emerald-500/15 border border-emerald-500/20 hover:border-emerald-500/40 px-3 py-1.5 rounded-lg font-mono text-xs text-emerald-300 hover:text-emerald-200 shadow-[0_0_8px_rgba(16,185,129,0)] hover:shadow-[0_0_8px_rgba(16,185,129,0.15)] transition-all duration-300 no-underline"
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500/70 italic pl-1">Any destination (unrestricted)</p>
+        )}
+      </div>
+
+      <div className={cn(
+        'transition-all duration-700 delay-300 ease-out mt-4',
+        isExpanded ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0',
+      )}>
+        <p className="text-[11px] font-semibold text-emerald-400/60 uppercase tracking-[0.15em] mb-2.5">Pullers</p>
+        {activePullers.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {activePullers.map((p) => (
+              <ExplorerLink
+                key={p}
+                address={p}
+                label={ellipsify(p, 6)}
+                className="bg-emerald-500/8 hover:bg-emerald-500/15 border border-emerald-500/20 hover:border-emerald-500/40 px-3 py-1.5 rounded-lg font-mono text-xs text-emerald-300 hover:text-emerald-200 shadow-[0_0_8px_rgba(16,185,129,0)] hover:shadow-[0_0_8px_rgba(16,185,129,0.15)] transition-all duration-300 no-underline"
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500/70 italic pl-1">Owner only</p>
+        )}
+      </div>
+
+      <div className={cn(
+        'transition-all duration-700 delay-[450ms] ease-out mt-4',
+        isExpanded ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0',
+      )}>
+        <p className="text-[11px] font-semibold text-emerald-400/60 uppercase tracking-[0.15em] mb-2.5">On-chain Details</p>
+        <div className="grid grid-cols-1 gap-2.5">
+          <div className="flex items-center justify-between bg-slate-800/40 rounded-lg px-3 py-2 border border-emerald-500/8 hover:border-emerald-500/20 transition-colors">
+            <p className="text-[11px] text-gray-500 uppercase tracking-wider">Plan ID</p>
+            <p className="font-mono text-sm text-white">{Number(plan.data.planId)}</p>
+          </div>
+          <div className="flex items-center justify-between bg-slate-800/40 rounded-lg px-3 py-2 border border-emerald-500/8 hover:border-emerald-500/20 transition-colors">
+            <p className="text-[11px] text-gray-500 uppercase tracking-wider">Token Mint</p>
+            <ExplorerLink
+              address={plan.data.mint}
+              label={ellipsify(plan.data.mint, 4)}
+              className="font-mono text-sm text-emerald-300 hover:text-emerald-200 no-underline"
+            />
+          </div>
+          <div className="flex items-center justify-between bg-slate-800/40 rounded-lg px-3 py-2 border border-emerald-500/8 hover:border-emerald-500/20 transition-colors">
+            <p className="text-[11px] text-gray-500 uppercase tracking-wider">Period</p>
+            <p className="font-mono text-sm text-white">{formatPeriodLabel(plan.data.periodHours)}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function PlanCard({ plan, variant = 'owner', isExpanded = false, onToggleExpand }: { plan: PlanItem; variant?: 'owner' | 'marketplace'; isExpanded?: boolean; onToggleExpand?: () => void }) {
   const [editOpen, setEditOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [subscribeOpen, setSubscribeOpen] = useState(false)
+  const { data: mySubscriptions } = useMySubscriptions()
+  const matchingSub = useMemo(() =>
+    mySubscriptions?.find((s) => s.subscription.header.delegatee === plan.address) ?? null,
+    [mySubscriptions, plan.address],
+  )
+  const isSubscribed = !!matchingSub
+  const subExpiresAtTs = matchingSub ? Number(matchingSub.subscription.expiresAtTs) : 0
+  const isCancelledSub = isSubscribed && subExpiresAtTs > 0
+  const [subDaysLeft, setSubDaysLeft] = useState<number | null>(null)
 
   const meta = useMemo(() => parsePlanMeta(plan.data.metadataUri), [plan.data.metadataUri])
 
@@ -387,9 +544,9 @@ export function PlanCard({ plan, variant = 'owner' }: { plan: PlanItem; variant?
   const period = formatPeriod(plan.data.periodHours)
   const activeDestinations = plan.data.destinations.filter((d) => d !== ZERO_ADDRESS).length
   const activePullers = plan.data.pullers.filter((p) => p !== ZERO_ADDRESS).length
+  const { data: subscriberCount } = useSubscriberCount(variant === 'owner' ? plan.address : null)
   const { getCurrentTimestamp } = useTimeTravel()
   const hasExpiry = Number(plan.data.endTs) > 0
-  const expiryDate = hasExpiry ? new Date(Number(plan.data.endTs) * 1000) : null
   const isSunset = plan.status === PlanStatus.Sunset
   const [planExpired, setIsExpired] = useState(false)
 
@@ -405,8 +562,16 @@ export function PlanCard({ plan, variant = 'owner' }: { plan: PlanItem; variant?
         const remaining = endTs - blockTime
         setSunsetIntensity(remaining <= 0 ? 1 : Math.max(0, Math.min(1, 1 - remaining / totalWindow)))
       }
-    }).catch(() => {})
+    }).catch((err) => console.error('Failed to fetch block timestamp:', err))
   }, [hasExpiry, isSunset, plan.data.endTs, getCurrentTimestamp])
+
+  useEffect(() => {
+    if (!isCancelledSub) return
+    getCurrentTimestamp().then((bt) => {
+      const secsLeft = subExpiresAtTs - bt
+      setSubDaysLeft(secsLeft <= 0 ? 0 : Math.ceil(secsLeft / 86400))
+    }).catch((err) => console.error('Failed to fetch block timestamp:', err))
+  }, [isCancelledSub, subExpiresAtTs, getCurrentTimestamp])
 
   const overlayStyle = planExpired
     ? { background: 'linear-gradient(to bottom, rgba(239, 68, 68, 0.18) 0%, rgba(185, 28, 28, 0.10) 40%, transparent 75%)' }
@@ -431,6 +596,10 @@ export function PlanCard({ plan, variant = 'owner' }: { plan: PlanItem; variant?
         {overlayStyle && <div className="absolute inset-0 pointer-events-none rounded-2xl" style={overlayStyle} />}
         <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/5 to-transparent pointer-events-none" />
         <CardContent className="p-6 space-y-5 relative z-10">
+          <div
+            className={cn(variant === 'owner' && onToggleExpand && 'cursor-pointer')}
+            onClick={variant === 'owner' ? onToggleExpand : undefined}
+          >
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-start gap-3.5 min-w-0">
               <div className="rounded-xl bg-emerald-500/15 p-3 shrink-0 ring-1 ring-emerald-500/20">
@@ -441,12 +610,20 @@ export function PlanCard({ plan, variant = 'owner' }: { plan: PlanItem; variant?
                 <p className="text-sm text-gray-400 truncate mt-0.5">{meta.d || 'No description'}</p>
               </div>
             </div>
-            {isSunset && (
-              <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 shrink-0">
-                <Sunset className="h-3 w-3 mr-1" />
-                Sunset
-              </Badge>
-            )}
+            <div className="flex items-center gap-2 shrink-0">
+              {isSunset && (
+                <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 shrink-0">
+                  <Sunset className="h-3 w-3 mr-1" />
+                  Sunset
+                </Badge>
+              )}
+              {variant === 'owner' && onToggleExpand && (
+                <ChevronDown className={cn(
+                  'h-4 w-4 text-gray-500 transition-transform duration-500 ease-out shrink-0',
+                  isExpanded && 'rotate-180',
+                )} />
+              )}
+            </div>
           </div>
 
           <div>
@@ -459,12 +636,12 @@ export function PlanCard({ plan, variant = 'owner' }: { plan: PlanItem; variant?
                 planExpired ? (
                 <div className="flex items-center gap-1.5 text-sm text-red-300 bg-red-500/10 px-3 py-1 rounded-lg border border-red-500/25">
                   <Clock className="h-3.5 w-3.5 text-red-400" />
-                  <span>Expired {expiryDate!.toLocaleDateString()}</span>
+                  <span>Expired {fmtDate(Number(plan.data.endTs))}</span>
                 </div>
                 ) : (
                 <div className="flex items-center gap-1.5 text-sm text-gray-300 bg-slate-800/60 px-3 py-1 rounded-lg border border-emerald-500/15">
                   <Clock className="h-3.5 w-3.5 text-emerald-400/70" />
-                  <span>Expires {expiryDate!.toLocaleDateString()}</span>
+                  <span>Expires {fmtDate(Number(plan.data.endTs))}</span>
                 </div>
                 )
               ) : (
@@ -478,15 +655,20 @@ export function PlanCard({ plan, variant = 'owner' }: { plan: PlanItem; variant?
 
           {variant === 'owner' && (
             <div className="flex items-center gap-4 text-sm text-gray-400">
+              <span><span className="font-semibold text-emerald-300">{subscriberCount ?? 0}</span> subscriber{subscriberCount !== 1 ? 's' : ''}</span>
+              <span className="text-emerald-800">|</span>
               <span><span className="font-semibold text-emerald-300">{activeDestinations}</span> dest.</span>
               <span className="text-emerald-800">|</span>
               <span><span className="font-semibold text-emerald-300">{activePullers}</span> puller{activePullers !== 1 ? 's' : ''}</span>
             </div>
           )}
+          </div>
+
+          {variant === 'owner' && <PlanExpandedDetails plan={plan} isExpanded={isExpanded} />}
 
           <div className="flex items-center justify-between gap-2 pt-2 border-t border-emerald-500/10">
             <span className="font-mono text-xs text-gray-500 break-all leading-relaxed">{plan.address}</span>
-            {meta.w && (
+            {variant === 'marketplace' && meta.w && (
               <a
                 href={meta.w}
                 target="_blank"
@@ -501,13 +683,24 @@ export function PlanCard({ plan, variant = 'owner' }: { plan: PlanItem; variant?
 
           {variant === 'marketplace' && (
             <div className="flex justify-center pt-2 border-t border-emerald-500/10">
-              <Button
-                size="sm"
-                onClick={() => {}}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white"
-              >
-                Subscribe
-              </Button>
+              {isCancelledSub ? (
+                <Badge variant="outline" className="w-full justify-center text-red-400 border-red-400/30 text-sm h-9">
+                  Cancelled {subDaysLeft !== null && subDaysLeft > 0 ? `\u2014 ${subDaysLeft} days until revoke` : ''}
+                </Badge>
+              ) : isSubscribed ? (
+                <Badge variant="outline" className="w-full justify-center text-amber-400 border-amber-400/30 text-sm h-9">
+                  Already Subscribed
+                </Badge>
+              ) : (
+                <Button
+                  size="sm"
+                  onClick={(e: React.MouseEvent) => { e.stopPropagation(); setSubscribeOpen(true) }}
+                  disabled={isSunset || planExpired}
+                  className="w-full h-9 bg-emerald-600 hover:bg-emerald-500 text-white"
+                >
+                  Subscribe
+                </Button>
+              )}
             </div>
           )}
 
@@ -517,7 +710,7 @@ export function PlanCard({ plan, variant = 'owner' }: { plan: PlanItem; variant?
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setEditOpen(true)}
+                  onClick={(e: React.MouseEvent) => { e.stopPropagation(); setEditOpen(true) }}
                   disabled={isSunset}
                   className="flex-1 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
                 >
@@ -528,7 +721,7 @@ export function PlanCard({ plan, variant = 'owner' }: { plan: PlanItem; variant?
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setDeleteOpen(true)}
+                onClick={(e: React.MouseEvent) => { e.stopPropagation(); setDeleteOpen(true) }}
                 className="flex-1 border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
               >
                 <Trash2 className="h-3.5 w-3.5 mr-1.5" />
@@ -544,6 +737,9 @@ export function PlanCard({ plan, variant = 'owner' }: { plan: PlanItem; variant?
           <EditPlanDialog plan={plan} meta={meta} open={editOpen} onOpenChange={setEditOpen} />
           <DeletePlanDialog plan={plan} meta={meta} open={deleteOpen} onOpenChange={setDeleteOpen} />
         </>
+      )}
+      {variant === 'marketplace' && (
+        <SubscribeDialog plan={plan} meta={meta} open={subscribeOpen} onOpenChange={setSubscribeOpen} />
       )}
     </>
   )

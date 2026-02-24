@@ -15,9 +15,15 @@ import {
   getCreatePlanInstruction,
   getUpdatePlanInstruction,
   getDeletePlanInstruction,
+  getSubscribeInstruction,
+  getCancelSubscriptionInstruction,
+  getTransferSubscriptionInstruction,
   getMultiDelegatePDA,
   getDelegationPDA,
   getPlanPDA,
+  getSubscriptionPDA,
+  getEventAuthorityPDA,
+  MULTI_DELEGATOR_PROGRAM_ADDRESS,
   MAX_PLAN_DESTINATIONS,
   MAX_PLAN_PULLERS,
   ZERO_ADDRESS,
@@ -404,6 +410,203 @@ export function useMultiDelegatorMutations() {
     onError: (error) => toast.onError(error),
   });
 
+  const subscribe = useMutation({
+    mutationFn: async ({
+      merchant,
+      planId,
+      tokenMint,
+    }: {
+      merchant: string;
+      planId: bigint;
+      tokenMint: string;
+    }) => {
+      if (!signer) throw new Error("Wallet not connected");
+
+      const [planPda, planBump] = await getPlanPDA(address(merchant), planId);
+      const [subscriptionPda] = await getSubscriptionPDA(planPda, signer.address);
+      const [multiDelegatePda] = await getMultiDelegatePDA(signer.address, address(tokenMint));
+      const [eventAuthority] = await getEventAuthorityPDA();
+
+      const instruction = getSubscribeInstruction({
+        subscriber: signer,
+        merchant: address(merchant),
+        planPda,
+        subscriptionPda,
+        multiDelegatePda,
+        eventAuthority,
+        selfProgram: address(MULTI_DELEGATOR_PROGRAM_ADDRESS),
+        subscribeData: { planId, planBump },
+      });
+
+      const signature = await signAndSend(instruction, signer);
+      return { signature };
+    },
+    onSuccess: (res) => {
+      toast.onSuccess(res.signature);
+      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
+    },
+    onError: (error) => toast.onError(error),
+  });
+
+  const cancelSubscription = useMutation({
+    mutationFn: async ({
+      merchant,
+      planId,
+      subscriptionPda,
+    }: {
+      merchant: string;
+      planId: bigint;
+      subscriptionPda: string;
+    }) => {
+      if (!signer) throw new Error("Wallet not connected");
+
+      const [planPda, planBump] = await getPlanPDA(address(merchant), planId);
+      const [eventAuthority] = await getEventAuthorityPDA();
+
+      const instruction = getCancelSubscriptionInstruction({
+        subscriber: signer,
+        merchant: address(merchant),
+        planPda,
+        subscriptionPda: address(subscriptionPda),
+        eventAuthority,
+        selfProgram: address(MULTI_DELEGATOR_PROGRAM_ADDRESS),
+        cancelSubscriptionData: { planId, planBump },
+      });
+
+      const signature = await signAndSend(instruction, signer);
+      return { signature };
+    },
+    onSuccess: (res) => {
+      toast.onSuccess(res.signature);
+      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
+    },
+    onError: (error) => toast.onError(error),
+  });
+
+  const revokeSubscription = useMutation({
+    mutationFn: async ({
+      subscriptionPda,
+    }: {
+      subscriptionPda: string;
+    }) => {
+      if (!signer) throw new Error("Wallet not connected");
+
+      const instruction = getRevokeDelegationInstruction({
+        authority: signer,
+        delegationAccount: address(subscriptionPda),
+      });
+
+      const signature = await signAndSend(instruction, signer);
+      return { signature };
+    },
+    onSuccess: (res) => {
+      toast.onSuccess(res.signature);
+      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
+    },
+    onError: (error) => toast.onError(error),
+  });
+
+  const collectSubscriptionPayments = useMutation({
+    mutationFn: async ({
+      planAddress,
+      subscribers,
+      mint,
+      destinations,
+    }: {
+      planAddress: string;
+      subscribers: Array<{ subscriptionAddress: string; delegator: string; amount: bigint }>;
+      mint: string;
+      destinations: string[];
+    }) => {
+      if (!signer) throw new Error("Wallet not connected");
+
+      const mintAddr = address(mint);
+      const planPda = address(planAddress);
+
+      const firstDest = destinations.find((d) => d !== ZERO_ADDRESS);
+      const receiverOwner = firstDest ? address(firstDest) : signer.address;
+      const [receiverAta] = await findAssociatedTokenPda({
+        mint: mintAddr,
+        owner: receiverOwner,
+        tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+      });
+
+      const createAtaIx = getCreateAssociatedTokenIdempotentInstruction({
+        payer: signer,
+        ata: receiverAta,
+        owner: receiverOwner,
+        mint: mintAddr,
+        tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+      });
+
+      const transferIxs = await Promise.all(
+        subscribers.map(async (sub) => {
+          const delegatorAddr = address(sub.delegator);
+          const [multiDelegate] = await getMultiDelegatePDA(delegatorAddr, mintAddr);
+          const [delegatorAta] = await findAssociatedTokenPda({
+            mint: mintAddr,
+            owner: delegatorAddr,
+            tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+          });
+
+          return getTransferSubscriptionInstruction({
+            subscriptionPda: address(sub.subscriptionAddress),
+            planPda,
+            multiDelegate,
+            delegatorAta,
+            receiverAta,
+            caller: signer,
+            tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+            transferData: {
+              amount: sub.amount,
+              delegator: delegatorAddr,
+              mint: mintAddr,
+            },
+          });
+        })
+      );
+
+      const signatures: string[] = [];
+      let collected = 0;
+
+      const FIRST_BATCH_TRANSFERS = 3; // one slot used by ATA creation ix
+      try {
+        const firstBatch = [createAtaIx, ...transferIxs.slice(0, FIRST_BATCH_TRANSFERS)];
+        signatures.push(await signAndSend(firstBatch, signer));
+        collected += Math.min(FIRST_BATCH_TRANSFERS, transferIxs.length);
+      } catch (e) {
+        if (collected === 0) throw e;
+        return { signatures, collected, partial: true };
+      }
+
+      const MAX_TRANSFERS_PER_TX = 4;
+      const firstBatchSize = MAX_TRANSFERS_PER_TX - 1;
+      for (let i = firstBatchSize; i < transferIxs.length; i += MAX_TRANSFERS_PER_TX) {
+        try {
+          const batch = transferIxs.slice(i, i + MAX_TRANSFERS_PER_TX);
+          signatures.push(await signAndSend(batch, signer));
+          collected += batch.length;
+        } catch (err) {
+          console.warn(
+            `Batch failed after collecting ${collected}/${subscribers.length}:`,
+            err instanceof Error ? err.message : err,
+          );
+          return { signatures, collected, partial: true };
+        }
+      }
+
+      return { signatures, collected, partial: false };
+    },
+    onSuccess: (res) => {
+      toast.onSuccess(res.signatures[0]);
+      invalidateWithDelay(queryClient, [
+        ["subscriberCounts"],
+        ["get-token-accounts"],
+      ]);
+    },
+    onError: (error) => toast.onError(error),
+  });
+
   return {
     initMultiDelegate,
     createFixedDelegation,
@@ -414,5 +617,9 @@ export function useMultiDelegatorMutations() {
     createPlan,
     updatePlan,
     deletePlan,
+    subscribe,
+    cancelSubscription,
+    revokeSubscription,
+    collectSubscriptionPayments,
   };
 }

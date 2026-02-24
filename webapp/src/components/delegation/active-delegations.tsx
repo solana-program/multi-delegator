@@ -22,9 +22,9 @@ import { useMultiDelegatorMutations } from '@/hooks/use-multi-delegator'
 import { useGetTokenAccountsQuery } from '@/components/account/account-data-access'
 import { useWalletUi } from '@wallet-ui/react'
 import { address } from 'gill'
-import { useEffect, useMemo, useState } from 'react'
-import { USDC_MULTIPLIER, isExpired, invalidateWithDelay, recurringAvailable } from '@/lib/utils'
-import { useQueryClient } from '@tanstack/react-query'
+import { useMemo, useState } from 'react'
+import { USDC_MULTIPLIER, isExpired, invalidateWithDelay, recurringAvailable, fmtDateTime, fmtDateShort } from '@/lib/utils'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CreateDelegationDialog } from './create-delegation-dialog'
 import type { TokenAccountEntry } from '@/lib/types'
 import { useClusterConfig } from '@/hooks/use-cluster-config'
@@ -47,15 +47,8 @@ function formatAddress(addr: string): string {
   return `${addr.slice(0, ADDRESS_VISIBLE_CHARS)}...${addr.slice(-ADDRESS_VISIBLE_CHARS)}`
 }
 
-function formatDateTime(ts: bigint | number): string {
-  const date = new Date(Number(ts) * 1000)
-  return date.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
+function formatDelegationDateTime(ts: bigint | number): string {
+  return fmtDateTime(Number(ts))
 }
 
 function formatDuration(seconds: bigint | number): string {
@@ -245,10 +238,15 @@ function TransferDelegationButton({ delegation, tokenMint, disabled, blockTime }
 function formatPeriodRange(startTs: bigint | null, periodLengthS: bigint, blockTime?: number): string {
   if (startTs == null) return 'Not started'
   const start = Number(startTs)
-  const end = start + Number(periodLengthS)
-  if (blockTime != null && blockTime >= end) return 'New period (pending pull)'
-  const fmt = (ts: number) => new Date(ts * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-  return `${fmt(start)} - ${fmt(end)}`
+  const period = Number(periodLengthS)
+  const end = start + period
+  if (blockTime != null && blockTime >= end) {
+    const elapsed = Math.floor((blockTime - start) / period)
+    const currentStart = start + elapsed * period
+    const currentEnd = currentStart + period
+    return `${fmtDateShort(currentStart)} - ${fmtDateShort(currentEnd)}`
+  }
+  return `${fmtDateShort(start)} - ${fmtDateShort(end)}`
 }
 
 interface DelegationTableProps {
@@ -299,7 +297,7 @@ function FixedDelegationTable({ delegations, mode, showExpired, tokenMint, block
                       <span className="text-red-400 font-medium">Expired</span>
                     ) : (
                       <div>
-                        <div>{formatDateTime(d.data.expiryTs)}</div>
+                        <div>{formatDelegationDateTime(d.data.expiryTs)}</div>
                         {formatTimeRemaining(d.data.expiryTs, blockTime) && (
                           <div className="text-xs text-blue-400/70 mt-0.5">{formatTimeRemaining(d.data.expiryTs, blockTime)}</div>
                         )}
@@ -359,7 +357,7 @@ function RecurringDelegationTable({ delegations, mode, showExpired, tokenMint, b
                     {formatAmount(available)} USDC
                     <span className="text-xs text-emerald-400/60 ml-1">/ {formatDuration(d.data.periodLengthS)}</span>
                   </TableCell>
-                  <TableCell className="py-5 text-gray-400 text-sm text-center">
+                  <TableCell className="py-5 text-sm text-center font-bold text-white">
                     {formatPeriodRange(d.data.currentPeriodStartTs, d.data.periodLengthS, blockTime)}
                   </TableCell>
                   <TableCell className="py-5 text-gray-300 text-[15px] text-center">
@@ -367,7 +365,7 @@ function RecurringDelegationTable({ delegations, mode, showExpired, tokenMint, b
                       <span className="text-red-400 font-medium">Expired</span>
                     ) : (
                       <div>
-                        <div>{formatDateTime(d.data.expiryTs)}</div>
+                        <div>{formatDelegationDateTime(d.data.expiryTs)}</div>
                         {formatTimeRemaining(d.data.expiryTs, blockTime) && (
                           <div className="text-xs text-blue-400/70 mt-0.5">{formatTimeRemaining(d.data.expiryTs, blockTime)}</div>
                         )}
@@ -454,9 +452,12 @@ function InitPrompt({ tokenMint, onSuccess }: { tokenMint: string; onSuccess?: (
   const { initMultiDelegate } = useMultiDelegatorMutations()
   const queryClient = useQueryClient()
 
+  const walletAddress = account?.address
   const { data: tokenAccounts, isLoading: tokenAccountsLoading } = useGetTokenAccountsQuery({
-    address: address(account?.address ?? ''),
+    address: walletAddress ? address(walletAddress) : address('11111111111111111111111111111111'),
   })
+
+  if (!walletAddress) return null
 
   const userAta = (tokenAccounts as TokenAccountEntry[] | undefined)?.find((entry) => {
     return entry.account?.data?.parsed?.info?.mint === tokenMint
@@ -503,12 +504,12 @@ function InitPrompt({ tokenMint, onSuccess }: { tokenMint: string; onSuccess?: (
 export function ActiveDelegations({ tokenMint, isApproved, onInitSuccess }: ActiveDelegationsProps) {
   const [activeTab, setActiveTab] = useState<TabType>('outgoing')
   const [outgoingSubTab, setOutgoingSubTab] = useState<OutgoingSubTab>('active')
+  const queryClient = useQueryClient()
   const { url: rpcUrl } = useClusterConfig()
-  const [blockTime, setBlockTime] = useState<number | undefined>()
-
-  useEffect(() => {
-    getBlockTimestamp(rpcUrl).then(setBlockTime).catch(() => {})
-  }, [rpcUrl])
+  const { data: blockTime } = useQuery({
+    queryKey: ['blockTime', rpcUrl],
+    queryFn: () => getBlockTimestamp(rpcUrl),
+  })
 
   const outgoing = useDelegations()
   const incoming = useIncomingDelegations()
@@ -546,7 +547,7 @@ export function ActiveDelegations({ tokenMint, isApproved, onInitSuccess }: Acti
   const handleRefresh = async () => {
     setSpinning(true)
     const minSpin = new Promise((r) => setTimeout(r, 600))
-    const refreshBlockTime = getBlockTimestamp(rpcUrl).then(setBlockTime).catch(() => {})
+    const refreshBlockTime = queryClient.invalidateQueries({ queryKey: ['blockTime'] })
     if (activeTab === 'outgoing') {
       await Promise.all([outgoing.refetch(), refreshBlockTime, minSpin])
     } else {

@@ -1,56 +1,226 @@
-import { useMemo } from 'react'
-import { CalendarCheck } from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
+import { CalendarCheck, Trash2, Clock } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog'
 import { useMySubscriptions, type EnrichedSubscription } from '@/hooks/use-subscriptions'
-import { USDC_MULTIPLIER, ellipsify } from '@/lib/utils'
+import { useMultiDelegatorMutations } from '@/hooks/use-multi-delegator'
+import { useTimeTravel } from '@/hooks/use-time-travel'
+import { cn, USDC_MULTIPLIER, ellipsify, fmtDate, fmtDateTime, formatPeriod } from '@/lib/utils'
+import { parsePlanMeta } from '@/lib/plan-constants'
 
-function formatPeriod(hours: bigint): string {
-  const h = Number(hours)
-  if (h === 24) return 'Daily'
-  if (h === 168) return 'Weekly'
-  if (h === 720) return 'Monthly'
-  if (h === 8760) return 'Yearly'
-  if (h > 24 && h % 24 === 0) return `Every ${h / 24} days`
-  return `Every ${h} hours`
+function CancelSubscriptionDialog({ item, open, onOpenChange }: {
+  item: EnrichedSubscription
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const { cancelSubscription } = useMultiDelegatorMutations()
+
+  if (!item.plan) return null
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="border-amber-500/30 bg-slate-950">
+        <DialogHeader>
+          <DialogTitle className="text-amber-400">Unsubscribe</DialogTitle>
+          <DialogDescription>
+            Are you sure you want to unsubscribe? Your subscription remains active until end of current billing period.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Keep Subscription</Button>
+          <Button
+            variant="outline"
+            onClick={() => cancelSubscription.mutate({
+              merchant: item.plan!.owner,
+              planId: item.plan!.data.planId,
+              subscriptionPda: item.address,
+            }, { onSuccess: () => onOpenChange(false) })}
+            disabled={cancelSubscription.isPending}
+            className="border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+          >
+            {cancelSubscription.isPending ? 'Cancelling...' : 'Yes, Unsubscribe'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
-function parsePlanMeta(uri: string): { n?: string; d?: string } {
-  try { return JSON.parse(uri) } catch { return {} }
+function RevokeSubscriptionDialog({ item, open, onOpenChange }: {
+  item: EnrichedSubscription
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const { revokeSubscription } = useMultiDelegatorMutations()
+  const { getCurrentTimestamp } = useTimeTravel()
+  const revokedTs = Number(item.subscription.expiresAtTs)
+  const [canRevoke, setCanRevoke] = useState(false)
+
+  useEffect(() => {
+    if (!open || revokedTs === 0) return
+    getCurrentTimestamp().then((bt) => {
+      setCanRevoke(bt >= revokedTs)
+    }).catch((err) => console.error('Failed to fetch block timestamp:', err))
+  }, [open, revokedTs, getCurrentTimestamp])
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="border-red-500/30 bg-slate-950">
+        <DialogHeader>
+          <DialogTitle className="text-red-400">Delete Subscription</DialogTitle>
+          <DialogDescription>
+            {canRevoke
+              ? 'This subscription has expired. Deleting will close the account and return rent to your wallet.'
+              : 'This subscription cannot be deleted yet.'}
+          </DialogDescription>
+        </DialogHeader>
+        {!canRevoke && (
+          <div className="text-sm text-gray-400 p-3 rounded-lg border border-gray-700 bg-gray-900/50">
+            Expires on {fmtDateTime(revokedTs)}. You can delete after that.
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button
+            variant="destructive"
+            onClick={() => revokeSubscription.mutate({
+              subscriptionPda: item.address,
+            }, { onSuccess: () => onOpenChange(false) })}
+            disabled={!canRevoke || revokeSubscription.isPending}
+          >
+            {revokeSubscription.isPending ? 'Deleting...' : 'Delete Subscription'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
-function SubscriptionRow({ item }: { item: EnrichedSubscription }) {
-  const isActive = Number(item.subscription.revokedTs) === 0
+function SubscriptionCard({ item }: { item: EnrichedSubscription }) {
+  const [cancelOpen, setCancelOpen] = useState(false)
+  const [revokeOpen, setRevokeOpen] = useState(false)
+  const { getCurrentTimestamp } = useTimeTravel()
+  const isActive = Number(item.subscription.expiresAtTs) === 0
+  const isCancelled = !isActive
+  const revokedTs = Number(item.subscription.expiresAtTs)
+  const [isExpired, setIsExpired] = useState(false)
+  const [daysLeft, setDaysLeft] = useState<number | null>(null)
   const meta = useMemo(() => item.plan ? parsePlanMeta(item.plan.data.metadataUri) : {}, [item.plan])
+
+  useEffect(() => {
+    if (!isCancelled) return
+    getCurrentTimestamp().then((bt) => {
+      if (bt >= revokedTs) {
+        setIsExpired(true)
+        setDaysLeft(0)
+      } else {
+        setIsExpired(false)
+        const secsLeft = revokedTs - bt
+        setDaysLeft(Math.ceil(secsLeft / 86400))
+      }
+    }).catch((err) => console.error('Failed to fetch block timestamp:', err))
+  }, [isCancelled, revokedTs, getCurrentTimestamp])
+
+  const planDeleted = !item.plan
   const planName = meta.n || 'Unknown Plan'
   const amount = item.plan ? Number(item.plan.data.amount) / USDC_MULTIPLIER : null
   const period = item.plan ? formatPeriod(item.plan.data.periodHours) : null
   const pulled = Number(item.subscription.amountPulledInPeriod) / USDC_MULTIPLIER
 
   return (
-    <div className="flex items-center justify-between gap-4 rounded-lg border border-amber-500/10 bg-amber-950/20 px-4 py-3">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <p className="font-medium truncate">{planName}</p>
-          {isActive ? (
-            <Badge variant="outline" className="text-emerald-400 border-emerald-400/30 text-xs">Active</Badge>
+    <>
+      <Card className={cn(
+        'rounded-xl relative overflow-hidden transition-all duration-300',
+        planDeleted
+          ? 'border-red-500/15 bg-gradient-to-br from-red-950/30 via-gray-900/20 to-gray-950/60 opacity-80'
+          : isCancelled
+            ? 'border-gray-500/20 bg-gradient-to-br from-gray-950/60 via-gray-900/20 to-gray-950/60 opacity-70'
+            : 'border-teal-500/25 bg-gradient-to-br from-slate-900/80 via-teal-900/15 to-slate-900/80 hover:border-teal-500/45',
+      )}>
+        {!isCancelled && !planDeleted && <div className="absolute inset-0 bg-gradient-to-r from-teal-500/5 to-transparent pointer-events-none" />}
+        <CardContent className="p-4 space-y-3 relative z-10">
+          <div className="flex items-center justify-between gap-2">
+            <p className="font-semibold text-white truncate">{planName}</p>
+            {planDeleted ? (
+              <Badge variant="outline" className="text-red-400 border-red-400/30 text-xs shrink-0">Plan Deleted</Badge>
+            ) : isActive ? (
+              <Badge variant="outline" className="text-teal-400 border-teal-400/30 text-xs shrink-0">Active</Badge>
+            ) : (
+              <Badge variant="outline" className="text-red-400 border-red-400/30 text-xs shrink-0">Cancelled</Badge>
+            )}
+          </div>
+
+          <div className="flex items-baseline gap-1.5">
+            {amount !== null && period && (
+              <>
+                <span className="text-xl font-bold text-teal-400">${amount}</span>
+                <span className="text-sm text-teal-400/60">/{period.toLowerCase()}</span>
+              </>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-400">
+            <span className="font-mono">{ellipsify(item.address, 4)}</span>
+            <span className="text-teal-800">|</span>
+            <span>Pulled: ${pulled.toFixed(2)}</span>
+            {isCancelled && !planDeleted && (
+              <>
+                <span className="text-teal-800">|</span>
+                <span className="flex items-center gap-1 text-red-400">
+                  <Clock className="h-3 w-3" />
+                  Expires: {fmtDate(revokedTs)}
+                </span>
+              </>
+            )}
+          </div>
+
+          {planDeleted ? (
+            <div className="pt-2 border-t border-red-500/10">
+              <p className="text-xs text-gray-500 text-center py-1">Pending program update to reclaim rent</p>
+            </div>
           ) : (
-            <Badge variant="outline" className="text-red-400 border-red-400/30 text-xs">Cancelled</Badge>
+            <div className="pt-2 border-t border-teal-500/10">
+              {isActive ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCancelOpen(true)}
+                  className="w-full border-amber-500/30 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
+                >
+                  Unsubscribe
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setRevokeOpen(true)}
+                  disabled={!isExpired}
+                  className={cn(
+                    'w-full',
+                    isExpired
+                      ? 'border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300'
+                      : 'border-gray-600/30 text-gray-500 cursor-not-allowed',
+                  )}
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                  {isExpired ? 'Delete' : `${daysLeft ?? '?'} days left`}
+                </Button>
+              )}
+            </div>
           )}
-        </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground mt-1">
-          <span className="font-mono">{ellipsify(item.address, 4)}</span>
-          {amount !== null && period && (
-            <>
-              <span className="text-border">|</span>
-              <span>${amount} / {period.toLowerCase()}</span>
-            </>
-          )}
-          <span className="text-border">|</span>
-          <span>Pulled: ${pulled.toFixed(2)}</span>
-        </div>
-      </div>
-    </div>
+        </CardContent>
+      </Card>
+      {item.plan && (
+        <>
+          <CancelSubscriptionDialog item={item} open={cancelOpen} onOpenChange={setCancelOpen} />
+          <RevokeSubscriptionDialog item={item} open={revokeOpen} onOpenChange={setRevokeOpen} />
+        </>
+      )}
+    </>
   )
 }
 
@@ -59,7 +229,7 @@ export function MySubscriptionsPanel() {
 
   if (isLoading) {
     return (
-      <Card className="border-amber-500/20 bg-gradient-to-br from-amber-950/40 via-amber-900/20 to-transparent">
+      <Card className="border-teal-500/20 bg-gradient-to-br from-teal-950/40 via-teal-900/20 to-transparent">
         <CardContent className="flex items-center justify-center py-12">
           <div className="animate-pulse text-muted-foreground">Loading subscriptions...</div>
         </CardContent>
@@ -70,15 +240,15 @@ export function MySubscriptionsPanel() {
   const hasSubs = subscriptions && subscriptions.length > 0
 
   return (
-    <Card className="relative overflow-hidden border-amber-500/20 bg-gradient-to-br from-amber-950/40 via-amber-900/20 to-transparent hover:border-amber-500/40 transition-all duration-300">
+    <Card className="relative overflow-hidden border-teal-500/20 bg-gradient-to-br from-teal-950/40 via-teal-900/20 to-transparent hover:border-teal-500/40 transition-all duration-300">
       <CardHeader className="pb-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <CalendarCheck className="h-5 w-5 text-amber-400" />
+            <CalendarCheck className="h-5 w-5 text-teal-400" />
             <CardTitle>My Subscriptions</CardTitle>
           </div>
           {hasSubs && (
-            <Badge variant="outline" className="text-amber-400 border-amber-400/30">
+            <Badge variant="outline" className="text-teal-400 border-teal-400/30">
               {subscriptions.length}
             </Badge>
           )}
@@ -86,9 +256,9 @@ export function MySubscriptionsPanel() {
       </CardHeader>
       <CardContent>
           {hasSubs ? (
-            <div className="space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {subscriptions.map((item) => (
-                <SubscriptionRow key={item.address} item={item} />
+                <SubscriptionCard key={item.address} item={item} />
               ))}
             </div>
           ) : (

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Clock, RotateCcw } from 'lucide-react'
 import { useWalletUi } from '@wallet-ui/react'
 import { Button } from '@/components/ui/button'
@@ -10,6 +10,7 @@ import {
 import { useTimeTravel } from '@/hooks/use-time-travel'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { fmtDate, fmtDateTime } from '@/lib/utils'
 
 const QUICK_JUMPS = [
   { label: '+1h', seconds: 3600 },
@@ -21,16 +22,10 @@ const QUICK_JUMPS = [
 
 const DRIFT_THRESHOLD_SEC = 30
 
+
 export function TimeTravelButton() {
   const { cluster } = useWalletUi()
   const isLocalnet = cluster.id === 'solana:localnet'
-
-  if (!isLocalnet) return null
-
-  return <TimeTravelDialog />
-}
-
-function TimeTravelDialog() {
   const { timeTravel, getCurrentTimestamp } = useTimeTravel()
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
@@ -39,6 +34,8 @@ function TimeTravelDialog() {
   const [date, setDate] = useState('')
   const [hour, setHour] = useState('12')
   const [timeTraveled, setTimeTraveled] = useState(false)
+
+  if (!isLocalnet) return null
 
   const updateDrift = useCallback((blockTime: number) => {
     const wallTime = Math.floor(Date.now() / 1000)
@@ -61,20 +58,46 @@ function TimeTravelDialog() {
     if (open) fetchTime()
   }, [open, fetchTime])
 
-  const handleQuickJump = async (seconds: number) => {
+  const animRef = useRef<number>(0)
+  const dateDisplayRef = useRef<HTMLDivElement>(null)
+  const [animating, setAnimating] = useState(false)
+
+  const handleQuickJump = (seconds: number) => {
     if (!currentTime) return
-    setLoading(true)
-    try {
-      await timeTravel(currentTime + seconds)
-      await fetchTime()
-      queryClient.invalidateQueries()
-      setTimeout(() => queryClient.invalidateQueries(), 500)
-      toast.success('Clock advanced')
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Time travel failed')
-    } finally {
-      setLoading(false)
+    if (animRef.current) cancelAnimationFrame(animRef.current)
+
+    const startTs = currentTime
+    const endTs = currentTime + seconds
+    const duration = 1400
+    const startMs = performance.now()
+    setAnimating(true)
+
+    const step = (now: number) => {
+      const elapsed = now - startMs
+      const t = Math.min(elapsed / duration, 1)
+      const eased = 1 - Math.pow(1 - t, 4)
+      const ts = startTs + (endTs - startTs) * eased
+      const d = new Date(ts * 1000)
+      setDate(d.toLocaleDateString('en-CA'))
+      setHour(d.getHours().toString())
+
+      const speed = 4 * Math.pow(1 - t, 3)
+      const normalizedSpeed = Math.min(speed / 4, 1)
+      const flicker = Math.sin(elapsed * 0.025) * 0.15 * normalizedSpeed
+      const opacity = 0.8 + 0.2 * (1 - normalizedSpeed) + flicker
+      if (dateDisplayRef.current) {
+        dateDisplayRef.current.style.opacity = String(Math.max(0.55, Math.min(1, opacity)))
+      }
+
+      if (t < 1) {
+        animRef.current = requestAnimationFrame(step)
+      } else {
+        if (dateDisplayRef.current) dateDisplayRef.current.style.opacity = '1'
+        setAnimating(false)
+        animRef.current = 0
+      }
     }
+    animRef.current = requestAnimationFrame(step)
   }
 
   const handleCustomJump = async () => {
@@ -105,13 +128,18 @@ function TimeTravelDialog() {
       <DialogTrigger asChild>
         <Button
           variant="outline"
-          size="icon"
-          className={timeTraveled
-            ? 'relative ring-2 ring-green-500/50 shadow-[0_0_12px_rgba(34,197,94,0.4)] animate-[glow_2s_ease-in-out_infinite]'
-            : 'relative'}
+          size="sm"
+          className={`px-2 py-[6px] h-auto gap-1.5 ${timeTraveled
+            ? 'relative ring-2 ring-green-500/50 shadow-[0_0_12px_rgba(34,197,94,0.4)] animate-[glow_3s_ease-in-out_infinite]'
+            : 'relative'}`}
           title="Time Travel (Dev)"
         >
           <Clock className={timeTraveled ? 'h-4 w-4 text-green-400' : 'h-4 w-4 text-muted-foreground'} />
+          {currentTime !== null && (
+            <span className={`text-sm font-semibold ${timeTraveled ? 'text-green-400' : 'text-muted-foreground'}`}>
+              {fmtDate(currentTime)}
+            </span>
+          )}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md border-emerald-500/20 bg-gradient-to-br from-emerald-950/40 via-slate-950 to-slate-950">
@@ -125,7 +153,7 @@ function TimeTravelDialog() {
         <div className="grid gap-4">
           <div className="rounded-md bg-neutral-800 p-3 text-sm font-mono text-center">
             {currentTime !== null
-              ? new Date(currentTime * 1000).toLocaleString()
+              ? fmtDateTime(currentTime)
               : 'Fetching...'}
           </div>
 
@@ -150,18 +178,18 @@ function TimeTravelDialog() {
 
           <div className="grid gap-2">
             <Label className="text-xs font-medium uppercase tracking-wider text-emerald-400">Jump to Date</Label>
-            <div className="flex gap-2">
+            <div ref={dateDisplayRef} className="flex gap-2">
               <Input
                 type="date"
                 value={date}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDate(e.target.value)}
                 min={currentTime ? new Date(currentTime * 1000).toLocaleDateString('en-CA') : undefined}
-                className="flex-1"
+                className={`flex-1 transition-shadow duration-200 ${animating ? 'ring-2 ring-green-500/30 border-green-500/25 shadow-[0_0_8px_rgba(34,197,94,0.15)] text-green-400' : ''}`}
               />
               <select
                 value={hour}
                 onChange={(e) => setHour(e.target.value)}
-                className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                className={`h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-shadow duration-200 ${animating ? 'ring-2 ring-green-500/30 border-green-500/25 shadow-[0_0_8px_rgba(34,197,94,0.15)] text-green-400' : ''}`}
               >
                 {Array.from({ length: 24 }, (_, i) => (
                   <option key={i} value={i.toString()}>
@@ -174,9 +202,12 @@ function TimeTravelDialog() {
               variant="outline"
               disabled={loading || !date}
               onClick={handleCustomJump}
-              className="w-full font-bold text-base h-11 rounded-full border-green-500/30 bg-green-600 hover:bg-green-500 text-white shadow-[0_0_12px_rgba(34,197,94,0.3)]"
+              className={`w-full font-bold text-base h-11 rounded-full border-green-500/30 text-white shadow-[0_0_12px_rgba(34,197,94,0.3)] relative overflow-hidden ${date ? 'bg-transparent' : 'bg-green-600 hover:bg-green-500'}`}
             >
-              Jump
+              {date && (
+                <span className="absolute inset-0 animate-[shimmer_2s_ease-in-out_infinite] bg-[length:200%_100%] bg-gradient-to-r from-green-700 via-green-500 to-green-700" />
+              )}
+              <span className="relative z-10">Jump</span>
             </Button>
           </div>
 
