@@ -51,13 +51,12 @@ impl TryFrom<u32> for MultiDelegatorError {
             302 => Ok(Self::FixedDelegationAmountZero),
             400 => Ok(Self::AmountExceedsPeriodLimit),
             401 => Ok(Self::PeriodNotElapsed),
-            402 => Ok(Self::TransferInvalidKind),
-            403 => Ok(Self::InvalidPeriodLength),
-            404 => Ok(Self::InvalidPayerData),
-            405 => Ok(Self::RecurringDelegationStartTimeInPast),
-            406 => Ok(Self::RecurringDelegationZeroPeriod),
-            407 => Ok(Self::RecurringDelegationStartTimeGreaterThanExpiry),
-            408 => Ok(Self::RecurringDelegationAmountZero),
+            402 => Ok(Self::InvalidPeriodLength),
+            403 => Ok(Self::InvalidPayerData),
+            404 => Ok(Self::RecurringDelegationStartTimeInPast),
+            405 => Ok(Self::RecurringDelegationZeroPeriod),
+            406 => Ok(Self::RecurringDelegationStartTimeGreaterThanExpiry),
+            407 => Ok(Self::RecurringDelegationAmountZero),
             500 => Ok(Self::PlanSunset),
             501 => Ok(Self::PlanExpired),
             502 => Ok(Self::InvalidPlanPda),
@@ -75,6 +74,7 @@ impl TryFrom<u32> for MultiDelegatorError {
             514 => Ok(Self::SunsetRequiresEndTs),
             515 => Ok(Self::PlanNotExpired),
             516 => Ok(Self::PlanClosed),
+            517 => Ok(Self::AlreadySubscribed),
             600 => Ok(Self::InvalidEventAuthority),
             601 => Ok(Self::InvalidEventData),
             602 => Ok(Self::InvalidEventTag),
@@ -168,8 +168,6 @@ pub enum MultiDelegatorError {
     AmountExceedsPeriodLimit = 400,
     #[error("Period has not elapsed yet")]
     PeriodNotElapsed,
-    #[error("Invalid transfer kind")]
-    TransferInvalidKind,
     #[error("Invalid Period length")]
     InvalidPeriodLength,
     #[error("Payer provided does not match delegation")]
@@ -219,6 +217,8 @@ pub enum MultiDelegatorError {
     PlanNotExpired,
     #[error("Plan account has been closed")]
     PlanClosed,
+    #[error("Already subscribed to this plan")]
+    AlreadySubscribed,
 
     // Event related errors
     // Start with 600

@@ -1,9 +1,11 @@
+pub mod cancel_subscription;
 pub mod close_multidelegate;
 pub mod create_fixed_delegation;
 pub use create_fixed_delegation::CreateFixedDelegationData;
 pub mod create_plan;
 pub mod create_recurring_delegation;
 pub mod delete_plan;
+pub mod subscribe;
 pub mod update_plan;
 pub use create_recurring_delegation::CreateRecurringDelegationData;
 pub mod emit_event;
@@ -22,7 +24,9 @@ use codama::CodamaInstructions;
 use pinocchio::error::ProgramError;
 
 use crate::event_engine::EMIT_EVENT_IX_DISC;
+use crate::instructions::cancel_subscription::CancelSubscriptionData;
 use crate::instructions::create_plan::PlanData;
+use crate::instructions::subscribe::SubscribeData;
 use crate::instructions::update_plan::UpdatePlanData;
 use crate::MultiDelegatorError;
 
@@ -238,6 +242,48 @@ pub enum MultiDelegatorInstruction {
     #[codama(account(name = "token_program", docs = "Token program"))]
     TransferSubscription(#[codama(name = "transfer_data")] TransferData) = 10,
 
+    #[codama(account(
+        name = "subscriber",
+        signer,
+        writable,
+        docs = "The subscriber creating the subscription (pays rent)"
+    ))]
+    #[codama(account(name = "merchant", docs = "The merchant who owns the plan"))]
+    #[codama(account(name = "plan_pda", docs = "The plan PDA to subscribe to"))]
+    #[codama(account(
+        name = "subscription_pda",
+        writable,
+        docs = "The subscription PDA being created"
+    ))]
+    #[codama(account(
+        name = "multi_delegate_pda",
+        docs = "The subscriber's MultiDelegate PDA for the plan's mint"
+    ))]
+    #[codama(account(
+        name = "system_program",
+        docs = "The system program",
+        default_value = program("system")
+    ))]
+    #[codama(account(name = "event_authority", docs = "The event authority PDA"))]
+    #[codama(account(name = "self_program", docs = "This program (for self-CPI)"))]
+    Subscribe(#[codama(name = "subscribe_data")] SubscribeData) = 11,
+
+    #[codama(account(
+        name = "subscriber",
+        signer,
+        docs = "The subscriber cancelling the subscription"
+    ))]
+    #[codama(account(name = "merchant", docs = "The merchant who owns the plan"))]
+    #[codama(account(name = "plan_pda", docs = "The plan PDA for the subscription"))]
+    #[codama(account(
+        name = "subscription_pda",
+        writable,
+        docs = "The subscription PDA being cancelled"
+    ))]
+    #[codama(account(name = "event_authority", docs = "The event authority PDA"))]
+    #[codama(account(name = "self_program", docs = "This program (for self-CPI)"))]
+    CancelSubscription(#[codama(name = "cancel_subscription_data")] CancelSubscriptionData) = 12,
+
     #[codama(account(name = "event_authority", signer, docs = "The event authority PDA"))]
     EmitEvent = 228,
 }
@@ -283,6 +329,14 @@ impl MultiDelegatorInstruction {
                 let loaded = TransferData::load(rest)?;
                 Ok(Self::TransferSubscription(loaded.clone()))
             }
+            subscribe::DISCRIMINATOR => {
+                let loaded = SubscribeData::load(rest)?;
+                Ok(Self::Subscribe(loaded.clone()))
+            }
+            cancel_subscription::DISCRIMINATOR => {
+                let loaded = CancelSubscriptionData::load(rest)?;
+                Ok(Self::CancelSubscription(loaded.clone()))
+            }
             &EMIT_EVENT_IX_DISC => Ok(Self::EmitEvent),
             _ => Err(MultiDelegatorError::InvalidInstruction.into()),
         }
@@ -303,6 +357,8 @@ impl fmt::Display for MultiDelegatorInstruction {
             Self::UpdatePlan(_) => write!(f, "update_plan"),
             Self::DeletePlan => write!(f, "delete_plan"),
             Self::TransferSubscription(_) => write!(f, "transfer_subscription"),
+            Self::Subscribe(_) => write!(f, "subscribe"),
+            Self::CancelSubscription(_) => write!(f, "cancel_subscription"),
             Self::EmitEvent => write!(f, "emit_event"),
         }
     }

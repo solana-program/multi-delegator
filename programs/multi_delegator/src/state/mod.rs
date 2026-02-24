@@ -7,8 +7,8 @@ pub mod recurring_delegation;
 pub mod subscription_delegation;
 
 pub use common::{
-    find_plan_pda, find_subscription_pda, verify_delegation_pda, AccountDiscriminator, PlanStatus,
-    DELEGATE_BASE_SEED,
+    find_plan_pda, find_subscription_pda, verify_delegation_pda, verify_plan_pda,
+    AccountDiscriminator, PlanStatus, DELEGATE_BASE_SEED,
 };
 pub use fixed_delegation::FixedDelegation;
 pub use header::{Header, CURRENT_VERSION, DISCRIMINATOR_OFFSET, VERSION_OFFSET};

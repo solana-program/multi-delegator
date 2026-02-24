@@ -8,17 +8,17 @@ use crate::event_engine::{EventDiscriminator, EventDiscriminators, EventSerializ
 pub struct SubscriptionCancelledEvent {
     pub plan: Address,
     pub subscriber: Address,
-    pub revoked_ts: i64,
+    pub expires_at_ts: i64,
 }
 
 impl SubscriptionCancelledEvent {
     pub const DATA_LEN: usize = size_of::<Self>();
 
-    pub fn new(plan: Address, subscriber: Address, revoked_ts: i64) -> Self {
+    pub fn new(plan: Address, subscriber: Address, expires_at_ts: i64) -> Self {
         Self {
             plan,
             subscriber,
-            revoked_ts,
+            expires_at_ts,
         }
     }
 }
@@ -33,7 +33,7 @@ impl EventSerialize for SubscriptionCancelledEvent {
     fn write_inner(&self, writer: &mut Vec<u8>) {
         writer.extend_from_slice(self.plan.as_ref());
         writer.extend_from_slice(self.subscriber.as_ref());
-        writer.extend_from_slice(&{ self.revoked_ts }.to_le_bytes());
+        writer.extend_from_slice(&{ self.expires_at_ts }.to_le_bytes());
     }
 }
 
@@ -62,7 +62,7 @@ mod tests {
             SubscriptionEvent::Cancelled(e) => {
                 assert_eq!(e.plan, plan());
                 assert_eq!(e.subscriber, subscriber());
-                assert_eq!({ e.revoked_ts }, 1_700_000_000);
+                assert_eq!({ e.expires_at_ts }, 1_700_000_000);
             }
             _ => panic!("expected Cancelled event"),
         }
@@ -86,7 +86,7 @@ mod tests {
         let bytes = event.to_bytes();
         let decoded = decode_event(&bytes).unwrap();
         match decoded {
-            SubscriptionEvent::Cancelled(e) => assert_eq!({ e.revoked_ts }, -1),
+            SubscriptionEvent::Cancelled(e) => assert_eq!({ e.expires_at_ts }, -1),
             _ => panic!("expected Cancelled"),
         }
     }

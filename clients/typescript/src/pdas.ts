@@ -5,6 +5,7 @@ import {
 } from 'gill';
 import {
   DELEGATION_SEED,
+  EVENT_AUTHORITY_SEED,
   MULTI_DELEGATE_SEED,
   PLAN_SEED,
   PROGRAM_ID,
@@ -68,6 +69,16 @@ export async function getPlanPDA(
     addressEncoder.encode(owner),
     planIdBytes,
   ];
+
+  const [pda, bump] = await getProgramDerivedAddress({
+    programAddress: PROGRAM_ID,
+    seeds,
+  });
+  return [pda, bump];
+}
+
+export async function getEventAuthorityPDA(): Promise<[Address, number]> {
+  const seeds = [textEncoder.encode(EVENT_AUTHORITY_SEED)];
 
   const [pda, bump] = await getProgramDerivedAddress({
     programAddress: PROGRAM_ID,

@@ -99,6 +99,19 @@ impl TryFrom<u8> for PlanStatus {
     }
 }
 
+pub fn verify_plan_pda(owner: &Address, plan_id: u64, bump: u8) -> Result<Address, ProgramError> {
+    Address::create_program_address(
+        &[
+            crate::state::plan::Plan::SEED,
+            owner.as_ref(),
+            &plan_id.to_le_bytes(),
+            &[bump],
+        ],
+        &crate::ID,
+    )
+    .map_err(|_| MultiDelegatorError::InvalidPlanPda.into())
+}
+
 pub fn find_plan_pda(owner: &Address, plan_id: u64) -> (Address, u8) {
     Address::find_program_address(
         &[

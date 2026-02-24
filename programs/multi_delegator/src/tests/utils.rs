@@ -30,18 +30,20 @@ use spl_token_2022::{
 use solana_instruction::AccountMeta;
 
 use crate::{
+    event_engine::event_authority_pda,
     instructions::create_plan::{PlanData, MAX_DESTINATIONS, MAX_PULLERS},
     instructions::update_plan::UpdatePlanData,
     instructions::{
-        close_multidelegate, create_fixed_delegation, create_plan, create_recurring_delegation,
-        delete_plan, initialize_multidelegate, revoke_delegation, transfer_fixed_delegation,
-        transfer_recurring_delegation, transfer_subscription, update_plan,
+        cancel_subscription, close_multidelegate, create_fixed_delegation, create_plan,
+        create_recurring_delegation, delete_plan, initialize_multidelegate, revoke_delegation,
+        subscribe, transfer_fixed_delegation, transfer_recurring_delegation, transfer_subscription,
+        update_plan,
     },
     state::common::PlanStatus,
     tests::{
         constants::{PROGRAM_ID, SYSTEM_PROGRAM_ID},
         cu_tracker::record_transaction,
-        pda::{get_delegation_pda, get_multidelegate_pda, get_plan_pda},
+        pda::{get_delegation_pda, get_multidelegate_pda, get_plan_pda, get_subscription_pda},
     },
 };
 
@@ -855,7 +857,7 @@ pub struct CreateSubscription<'a> {
     subscriber: Pubkey,
     period_start_ts: i64,
     amount_pulled: u64,
-    revoked_ts: i64,
+    expires_at_ts: i64,
 }
 
 impl<'a> CreateSubscription<'a> {
@@ -871,7 +873,7 @@ impl<'a> CreateSubscription<'a> {
             subscriber,
             period_start_ts,
             amount_pulled: 0,
-            revoked_ts: 0,
+            expires_at_ts: 0,
         }
     }
 
@@ -880,8 +882,8 @@ impl<'a> CreateSubscription<'a> {
         self
     }
 
-    pub fn revoked_ts(mut self, revoked_ts: i64) -> Self {
-        self.revoked_ts = revoked_ts;
+    pub fn expires_at_ts(mut self, expires_at_ts: i64) -> Self {
+        self.expires_at_ts = expires_at_ts;
         self
     }
 
@@ -905,7 +907,7 @@ impl<'a> CreateSubscription<'a> {
             },
             amount_pulled_in_period: self.amount_pulled,
             current_period_start_ts: self.period_start_ts,
-            revoked_ts: self.revoked_ts,
+            expires_at_ts: self.expires_at_ts,
         };
 
         let data = unsafe {
@@ -1014,5 +1016,251 @@ impl<'a> TransferSubscription<'a> {
         };
 
         build_and_send_transaction(self.litesvm, &[self.caller], &self.caller.pubkey(), &ix)
+    }
+}
+
+pub struct Subscribe<'a> {
+    litesvm: &'a mut LiteSVM,
+    subscriber: &'a Keypair,
+    merchant: Pubkey,
+    plan_pda: Pubkey,
+    plan_id: u64,
+    plan_bump: u8,
+    mint: Pubkey,
+}
+
+impl<'a> Subscribe<'a> {
+    pub fn new(
+        litesvm: &'a mut LiteSVM,
+        subscriber: &'a Keypair,
+        merchant: Pubkey,
+        plan_pda: Pubkey,
+        plan_id: u64,
+        plan_bump: u8,
+        mint: Pubkey,
+    ) -> Self {
+        Self {
+            litesvm,
+            subscriber,
+            merchant,
+            plan_pda,
+            plan_id,
+            plan_bump,
+            mint,
+        }
+    }
+
+    #[allow(clippy::result_large_err)]
+    pub fn execute(self) -> TransactionResult {
+        let (multi_delegate_pda, _) = get_multidelegate_pda(&self.subscriber.pubkey(), &self.mint);
+        let (subscription_pda, _) = get_subscription_pda(&self.plan_pda, &self.subscriber.pubkey());
+
+        let event_authority = Pubkey::new_from_array(event_authority_pda::ID.to_bytes());
+
+        let accounts = vec![
+            AccountMeta::new(self.subscriber.pubkey(), true),
+            AccountMeta::new_readonly(self.merchant, false),
+            AccountMeta::new_readonly(self.plan_pda, false),
+            AccountMeta::new(subscription_pda, false),
+            AccountMeta::new_readonly(multi_delegate_pda, false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+            AccountMeta::new_readonly(event_authority, false),
+            AccountMeta::new_readonly(PROGRAM_ID, false),
+        ];
+
+        let data = [
+            vec![*subscribe::DISCRIMINATOR],
+            self.plan_id.to_le_bytes().to_vec(),
+            vec![self.plan_bump],
+        ]
+        .concat();
+
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts,
+            data,
+        };
+
+        build_and_send_transaction(
+            self.litesvm,
+            &[self.subscriber],
+            &self.subscriber.pubkey(),
+            &ix,
+        )
+    }
+}
+
+pub struct CancelSubscription<'a> {
+    litesvm: &'a mut LiteSVM,
+    subscriber: &'a Keypair,
+    merchant: Pubkey,
+    plan_pda: Pubkey,
+    plan_id: u64,
+    plan_bump: u8,
+    subscription_pda: Pubkey,
+}
+
+impl<'a> CancelSubscription<'a> {
+    pub fn new(
+        litesvm: &'a mut LiteSVM,
+        subscriber: &'a Keypair,
+        merchant: Pubkey,
+        plan_pda: Pubkey,
+        plan_id: u64,
+        plan_bump: u8,
+        subscription_pda: Pubkey,
+    ) -> Self {
+        Self {
+            litesvm,
+            subscriber,
+            merchant,
+            plan_pda,
+            plan_id,
+            plan_bump,
+            subscription_pda,
+        }
+    }
+
+    #[allow(clippy::result_large_err)]
+    pub fn execute(self) -> TransactionResult {
+        let event_authority = Pubkey::new_from_array(event_authority_pda::ID.to_bytes());
+
+        let accounts = vec![
+            AccountMeta::new_readonly(self.subscriber.pubkey(), true),
+            AccountMeta::new_readonly(self.merchant, false),
+            AccountMeta::new_readonly(self.plan_pda, false),
+            AccountMeta::new(self.subscription_pda, false),
+            AccountMeta::new_readonly(event_authority, false),
+            AccountMeta::new_readonly(PROGRAM_ID, false),
+        ];
+
+        let data = [
+            vec![*cancel_subscription::DISCRIMINATOR],
+            self.plan_id.to_le_bytes().to_vec(),
+            vec![self.plan_bump],
+        ]
+        .concat();
+
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts,
+            data,
+        };
+
+        build_and_send_transaction(
+            self.litesvm,
+            &[self.subscriber],
+            &self.subscriber.pubkey(),
+            &ix,
+        )
+    }
+}
+
+pub fn setup_with_subscription() -> (
+    LiteSVM,
+    Keypair, // alice (subscriber)
+    Keypair, // merchant
+    Pubkey,  // mint
+    Pubkey,  // plan_pda
+    u8,      // plan_bump
+    Pubkey,  // subscription_pda
+) {
+    use crate::tests::{
+        asserts::TransactionResultExt,
+        constants::{MINT_DECIMALS, TOKEN_PROGRAM_ID},
+        pda::get_subscription_pda,
+    };
+
+    let (mut litesvm, alice) = setup();
+    let merchant = Keypair::new();
+    litesvm.airdrop(&merchant.pubkey(), 10_000_000_000).unwrap();
+
+    let mint = init_mint(
+        &mut litesvm,
+        TOKEN_PROGRAM_ID,
+        MINT_DECIMALS,
+        1_000_000_000,
+        Some(alice.pubkey()),
+        &[],
+    );
+    let _alice_ata = init_ata(&mut litesvm, mint, alice.pubkey(), 100_000_000);
+
+    initialize_multidelegate_action(&mut litesvm, &alice, mint)
+        .0
+        .assert_ok();
+
+    let end_ts = current_ts() + days(30) as i64;
+    let (res, plan_pda) = CreatePlan::new(&mut litesvm, &merchant, mint)
+        .plan_id(1)
+        .amount(50_000_000)
+        .period_hours(1)
+        .end_ts(end_ts)
+        .execute();
+    res.assert_ok();
+
+    let (_, plan_bump) = get_plan_pda(&merchant.pubkey(), 1);
+    Subscribe::new(
+        &mut litesvm,
+        &alice,
+        merchant.pubkey(),
+        plan_pda,
+        1,
+        plan_bump,
+        mint,
+    )
+    .execute()
+    .assert_ok();
+
+    let (subscription_pda, _) = get_subscription_pda(&plan_pda, &alice.pubkey());
+
+    (
+        litesvm,
+        alice,
+        merchant,
+        mint,
+        plan_pda,
+        plan_bump,
+        subscription_pda,
+    )
+}
+
+pub struct RevokeSubscription<'a> {
+    litesvm: &'a mut LiteSVM,
+    subscriber: &'a Keypair,
+    subscription_pda: Pubkey,
+}
+
+impl<'a> RevokeSubscription<'a> {
+    pub fn new(
+        litesvm: &'a mut LiteSVM,
+        subscriber: &'a Keypair,
+        subscription_pda: Pubkey,
+    ) -> Self {
+        Self {
+            litesvm,
+            subscriber,
+            subscription_pda,
+        }
+    }
+
+    #[allow(clippy::result_large_err)]
+    pub fn execute(self) -> TransactionResult {
+        let accounts = vec![
+            AccountMeta::new(self.subscriber.pubkey(), true),
+            AccountMeta::new(self.subscription_pda, false),
+        ];
+
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts,
+            data: vec![*revoke_delegation::DISCRIMINATOR],
+        };
+
+        build_and_send_transaction(
+            self.litesvm,
+            &[self.subscriber],
+            &self.subscriber.pubkey(),
+            &ix,
+        )
     }
 }

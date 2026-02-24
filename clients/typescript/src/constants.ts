@@ -28,6 +28,7 @@ export const DELEGATION_SEED = 'delegation';
 
 export const PLAN_SEED = 'plan';
 export const SUBSCRIPTION_SEED = 'subscription';
+export const EVENT_AUTHORITY_SEED = 'event_authority';
 
 export const PLAN_SIZE = 483;
 export const SUBSCRIPTION_SIZE = 123;

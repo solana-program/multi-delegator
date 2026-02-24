@@ -85,9 +85,9 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
             return Err(MultiDelegatorError::Unauthorized.into());
         }
 
-        // Check cancellation
-        let revoked_ts = subscription.revoked_ts;
-        if revoked_ts != 0 && current_ts > revoked_ts {
+        // Check cancellation — expires_at_ts is pre-computed at cancellation time
+        let expires_at_ts = subscription.expires_at_ts;
+        if expires_at_ts != 0 && current_ts >= expires_at_ts {
             return Err(MultiDelegatorError::SubscriptionCancelled.into());
         }
 
@@ -178,11 +178,11 @@ mod tests {
         tests::{
             asserts::TransactionResultExt,
             constants::{MINT_DECIMALS, PROGRAM_ID, TOKEN_PROGRAM_ID},
-            pda::get_multidelegate_pda,
+            pda::{get_multidelegate_pda, get_plan_pda},
             utils::{
                 build_and_send_transaction, current_ts, days, get_ata_balance, hours, init_ata,
                 init_mint, init_wallet, initialize_multidelegate_action, move_clock_forward, setup,
-                CreatePlan, CreateSubscription, TransferSubscription,
+                CancelSubscription, CreatePlan, CreateSubscription, TransferSubscription,
             },
         },
         MultiDelegatorError,
@@ -207,6 +207,7 @@ mod tests {
         Keypair, // merchant (plan owner)
         Pubkey,  // mint
         Pubkey,  // plan_pda
+        u8,      // plan_bump
         Pubkey,  // subscription_pda
         Pubkey,  // alice_ata
         Pubkey,  // merchant_ata
@@ -245,12 +246,15 @@ mod tests {
         let subscription_pda =
             CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), current_ts()).execute();
 
+        let (_, plan_bump) = get_plan_pda(&merchant.pubkey(), 1);
+
         (
             litesvm,
             alice,
             merchant,
             mint,
             plan_pda,
+            plan_bump,
             subscription_pda,
             alice_ata,
             merchant_ata,
@@ -263,7 +267,7 @@ mod tests {
         let period_hours = 1u64;
         let end_ts = current_ts() + days(30) as i64;
 
-        let (mut litesvm, alice, merchant, mint, plan_pda, subscription_pda, _, merchant_ata) =
+        let (mut litesvm, alice, merchant, mint, plan_pda, _, subscription_pda, _, merchant_ata) =
             setup_plan_and_subscription(amount_per_period, period_hours, end_ts, vec![], vec![]);
 
         assert_eq!(get_ata_balance(&litesvm, &merchant_ata), 0);
@@ -298,7 +302,7 @@ mod tests {
 
         let puller = Keypair::new();
 
-        let (mut litesvm, alice, _merchant, mint, plan_pda, subscription_pda, _, merchant_ata) =
+        let (mut litesvm, alice, _merchant, mint, plan_pda, _, subscription_pda, _, merchant_ata) =
             setup_plan_and_subscription(
                 amount_per_period,
                 period_hours,
@@ -332,7 +336,7 @@ mod tests {
         let period_hours = 1u64;
         let end_ts = current_ts() + days(30) as i64;
 
-        let (mut litesvm, alice, _merchant, mint, plan_pda, subscription_pda, _, merchant_ata) =
+        let (mut litesvm, alice, _merchant, mint, plan_pda, _, subscription_pda, _, merchant_ata) =
             setup_plan_and_subscription(amount_per_period, period_hours, end_ts, vec![], vec![]);
 
         let random_signer = Keypair::new();
@@ -362,7 +366,7 @@ mod tests {
         let period_hours = 1u64;
         let end_ts = current_ts() + days(30) as i64;
 
-        let (mut litesvm, alice, merchant, mint, plan_pda, subscription_pda, _, merchant_ata) =
+        let (mut litesvm, alice, merchant, mint, plan_pda, _, subscription_pda, _, merchant_ata) =
             setup_plan_and_subscription(amount_per_period, period_hours, end_ts, vec![], vec![]);
 
         // First pull
@@ -408,7 +412,7 @@ mod tests {
         let period_hours = 1u64;
         let end_ts = current_ts() + days(30) as i64;
 
-        let (mut litesvm, alice, merchant, mint, plan_pda, subscription_pda, _, merchant_ata) =
+        let (mut litesvm, alice, merchant, mint, plan_pda, _, subscription_pda, _, merchant_ata) =
             setup_plan_and_subscription(amount_per_period, period_hours, end_ts, vec![], vec![]);
 
         let result = TransferSubscription::new(
@@ -432,7 +436,7 @@ mod tests {
         let period_hours = 1u64;
         let end_ts = current_ts() + days(30) as i64;
 
-        let (mut litesvm, alice, merchant, mint, plan_pda, subscription_pda, _, merchant_ata) =
+        let (mut litesvm, alice, merchant, mint, plan_pda, _, subscription_pda, _, merchant_ata) =
             setup_plan_and_subscription(amount_per_period, period_hours, end_ts, vec![], vec![]);
 
         // Pull full period
@@ -481,7 +485,7 @@ mod tests {
         let period_hours = 1u64;
         let end_ts = current_ts() + days(2) as i64;
 
-        let (mut litesvm, alice, merchant, mint, plan_pda, subscription_pda, _, _) =
+        let (mut litesvm, alice, merchant, mint, plan_pda, _, subscription_pda, _, _) =
             setup_plan_and_subscription(amount_per_period, period_hours, end_ts, vec![], vec![]);
 
         // Move past plan expiry
@@ -507,15 +511,105 @@ mod tests {
         let period_hours = 1u64;
         let end_ts = current_ts() + days(30) as i64;
 
-        let (mut litesvm, alice, merchant, mint, plan_pda, _, _, _) =
+        let (mut litesvm, alice, merchant, mint, plan_pda, _, _, _, _) =
             setup_plan_and_subscription(amount_per_period, period_hours, end_ts, vec![], vec![]);
 
-        // Create subscription with revoked_ts in the past
+        // Create subscription with expires_at_ts set to end of a past period
+        let period_start = current_ts() - hours(2) as i64;
+        let expires_at = period_start + hours(1) as i64; // end of that period, which is in the past
         let subscription_pda =
-            CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), current_ts())
-                .revoked_ts(current_ts() - 100)
+            CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), period_start)
+                .expires_at_ts(expires_at)
                 .execute();
 
+        // Current time is past expires_at_ts
+        let result = TransferSubscription::new(
+            &mut litesvm,
+            &merchant,
+            alice.pubkey(),
+            mint,
+            subscription_pda,
+            plan_pda,
+        )
+        .amount(10_000_000)
+        .execute();
+
+        result.assert_err(MultiDelegatorError::SubscriptionCancelled);
+    }
+
+    #[test]
+    fn test_transfer_subscription_cancelled_allows_current_period() {
+        let amount_per_period = 50_000_000u64;
+        let period_hours = 1u64;
+        let end_ts = current_ts() + days(30) as i64;
+
+        let (
+            mut litesvm,
+            alice,
+            merchant,
+            mint,
+            plan_pda,
+            plan_bump,
+            subscription_pda,
+            _,
+            merchant_ata,
+        ) = setup_plan_and_subscription(amount_per_period, period_hours, end_ts, vec![], vec![]);
+
+        // Cancel the subscription (sets expires_at_ts = end of current period)
+        CancelSubscription::new(
+            &mut litesvm,
+            &alice,
+            merchant.pubkey(),
+            plan_pda,
+            1,
+            plan_bump,
+            subscription_pda,
+        )
+        .execute()
+        .assert_ok();
+
+        // Pull within the same period should still succeed
+        TransferSubscription::new(
+            &mut litesvm,
+            &merchant,
+            alice.pubkey(),
+            mint,
+            subscription_pda,
+            plan_pda,
+        )
+        .amount(10_000_000)
+        .execute()
+        .assert_ok();
+
+        assert_eq!(get_ata_balance(&litesvm, &merchant_ata), 10_000_000);
+    }
+
+    #[test]
+    fn test_transfer_subscription_cancelled_blocks_next_period() {
+        let amount_per_period = 50_000_000u64;
+        let period_hours = 1u64;
+        let end_ts = current_ts() + days(30) as i64;
+
+        let (mut litesvm, alice, merchant, mint, plan_pda, plan_bump, subscription_pda, _, _) =
+            setup_plan_and_subscription(amount_per_period, period_hours, end_ts, vec![], vec![]);
+
+        // Cancel the subscription
+        CancelSubscription::new(
+            &mut litesvm,
+            &alice,
+            merchant.pubkey(),
+            plan_pda,
+            1,
+            plan_bump,
+            subscription_pda,
+        )
+        .execute()
+        .assert_ok();
+
+        // Move clock past the period boundary
+        move_clock_forward(&mut litesvm, hours(1));
+
+        // Pull should now fail
         let result = TransferSubscription::new(
             &mut litesvm,
             &merchant,
@@ -538,7 +632,7 @@ mod tests {
 
         let dest_wallet = Keypair::new();
 
-        let (mut litesvm, alice, merchant, mint, plan_pda, subscription_pda, _, _) =
+        let (mut litesvm, alice, merchant, mint, plan_pda, _, subscription_pda, _, _) =
             setup_plan_and_subscription(
                 amount_per_period,
                 period_hours,
@@ -573,7 +667,7 @@ mod tests {
 
         let dest_wallet = Keypair::new();
 
-        let (mut litesvm, alice, merchant, mint, plan_pda, subscription_pda, _, _) =
+        let (mut litesvm, alice, merchant, mint, plan_pda, _, subscription_pda, _, _) =
             setup_plan_and_subscription(
                 amount_per_period,
                 period_hours,
@@ -606,7 +700,7 @@ mod tests {
         let period_hours = 1u64;
         let end_ts = current_ts() + days(30) as i64;
 
-        let (mut litesvm, alice, merchant, mint, plan_pda, subscription_pda, _, _) =
+        let (mut litesvm, alice, merchant, mint, plan_pda, _, subscription_pda, _, _) =
             setup_plan_and_subscription(amount_per_period, period_hours, end_ts, vec![], vec![]);
 
         // Random third party receives
@@ -635,7 +729,7 @@ mod tests {
         let period_hours = 1u64;
         let end_ts = current_ts() + days(30) as i64;
 
-        let (mut litesvm, alice, merchant, mint, plan_pda, _, _, _) =
+        let (mut litesvm, alice, merchant, mint, plan_pda, _, _, _, _) =
             setup_plan_and_subscription(amount_per_period, period_hours, end_ts, vec![], vec![]);
 
         // Create a second plan
@@ -673,7 +767,7 @@ mod tests {
         let period_hours = 1u64;
         let end_ts = current_ts() + days(30) as i64;
 
-        let (mut litesvm, alice, merchant, mint, plan_pda, subscription_pda, _, _) =
+        let (mut litesvm, alice, merchant, mint, plan_pda, _, subscription_pda, _, _) =
             setup_plan_and_subscription(amount_per_period, period_hours, end_ts, vec![], vec![]);
 
         let result = TransferSubscription::new(
@@ -693,12 +787,12 @@ mod tests {
     #[test]
     fn test_transfer_subscription_sunset_allows_transfer() {
         // A sunset plan (status=0) should still allow existing subscription pulls.
-        // The plan status doesn't block transfers; only end_ts and subscription revoked_ts do.
+        // The plan status doesn't block transfers; only end_ts and subscription expires_at_ts do.
         let amount_per_period = 50_000_000u64;
         let period_hours = 1u64;
         let end_ts = current_ts() + days(30) as i64;
 
-        let (mut litesvm, alice, merchant, mint, plan_pda, subscription_pda, _, merchant_ata) =
+        let (mut litesvm, alice, merchant, mint, plan_pda, _, subscription_pda, _, merchant_ata) =
             setup_plan_and_subscription(amount_per_period, period_hours, end_ts, vec![], vec![]);
 
         // Manually set plan status to Sunset (0)
@@ -731,7 +825,7 @@ mod tests {
         let period_hours = 1u64;
         let end_ts = current_ts() + days(30) as i64;
 
-        let (mut litesvm, alice, merchant, mint, plan_pda, subscription_pda, _, _) =
+        let (mut litesvm, alice, merchant, mint, plan_pda, _, subscription_pda, _, _) =
             setup_plan_and_subscription(amount_per_period, period_hours, end_ts, vec![], vec![]);
 
         // Simulate plan closure: zero the data and transfer ownership to system program
@@ -764,7 +858,7 @@ mod tests {
         let period_hours = 1u64;
         let end_ts = current_ts() + days(30) as i64;
 
-        let (mut litesvm, alice, merchant, mint, plan_pda, subscription_pda, _, _) =
+        let (mut litesvm, alice, merchant, mint, plan_pda, _, subscription_pda, _, _) =
             setup_plan_and_subscription(amount_per_period, period_hours, end_ts, vec![], vec![]);
         let fee_payer = init_wallet(&mut litesvm, 10_000_000_000);
 
@@ -826,7 +920,7 @@ mod tests {
         let period_hours = 1u64;
         let end_ts = current_ts() + days(30) as i64;
 
-        let (mut litesvm, alice, merchant, mint, plan_pda, subscription_pda, _, _) =
+        let (mut litesvm, alice, merchant, mint, plan_pda, _, subscription_pda, _, _) =
             setup_plan_and_subscription(amount_per_period, period_hours, end_ts, vec![], vec![]);
         let fee_payer = init_wallet(&mut litesvm, 10_000_000_000);
 

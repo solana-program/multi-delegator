@@ -50,7 +50,7 @@ describe('DeletePlan', () => {
     );
 
     const validatorTs = await getValidatorTime(t.rpc);
-    const endTs = validatorTs + 3n;
+    const endTs = validatorTs + 10n;
 
     const updateIx = getUpdatePlanInstruction({
       owner: t.payer,
@@ -66,14 +66,14 @@ describe('DeletePlan', () => {
     const signed = await signTransactionMessageWithSigners(txMsg);
     await t.client.client.sendAndConfirmTransaction(signed);
 
-    await advanceClock(t.rpc, 5);
+    await advanceClock(t.rpc, 12);
 
     const { signature } = await t.client.deletePlan(t.payer, planPda);
     expect(signature).toBeDefined();
 
     const account = await fetchMaybePlan(t.rpc, planPda);
     expect(account.exists).toBe(false);
-  }, 30000);
+  });
 
   test('non-owner rejected', async () => {
     const t = await initTestSuite();
@@ -92,7 +92,7 @@ describe('DeletePlan', () => {
     );
 
     const validatorTs = await getValidatorTime(t.rpc);
-    const endTs = validatorTs + 3n;
+    const endTs = validatorTs + 10n;
 
     const updateIx = getUpdatePlanInstruction({
       owner: t.payer,
@@ -108,11 +108,11 @@ describe('DeletePlan', () => {
     const signed = await signTransactionMessageWithSigners(txMsg);
     await t.client.client.sendAndConfirmTransaction(signed);
 
-    await advanceClock(t.rpc, 5);
+    await advanceClock(t.rpc, 12);
 
     const nonOwner = await t.createFundedKeypair();
     await expect(t.client.deletePlan(nonOwner, planPda)).rejects.toThrow();
-  }, 30000);
+  });
 
   test('active expired plan deleted', async () => {
     const t = await initTestSuite();
@@ -131,7 +131,7 @@ describe('DeletePlan', () => {
     );
 
     const validatorTs = await getValidatorTime(t.rpc);
-    const endTs = validatorTs + 3n;
+    const endTs = validatorTs + 10n;
 
     const updateIx = getUpdatePlanInstruction({
       owner: t.payer,
@@ -147,14 +147,14 @@ describe('DeletePlan', () => {
     const signed = await signTransactionMessageWithSigners(txMsg);
     await t.client.client.sendAndConfirmTransaction(signed);
 
-    await advanceClock(t.rpc, 5);
+    await advanceClock(t.rpc, 12);
 
     const { signature } = await t.client.deletePlan(t.payer, planPda);
     expect(signature).toBeDefined();
 
     const account = await fetchMaybePlan(t.rpc, planPda);
     expect(account.exists).toBe(false);
-  }, 30000);
+  });
 
   test('perpetual plan rejected', async () => {
     const t = await initTestSuite();

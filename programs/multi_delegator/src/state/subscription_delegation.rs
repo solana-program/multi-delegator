@@ -13,7 +13,7 @@ pub struct SubscriptionDelegation {
     pub header: Header,
     pub amount_pulled_in_period: u64,
     pub current_period_start_ts: i64,
-    pub revoked_ts: i64,
+    pub expires_at_ts: i64,
 }
 
 impl SubscriptionDelegation {

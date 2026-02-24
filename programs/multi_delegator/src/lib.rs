@@ -50,6 +50,10 @@ fn process_instruction(
         MultiDelegatorInstruction::TransferSubscription(data) => {
             transfer_subscription::process(accounts, &data)
         }
+        MultiDelegatorInstruction::Subscribe(data) => subscribe::process(accounts, &data),
+        MultiDelegatorInstruction::CancelSubscription(data) => {
+            cancel_subscription::process(accounts, &data)
+        }
         MultiDelegatorInstruction::EmitEvent => emit_event::process(program_id, accounts),
     }
 }

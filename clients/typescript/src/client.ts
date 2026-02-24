@@ -1,3 +1,4 @@
+import { findAssociatedTokenPda } from '@solana-program/token';
 import type {
   Address,
   Base58EncodedBytes,
@@ -31,6 +32,7 @@ import {
   decodeSubscriptionDelegation,
   type FixedDelegation,
   fetchMaybeMultiDelegate,
+  getCancelSubscriptionInstruction,
   getCloseMultiDelegateInstruction,
   getCreateFixedDelegationInstruction,
   getCreatePlanInstruction,
@@ -38,8 +40,10 @@ import {
   getDeletePlanInstruction,
   getInitMultiDelegateInstruction,
   getRevokeDelegationInstruction,
+  getSubscribeInstruction,
   getTransferFixedInstruction,
   getTransferRecurringInstruction,
+  getTransferSubscriptionInstruction,
   getUpdatePlanInstruction,
   MULTI_DELEGATOR_PROGRAM_ADDRESS,
   type Plan,
@@ -47,7 +51,13 @@ import {
   type RecurringDelegation,
   type SubscriptionDelegation,
 } from './generated/index.js';
-import { getDelegationPDA, getMultiDelegatePDA, getPlanPDA } from './pdas.js';
+import {
+  getDelegationPDA,
+  getEventAuthorityPDA,
+  getMultiDelegatePDA,
+  getPlanPDA,
+  getSubscriptionPDA,
+} from './pdas.js';
 
 type SolanaClient = {
   rpc: Rpc<GetAccountInfoApi & GetLatestBlockhashApi & GetProgramAccountsApi>;
@@ -454,6 +464,112 @@ export class MultiDelegatorClient {
     const signature = await this.buildAndSendTransaction(
       [instruction],
       [owner],
+    );
+    return { signature };
+  }
+
+  async subscribe(
+    subscriber: TransactionSigner,
+    merchant: Address,
+    planId: number | bigint,
+    tokenMint: Address,
+  ): Promise<{ signature: string; subscriptionPda: Address }> {
+    const [planPda, planBump] = await getPlanPDA(merchant, planId);
+    const [multiDelegatePda] = await getMultiDelegatePDA(
+      subscriber.address,
+      tokenMint,
+    );
+    const [subscriptionPda] = await getSubscriptionPDA(
+      planPda,
+      subscriber.address,
+    );
+    const [eventAuthority] = await getEventAuthorityPDA();
+
+    const instruction = getSubscribeInstruction({
+      subscriber,
+      merchant,
+      planPda,
+      subscriptionPda,
+      multiDelegatePda,
+      eventAuthority,
+      selfProgram: MULTI_DELEGATOR_PROGRAM_ADDRESS,
+      subscribeData: {
+        planId,
+        planBump,
+      },
+    });
+
+    const signature = await this.buildAndSendTransaction(
+      [instruction],
+      [subscriber],
+    );
+    return { signature, subscriptionPda };
+  }
+
+  async cancelSubscription(
+    subscriber: TransactionSigner,
+    merchant: Address,
+    planId: number | bigint,
+    subscriptionPda: Address,
+  ): Promise<{ signature: string }> {
+    const [planPda, planBump] = await getPlanPDA(merchant, planId);
+    const [eventAuthority] = await getEventAuthorityPDA();
+
+    const instruction = getCancelSubscriptionInstruction({
+      subscriber,
+      merchant,
+      planPda,
+      subscriptionPda,
+      eventAuthority,
+      selfProgram: MULTI_DELEGATOR_PROGRAM_ADDRESS,
+      cancelSubscriptionData: {
+        planId,
+        planBump,
+      },
+    });
+
+    const signature = await this.buildAndSendTransaction(
+      [instruction],
+      [subscriber],
+    );
+    return { signature };
+  }
+
+  async transferSubscription(
+    caller: TransactionSigner,
+    delegator: Address,
+    tokenMint: Address,
+    subscriptionPda: Address,
+    planPda: Address,
+    amount: number | bigint,
+    receiverAta: Address,
+    tokenProgram: Address,
+  ): Promise<{ signature: string }> {
+    const [multiDelegate] = await getMultiDelegatePDA(delegator, tokenMint);
+    const [delegatorAta] = await findAssociatedTokenPda({
+      mint: tokenMint,
+      owner: delegator,
+      tokenProgram,
+    });
+
+    const instruction = getTransferSubscriptionInstruction({
+      subscriptionPda,
+      planPda,
+      multiDelegate,
+      delegatorAta,
+      receiverAta,
+      caller,
+      tokenProgram,
+      transferData: {
+        amount,
+        delegator,
+        mint: tokenMint,
+      },
+    });
+
+    const signature = await this.buildAndSendTransaction(
+      [instruction],
+      [caller],
     );
     return { signature };
   }

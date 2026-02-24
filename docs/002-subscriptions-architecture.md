@@ -141,7 +141,7 @@ ADR-001 provides the core delegation infrastructure. Plans add a subscription mo
 | **Discoverability** | Manual PDA sharing | Plans can be discovered/marketplace |
 | **Use Cases** | P2P, custom, one-off | Subscription services, SaaS, platforms |
 | **Pull Authorization** | Delegatee-only (`transfer_fixed`/`transfer_recurring`) | Owner + configurable pullers array (`transfer_subscription`) |
-| **Cancellability** | Not implemented (add later) | Delegator can revoke, Plan can sunset |
+| **Cancellability** | Not implemented (add later) | Two-step: `cancel_subscription` (pre-computes expiration at end of current period) then `revoke_delegation` (close after expiration). Plan can sunset. |
 
 ### Integration With ADR-001
 
@@ -188,11 +188,12 @@ The Plan serves as a **source of truth** for terms. When a delegator subscribes,
 | `transfer_recurring` instruction | ✓ Reads from Delegation | ✓ Reads from Delegation (same) |
 | **NEW** | - | `Plan` PDA (source of terms) |
 | **NEW** | - | `subscribe` instruction (creates SubscriptionDelegation) |
+| **NEW** | - | `cancel_subscription` instruction (sets expires_at_ts, grace period) |
 | **NEW** | - | `transfer_subscription` instruction (pull with Plan validation) |
 
 **Seeded Separation for Coexistence:**
 - **Direct Delegations**: Seeds `["delegation", multi_delegate, delegator, delegatee, nonce]`
-- **Subscription Delegations**: Seeds `["delegation", plan_pda, delegator]`
+- **Subscription Delegations**: Seeds `["subscription", plan_pda, subscriber]`
 - Different seeds prevent PDA collisions
 - Both can use the same MultiDelegate PDA simultaneously
 - Both models can be used in the same program instance
@@ -215,7 +216,7 @@ The Plan serves as a **source of truth** for terms. When a delegator subscribes,
 
 **Flows Remain Available:**
 - All ADR-001 instructions (`initialize_multidelegate`, `create_fixed_delegation`, `create_recurring_delegation`) continue to work unchanged
-- New ADR-002 instructions (`create_plan`, `update_plan`, `delete_plan`, `subscribe`, `transfer_subscription`) add subscription capability
+- New ADR-002 instructions (`create_plan`, `update_plan`, `delete_plan`, `subscribe`, `cancel_subscription`, `transfer_subscription`) add subscription capability
 - Direct delegations and subscriptions can be created and withdrawn independently
 - Transfer validation code is shared and identical for both models
 
@@ -395,7 +396,7 @@ Authorized caller (plan owner or whitelisted puller) pulls tokens from a subscri
 5. Validate destination: if plan has non-zero destinations, receiver ATA owner must match one (else `UnauthorizedDestination`); if all destinations are zero, any receiver is valid
 6. Load SubscriptionDelegation and verify `delegatee == plan_pda` (else `SubscriptionPlanMismatch`)
 7. Verify `delegator` matches `transfer_data.delegator` (else `Unauthorized`)
-8. Check subscription not cancelled: `revoked_ts == 0` or `current_ts <= revoked_ts` (else `SubscriptionCancelled`)
+8. Check subscription not cancelled: if `expires_at_ts != 0 && current_ts >= expires_at_ts`, block the transfer (else `SubscriptionCancelled`)
 9. Validate recurring transfer: amount within period limit, handle period rollover
 10. Update subscription state (`current_period_start_ts`, `amount_pulled_in_period`)
 11. Execute transfer via MultiDelegate PDA (CPI to Token Program)
@@ -405,6 +406,34 @@ Authorized caller (plan owner or whitelisted puller) pulls tokens from a subscri
 - Subscription delegations (ADR-002): Plan owner is always authorized, plus up to 4 additional addresses in `pullers` array
 
 **Sunset behavior:** A plan in Sunset status still allows existing subscription pulls. Sunset only prevents new subscriptions (handled in `subscribe` instruction).
+
+### `cancel_subscription` (Discriminator: 12)
+
+Subscriber cancels their subscription. Computes `expires_at_ts` as the end of the current billing period, allowing the merchant to pull for the remainder of that period (grace period). If the plan account is closed, `expires_at_ts` is set to the current timestamp (immediate expiration). After `expires_at_ts` passes, pulls are blocked. The subscriber can then call `revoke_delegation` to close the account and reclaim rent.
+
+| Account | Type             | Description                      |
+| ------- | ---------------- | -------------------------------- |
+| 0       | signer           | Subscriber (delegator)           |
+| 1       |                  | Plan PDA                         |
+| 2       | writable         | SubscriptionDelegation PDA       |
+| 3       |                  | Event authority PDA              |
+| 4       |                  | Self program                     |
+
+**Parameters:** None (only discriminator byte)
+
+**Validation:**
+1. Verify caller is the subscription's delegator (else `Unauthorized`)
+2. Verify `expires_at_ts == 0` (else `SubscriptionAlreadyCancelled`)
+3. Verify subscription's delegatee matches the plan PDA (else `SubscriptionPlanMismatch`)
+
+**Process:**
+1. If plan is valid (program-owned): compute `expires_at_ts = current_period_start + (periods_elapsed + 1) * period_length`
+2. If plan is closed (not program-owned): set `expires_at_ts = current_ts`
+3. Emit `SubscriptionCancelled` event via self-CPI
+
+**Two-step revocation flow:**
+- `cancel_subscription` → pre-computes `expires_at_ts` (end of current period), allows pulls until then
+- `revoke_delegation` → closes account (requires `expires_at_ts != 0` and `expires_at_ts <= current_ts`)
 
 ---
 
@@ -463,19 +492,31 @@ sequenceDiagram
     end
 ```
 
-### Delegator Revokes Subscription
+### Delegator Cancels and Revokes Subscription
+
+Cancellation is a two-step process:
+1. **`cancel_subscription`** — Sets `expires_at_ts` to the current timestamp. The merchant can still pull for the remainder of the current billing period (grace period).
+2. **`revoke_delegation`** — Closes the subscription account and reclaims rent. Only allowed after `expires_at_ts` is in the past.
 
 ```mermaid
 sequenceDiagram
     participant D as Alice (Delegator)
     participant P as Program
-    participant X as Anyone/Whitelist
+    participant X as Merchant/Puller
 
-    D->>P: revoke(delegation_pda)
-    Note over P: Delegation state -> Revoked/Closed
+    D->>P: cancel_subscription(plan_pda, subscription_pda)
+    Note over P: Compute expires_at_ts = end of current period<br/>Emit SubscriptionCancelled event
 
     X->>P: transfer_subscription(amount, delegator, mint)
-    Note over P: Rejected (SubscriptionCancelled)
+    Note over P: Within cancellation period:<br/>Pull allowed (grace period)
+
+    Note over D,P: Period boundary passes...
+
+    X->>P: transfer_subscription(amount, delegator, mint)
+    Note over P: Past cancellation period end:<br/>Rejected (SubscriptionCancelled)
+
+    D->>P: revoke_delegation(subscription_pda)
+    Note over P: expires_at_ts in the past → Close account<br/>Return rent to payer
 ```
 
 ### Merchant Sunsets and Deletes Plan
@@ -552,7 +593,7 @@ Subscription Delegations would use different PDA seeds than direct delegations, 
 
 **Subscription Delegation Seeds (ADR-002):**
 ```
-["delegation", plan_pda, delegator]
+["subscription", plan_pda, subscriber]
 ```
 
 This enables incremental rollout (start with direct, add subscriptions later) without breaking existing delegations.

@@ -1,8 +1,13 @@
-use pinocchio::{error::ProgramError, AccountView, ProgramResult};
+use pinocchio::{
+    error::ProgramError,
+    sysvars::{clock::Clock, Sysvar},
+    AccountView, ProgramResult,
+};
 
 use crate::{
+    state::{common::AccountDiscriminator, subscription_delegation::SubscriptionDelegation},
     AccountCheck, AccountClose, Header, MultiDelegatorError, ProgramAccount, SignerAccount,
-    WritableAccount, DELEGATEE_OFFSET, DELEGATOR_OFFSET, PAYER_OFFSET,
+    WritableAccount, DELEGATEE_OFFSET, DELEGATOR_OFFSET, DISCRIMINATOR_OFFSET, PAYER_OFFSET,
 };
 
 pub struct RevokeDelegationAccounts<'a> {
@@ -36,41 +41,72 @@ pub const DISCRIMINATOR: &u8 = &3;
 
 /// Revokes a delegation by closing the delegation PDA.
 /// The rent lamports are returned to the original payer.
+///
+/// For Fixed/Recurring delegations: closes immediately.
+/// For Subscriptions: requires cancellation first (expires_at_ts != 0) and expiration in the past.
 pub fn process(accounts: &[AccountView]) -> ProgramResult {
     let accounts = RevokeDelegationAccounts::try_from(accounts)?;
 
-    let destination = {
-        let data = accounts.delegation_account.try_borrow()?;
+    let data = accounts.delegation_account.try_borrow()?;
 
-        if data.len() < Header::LEN {
-            return Err(MultiDelegatorError::InvalidHeaderData.into());
-        }
+    if data.len() < Header::LEN {
+        return Err(MultiDelegatorError::InvalidHeaderData.into());
+    }
 
-        let delegator_bytes: &[u8; 32] = data[DELEGATOR_OFFSET..DELEGATEE_OFFSET]
-            .try_into()
-            .map_err(|_| MultiDelegatorError::InvalidHeaderData)?;
-        if delegator_bytes != accounts.authority.address().as_ref() {
+    let kind = data[DISCRIMINATOR_OFFSET];
+
+    // For subscriptions, validate cancellation before closing
+    if kind == AccountDiscriminator::SubscriptionDelegation as u8 {
+        let subscription = SubscriptionDelegation::load(&data)?;
+
+        if subscription.header.delegator != *accounts.authority.address() {
             return Err(MultiDelegatorError::Unauthorized.into());
         }
 
-        let payer_bytes: &[u8; 32] = data[PAYER_OFFSET..PAYER_OFFSET + 32]
-            .try_into()
-            .map_err(|_| MultiDelegatorError::InvalidPayerData)?;
-
-        if payer_bytes == accounts.authority.address().as_ref() {
-            accounts.authority
-        } else {
-            let receiver = accounts
-                .receiver
-                .ok_or(MultiDelegatorError::NotEnoughAccountKeys)?;
-            if receiver.address().as_ref() != payer_bytes {
-                return Err(MultiDelegatorError::Unauthorized.into());
-            }
-            receiver
+        // Subscription must be cancelled (expires_at_ts != 0) and expired
+        let current_ts = Clock::get()?.unix_timestamp;
+        if subscription.expires_at_ts == 0 || subscription.expires_at_ts > current_ts {
+            return Err(MultiDelegatorError::SubscriptionNotCancelled.into());
         }
-    };
+    } else if kind != AccountDiscriminator::FixedDelegation as u8
+        && kind != AccountDiscriminator::RecurringDelegation as u8
+    {
+        return Err(MultiDelegatorError::InvalidAccountDiscriminator.into());
+    }
+
+    let destination = resolve_destination(&data, &accounts)?;
+    drop(data);
 
     ProgramAccount::close(accounts.delegation_account, destination)
+}
+
+/// Resolves the rent destination from the payer field in the header.
+fn resolve_destination<'a>(
+    data: &[u8],
+    accounts: &RevokeDelegationAccounts<'a>,
+) -> Result<&'a AccountView, ProgramError> {
+    let delegator_bytes: &[u8; 32] = data[DELEGATOR_OFFSET..DELEGATEE_OFFSET]
+        .try_into()
+        .map_err(|_| MultiDelegatorError::InvalidHeaderData)?;
+    if delegator_bytes != accounts.authority.address().as_ref() {
+        return Err(MultiDelegatorError::Unauthorized.into());
+    }
+
+    let payer_bytes: &[u8; 32] = data[PAYER_OFFSET..PAYER_OFFSET + 32]
+        .try_into()
+        .map_err(|_| MultiDelegatorError::InvalidPayerData)?;
+
+    if payer_bytes == accounts.authority.address().as_ref() {
+        Ok(accounts.authority)
+    } else {
+        let receiver = accounts
+            .receiver
+            .ok_or(MultiDelegatorError::NotEnoughAccountKeys)?;
+        if receiver.address().as_ref() != payer_bytes {
+            return Err(MultiDelegatorError::Unauthorized.into());
+        }
+        Ok(receiver)
+    }
 }
 
 #[cfg(test)]
@@ -83,8 +119,10 @@ mod tests {
             asserts::TransactionResultExt,
             constants::{MINT_DECIMALS, TOKEN_PROGRAM_ID},
             utils::{
-                current_ts, days, init_ata, init_mint, init_wallet,
-                initialize_multidelegate_action, setup, CreateDelegation, RevokeDelegation,
+                current_ts, days, hours, init_ata, init_mint, init_wallet,
+                initialize_multidelegate_action, move_clock_forward, setup,
+                setup_with_subscription, CancelSubscription, CreateDelegation, CreateSubscription,
+                RevokeDelegation, RevokeSubscription,
             },
         },
         AccountDiscriminator, FixedDelegation, MultiDelegatorError, RecurringDelegation,
@@ -448,6 +486,79 @@ mod tests {
             let res = build_and_send_transaction(litesvm, &[&fee_payer], &fee_payer.pubkey(), &ix);
             res.assert_err(MultiDelegatorError::NotSigner);
         }
+    }
+
+    #[test]
+    fn revoke_subscription_without_cancel_rejected() {
+        let (mut litesvm, alice, _merchant, _mint, _plan_pda, _, subscription_pda) =
+            setup_with_subscription();
+
+        // Try to revoke without cancelling first
+        let result = RevokeSubscription::new(&mut litesvm, &alice, subscription_pda).execute();
+        result.assert_err(MultiDelegatorError::SubscriptionNotCancelled);
+
+        // Account should still exist
+        let account = litesvm.get_account(&subscription_pda);
+        assert!(account.is_some());
+    }
+
+    #[test]
+    fn revoke_subscription_after_cancel_succeeds() {
+        let (mut litesvm, alice, merchant, _mint, plan_pda, plan_bump, subscription_pda) =
+            setup_with_subscription();
+
+        let balance_before = litesvm.get_account(&alice.pubkey()).unwrap().lamports;
+
+        // Cancel first
+        CancelSubscription::new(
+            &mut litesvm,
+            &alice,
+            merchant.pubkey(),
+            plan_pda,
+            1,
+            plan_bump,
+            subscription_pda,
+        )
+        .execute()
+        .assert_ok();
+
+        // Advance clock past the expiration (plan has 1h period)
+        move_clock_forward(&mut litesvm, hours(1));
+
+        // Then revoke
+        RevokeSubscription::new(&mut litesvm, &alice, subscription_pda)
+            .execute()
+            .assert_ok();
+
+        // Account should be closed
+        let account = litesvm.get_account(&subscription_pda);
+        assert!(
+            account.is_none() || account.as_ref().map(|a| a.lamports).unwrap_or(0) == 0,
+            "Subscription PDA should be closed"
+        );
+
+        // Rent should be returned
+        let balance_after = litesvm.get_account(&alice.pubkey()).unwrap().lamports;
+        assert!(balance_after > balance_before - 10000);
+    }
+
+    #[test]
+    fn revoke_subscription_with_future_expires_at_ts_rejected() {
+        let (mut litesvm, alice, _merchant, _mint, plan_pda, _, _subscription_pda) =
+            setup_with_subscription();
+
+        // Manually inject a subscription with expires_at_ts in the future
+        let subscription_pda =
+            CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), current_ts())
+                .expires_at_ts(current_ts() + days(1) as i64)
+                .execute();
+
+        let result = RevokeSubscription::new(&mut litesvm, &alice, subscription_pda).execute();
+        result.assert_err(MultiDelegatorError::SubscriptionNotCancelled);
+
+        // Account should still exist
+        let account = litesvm.get_account(&subscription_pda);
+        assert!(account.is_some());
     }
 
     #[allow(clippy::result_large_err)]
