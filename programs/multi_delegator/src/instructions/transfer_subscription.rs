@@ -549,24 +549,16 @@ mod tests {
             merchant,
             mint,
             plan_pda,
-            plan_bump,
+            _plan_bump,
             subscription_pda,
             _,
             merchant_ata,
         ) = setup_plan_and_subscription(amount_per_period, period_hours, end_ts, vec![], vec![]);
 
         // Cancel the subscription (sets expires_at_ts = end of current period)
-        CancelSubscription::new(
-            &mut litesvm,
-            &alice,
-            merchant.pubkey(),
-            plan_pda,
-            1,
-            plan_bump,
-            subscription_pda,
-        )
-        .execute()
-        .assert_ok();
+        CancelSubscription::new(&mut litesvm, &alice, plan_pda, subscription_pda)
+            .execute()
+            .assert_ok();
 
         // Pull within the same period should still succeed
         TransferSubscription::new(
@@ -590,21 +582,13 @@ mod tests {
         let period_hours = 1u64;
         let end_ts = current_ts() + days(30) as i64;
 
-        let (mut litesvm, alice, merchant, mint, plan_pda, plan_bump, subscription_pda, _, _) =
+        let (mut litesvm, alice, merchant, mint, plan_pda, _plan_bump, subscription_pda, _, _) =
             setup_plan_and_subscription(amount_per_period, period_hours, end_ts, vec![], vec![]);
 
         // Cancel the subscription
-        CancelSubscription::new(
-            &mut litesvm,
-            &alice,
-            merchant.pubkey(),
-            plan_pda,
-            1,
-            plan_bump,
-            subscription_pda,
-        )
-        .execute()
-        .assert_ok();
+        CancelSubscription::new(&mut litesvm, &alice, plan_pda, subscription_pda)
+            .execute()
+            .assert_ok();
 
         // Move clock past the period boundary
         move_clock_forward(&mut litesvm, hours(1));

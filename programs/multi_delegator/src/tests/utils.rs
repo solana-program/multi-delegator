@@ -1093,10 +1093,7 @@ impl<'a> Subscribe<'a> {
 pub struct CancelSubscription<'a> {
     litesvm: &'a mut LiteSVM,
     subscriber: &'a Keypair,
-    merchant: Pubkey,
     plan_pda: Pubkey,
-    plan_id: u64,
-    plan_bump: u8,
     subscription_pda: Pubkey,
 }
 
@@ -1104,19 +1101,13 @@ impl<'a> CancelSubscription<'a> {
     pub fn new(
         litesvm: &'a mut LiteSVM,
         subscriber: &'a Keypair,
-        merchant: Pubkey,
         plan_pda: Pubkey,
-        plan_id: u64,
-        plan_bump: u8,
         subscription_pda: Pubkey,
     ) -> Self {
         Self {
             litesvm,
             subscriber,
-            merchant,
             plan_pda,
-            plan_id,
-            plan_bump,
             subscription_pda,
         }
     }
@@ -1127,24 +1118,16 @@ impl<'a> CancelSubscription<'a> {
 
         let accounts = vec![
             AccountMeta::new_readonly(self.subscriber.pubkey(), true),
-            AccountMeta::new_readonly(self.merchant, false),
             AccountMeta::new_readonly(self.plan_pda, false),
             AccountMeta::new(self.subscription_pda, false),
             AccountMeta::new_readonly(event_authority, false),
             AccountMeta::new_readonly(PROGRAM_ID, false),
         ];
 
-        let data = [
-            vec![*cancel_subscription::DISCRIMINATOR],
-            self.plan_id.to_le_bytes().to_vec(),
-            vec![self.plan_bump],
-        ]
-        .concat();
-
         let ix = Instruction {
             program_id: PROGRAM_ID,
             accounts,
-            data,
+            data: vec![*cancel_subscription::DISCRIMINATOR],
         };
 
         build_and_send_transaction(

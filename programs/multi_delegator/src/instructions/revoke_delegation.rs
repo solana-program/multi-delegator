@@ -504,23 +504,15 @@ mod tests {
 
     #[test]
     fn revoke_subscription_after_cancel_succeeds() {
-        let (mut litesvm, alice, merchant, _mint, plan_pda, plan_bump, subscription_pda) =
+        let (mut litesvm, alice, _merchant, _mint, plan_pda, _plan_bump, subscription_pda) =
             setup_with_subscription();
 
         let balance_before = litesvm.get_account(&alice.pubkey()).unwrap().lamports;
 
         // Cancel first
-        CancelSubscription::new(
-            &mut litesvm,
-            &alice,
-            merchant.pubkey(),
-            plan_pda,
-            1,
-            plan_bump,
-            subscription_pda,
-        )
-        .execute()
-        .assert_ok();
+        CancelSubscription::new(&mut litesvm, &alice, plan_pda, subscription_pda)
+            .execute()
+            .assert_ok();
 
         // Advance clock past the expiration (plan has 1h period)
         move_clock_forward(&mut litesvm, hours(1));

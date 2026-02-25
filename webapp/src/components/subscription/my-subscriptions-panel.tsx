@@ -19,8 +19,6 @@ function CancelSubscriptionDialog({ item, open, onOpenChange }: {
 }) {
   const { cancelSubscription } = useMultiDelegatorMutations()
 
-  if (!item.plan) return null
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="border-amber-500/30 bg-slate-950">
@@ -35,8 +33,7 @@ function CancelSubscriptionDialog({ item, open, onOpenChange }: {
           <Button
             variant="outline"
             onClick={() => cancelSubscription.mutate({
-              merchant: item.plan!.owner,
-              planId: item.plan!.data.planId,
+              planPda: item.subscription.header.delegatee,
               subscriptionPda: item.address,
             }, { onSuccess: () => onOpenChange(false) })}
             disabled={cancelSubscription.isPending}
@@ -100,9 +97,45 @@ function RevokeSubscriptionDialog({ item, open, onOpenChange }: {
   )
 }
 
+function CancelAndRevokeDialog({ item, open, onOpenChange }: {
+  item: EnrichedSubscription
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const { cancelAndRevokeSubscription } = useMultiDelegatorMutations()
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="border-red-500/30 bg-slate-950">
+        <DialogHeader>
+          <DialogTitle className="text-red-400">Unsubscribe & Delete</DialogTitle>
+          <DialogDescription>
+            The plan for this subscription has been deleted. This will cancel and immediately delete the subscription, returning rent to your wallet.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Keep</Button>
+          <Button
+            variant="destructive"
+            onClick={() => cancelAndRevokeSubscription.mutate({
+              planPda: item.subscription.header.delegatee,
+              subscriptionPda: item.address,
+            }, { onSuccess: () => onOpenChange(false) })}
+            disabled={cancelAndRevokeSubscription.isPending}
+          >
+            <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+            {cancelAndRevokeSubscription.isPending ? 'Processing...' : 'Unsubscribe & Delete'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function SubscriptionCard({ item }: { item: EnrichedSubscription }) {
   const [cancelOpen, setCancelOpen] = useState(false)
   const [revokeOpen, setRevokeOpen] = useState(false)
+  const [cancelAndRevokeOpen, setCancelAndRevokeOpen] = useState(false)
   const { getCurrentTimestamp } = useTimeTravel()
   const isActive = Number(item.subscription.expiresAtTs) === 0
   const isCancelled = !isActive
@@ -178,48 +211,49 @@ function SubscriptionCard({ item }: { item: EnrichedSubscription }) {
             )}
           </div>
 
-          {planDeleted ? (
-            <div className="pt-2 border-t border-red-500/10">
-              <p className="text-xs text-gray-500 text-center py-1">Pending program update to reclaim rent</p>
-            </div>
-          ) : (
-            <div className="pt-2 border-t border-teal-500/10">
-              {isActive ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCancelOpen(true)}
-                  className="w-full border-amber-500/30 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
-                >
-                  Unsubscribe
-                </Button>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setRevokeOpen(true)}
-                  disabled={!isExpired}
-                  className={cn(
-                    'w-full',
-                    isExpired
-                      ? 'border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300'
-                      : 'border-gray-600/30 text-gray-500 cursor-not-allowed',
-                  )}
-                >
-                  <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-                  {isExpired ? 'Delete' : `${daysLeft ?? '?'} days left`}
-                </Button>
-              )}
-            </div>
-          )}
+          <div className={cn('pt-2 border-t', planDeleted ? 'border-red-500/10' : 'border-teal-500/10')}>
+            {planDeleted && isActive ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCancelAndRevokeOpen(true)}
+                className="w-full border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                Unsubscribe & Delete
+              </Button>
+            ) : isActive ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCancelOpen(true)}
+                className="w-full border-amber-500/30 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
+              >
+                Unsubscribe
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setRevokeOpen(true)}
+                disabled={!isExpired}
+                className={cn(
+                  'w-full',
+                  isExpired
+                    ? 'border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300'
+                    : 'border-gray-600/30 text-gray-500 cursor-not-allowed',
+                )}
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                {isExpired ? 'Delete' : `${daysLeft ?? '?'} days left`}
+              </Button>
+            )}
+          </div>
         </CardContent>
       </Card>
-      {item.plan && (
-        <>
-          <CancelSubscriptionDialog item={item} open={cancelOpen} onOpenChange={setCancelOpen} />
-          <RevokeSubscriptionDialog item={item} open={revokeOpen} onOpenChange={setRevokeOpen} />
-        </>
-      )}
+      <CancelSubscriptionDialog item={item} open={cancelOpen} onOpenChange={setCancelOpen} />
+      <RevokeSubscriptionDialog item={item} open={revokeOpen} onOpenChange={setRevokeOpen} />
+      <CancelAndRevokeDialog item={item} open={cancelAndRevokeOpen} onOpenChange={setCancelAndRevokeOpen} />
     </>
   )
 }

@@ -508,24 +508,17 @@ export class MultiDelegatorClient {
 
   async cancelSubscription(
     subscriber: TransactionSigner,
-    merchant: Address,
-    planId: number | bigint,
+    planPda: Address,
     subscriptionPda: Address,
   ): Promise<{ signature: string }> {
-    const [planPda, planBump] = await getPlanPDA(merchant, planId);
     const [eventAuthority] = await getEventAuthorityPDA();
 
     const instruction = getCancelSubscriptionInstruction({
       subscriber,
-      merchant,
       planPda,
       subscriptionPda,
       eventAuthority,
       selfProgram: MULTI_DELEGATOR_PROGRAM_ADDRESS,
-      cancelSubscriptionData: {
-        planId,
-        planBump,
-      },
     });
 
     const signature = await this.buildAndSendTransaction(

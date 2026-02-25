@@ -24,7 +24,6 @@ use codama::CodamaInstructions;
 use pinocchio::error::ProgramError;
 
 use crate::event_engine::EMIT_EVENT_IX_DISC;
-use crate::instructions::cancel_subscription::CancelSubscriptionData;
 use crate::instructions::create_plan::PlanData;
 use crate::instructions::subscribe::SubscribeData;
 use crate::instructions::update_plan::UpdatePlanData;
@@ -273,7 +272,6 @@ pub enum MultiDelegatorInstruction {
         signer,
         docs = "The subscriber cancelling the subscription"
     ))]
-    #[codama(account(name = "merchant", docs = "The merchant who owns the plan"))]
     #[codama(account(name = "plan_pda", docs = "The plan PDA for the subscription"))]
     #[codama(account(
         name = "subscription_pda",
@@ -282,7 +280,7 @@ pub enum MultiDelegatorInstruction {
     ))]
     #[codama(account(name = "event_authority", docs = "The event authority PDA"))]
     #[codama(account(name = "self_program", docs = "This program (for self-CPI)"))]
-    CancelSubscription(#[codama(name = "cancel_subscription_data")] CancelSubscriptionData) = 12,
+    CancelSubscription = 12,
 
     #[codama(account(name = "event_authority", signer, docs = "The event authority PDA"))]
     EmitEvent = 228,
@@ -333,10 +331,7 @@ impl MultiDelegatorInstruction {
                 let loaded = SubscribeData::load(rest)?;
                 Ok(Self::Subscribe(loaded.clone()))
             }
-            cancel_subscription::DISCRIMINATOR => {
-                let loaded = CancelSubscriptionData::load(rest)?;
-                Ok(Self::CancelSubscription(loaded.clone()))
-            }
+            cancel_subscription::DISCRIMINATOR => Ok(Self::CancelSubscription),
             &EMIT_EVENT_IX_DISC => Ok(Self::EmitEvent),
             _ => Err(MultiDelegatorError::InvalidInstruction.into()),
         }
@@ -358,7 +353,7 @@ impl fmt::Display for MultiDelegatorInstruction {
             Self::DeletePlan => write!(f, "delete_plan"),
             Self::TransferSubscription(_) => write!(f, "transfer_subscription"),
             Self::Subscribe(_) => write!(f, "subscribe"),
-            Self::CancelSubscription(_) => write!(f, "cancel_subscription"),
+            Self::CancelSubscription => write!(f, "cancel_subscription"),
             Self::EmitEvent => write!(f, "emit_event"),
         }
     }

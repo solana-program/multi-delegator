@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { fetchSubscriptionDelegation } from '../src/generated/index.ts';
+import { getPlanPDA } from '../src/pdas.ts';
 import { DEFAULT_TEST_BALANCE, initTestSuite } from './setup.ts';
 
 describe('CancelSubscription', () => {
@@ -38,22 +39,19 @@ describe('CancelSubscription', () => {
       t.tokenMint,
     );
 
-    // Verify not cancelled yet
     const subBefore = (
       await fetchSubscriptionDelegation(t.rpc, subscriptionPda)
     ).data;
     expect(subBefore.expiresAtTs).toBe(0n);
 
-    // Cancel
+    const [planPda] = await getPlanPDA(t.payer.address, 1n);
     const { signature } = await t.client.cancelSubscription(
       subscriber,
-      t.payer.address,
-      1n,
+      planPda,
       subscriptionPda,
     );
     expect(signature).toBeDefined();
 
-    // Verify cancelled
     const subAfter = (await fetchSubscriptionDelegation(t.rpc, subscriptionPda))
       .data;
     expect(subAfter.expiresAtTs).not.toBe(0n);
@@ -94,15 +92,10 @@ describe('CancelSubscription', () => {
       t.tokenMint,
     );
 
-    // A different user tries to cancel
+    const [planPda] = await getPlanPDA(t.payer.address, 1n);
     const impostor = await t.createFundedKeypair();
     await expect(
-      t.client.cancelSubscription(
-        impostor,
-        t.payer.address,
-        1n,
-        subscriptionPda,
-      ),
+      t.client.cancelSubscription(impostor, planPda, subscriptionPda),
     ).rejects.toThrow();
   });
 
@@ -141,21 +134,11 @@ describe('CancelSubscription', () => {
       t.tokenMint,
     );
 
-    await t.client.cancelSubscription(
-      subscriber,
-      t.payer.address,
-      1n,
-      subscriptionPda,
-    );
+    const [planPda] = await getPlanPDA(t.payer.address, 1n);
+    await t.client.cancelSubscription(subscriber, planPda, subscriptionPda);
 
-    // Second cancel should fail
     await expect(
-      t.client.cancelSubscription(
-        subscriber,
-        t.payer.address,
-        1n,
-        subscriptionPda,
-      ),
+      t.client.cancelSubscription(subscriber, planPda, subscriptionPda),
     ).rejects.toThrow();
   });
 });

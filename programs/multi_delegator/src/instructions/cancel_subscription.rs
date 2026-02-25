@@ -1,6 +1,3 @@
-use core::mem::{size_of, transmute};
-
-use codama::CodamaType;
 use pinocchio::{
     error::ProgramError,
     sysvars::{clock::Clock, Sysvar},
@@ -11,43 +8,14 @@ use crate::{
     event_engine::{self, EventSerialize},
     events::SubscriptionCancelledEvent,
     state::{plan::Plan, subscription_delegation::SubscriptionDelegation},
-    verify_plan_pda, AccountCheck, MultiDelegatorError, ProgramAccount, SignerAccount,
-    WritableAccount,
+    AccountCheck, MultiDelegatorError, ProgramAccount, SignerAccount, WritableAccount,
 };
 
 pub const DISCRIMINATOR: &u8 = &12;
 
-#[repr(C, packed)]
-#[derive(CodamaType, Debug, Clone)]
-pub struct CancelSubscriptionData {
-    pub plan_id: u64,
-    pub plan_bump: u8,
-}
-
-impl CancelSubscriptionData {
-    pub const LEN: usize = size_of::<CancelSubscriptionData>();
-
-    pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
-        if data.len() != Self::LEN {
-            return Err(MultiDelegatorError::InvalidInstructionData.into());
-        }
-        Ok(unsafe { &*transmute::<*const u8, *const Self>(data.as_ptr()) })
-    }
-}
-
-pub fn process(accounts: &[AccountView], data: &CancelSubscriptionData) -> ProgramResult {
+pub fn process(accounts: &[AccountView]) -> ProgramResult {
     let accounts_struct = CancelSubscriptionAccounts::try_from(accounts)?;
     let current_ts = Clock::get()?.unix_timestamp;
-
-    // Validate plan PDA derivation
-    let expected_plan_pda = verify_plan_pda(
-        accounts_struct.merchant.address(),
-        data.plan_id,
-        data.plan_bump,
-    )?;
-    if expected_plan_pda != *accounts_struct.plan_pda.address() {
-        return Err(MultiDelegatorError::InvalidPlanPda.into());
-    }
 
     let expires_at_ts;
     let plan_pda;
@@ -115,7 +83,6 @@ pub fn process(accounts: &[AccountView], data: &CancelSubscriptionData) -> Progr
 
 pub struct CancelSubscriptionAccounts<'a> {
     pub subscriber: &'a AccountView,
-    pub merchant: &'a AccountView,
     pub plan_pda: &'a AccountView,
     pub subscription_pda: &'a AccountView,
     pub event_authority: &'a AccountView,
@@ -126,8 +93,7 @@ impl<'a> TryFrom<&'a [AccountView]> for CancelSubscriptionAccounts<'a> {
     type Error = ProgramError;
 
     fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> {
-        let [subscriber, merchant, plan_pda, subscription_pda, event_authority, self_program] =
-            accounts
+        let [subscriber, plan_pda, subscription_pda, event_authority, self_program] = accounts
         else {
             return Err(MultiDelegatorError::NotEnoughAccountKeys.into());
         };
@@ -138,7 +104,6 @@ impl<'a> TryFrom<&'a [AccountView]> for CancelSubscriptionAccounts<'a> {
 
         Ok(Self {
             subscriber,
-            merchant,
             plan_pda,
             subscription_pda,
             event_authority,
@@ -157,24 +122,14 @@ mod tests {
         },
         MultiDelegatorError,
     };
-    use solana_signer::Signer;
-
     #[test]
     fn cancel_subscription_happy_path() {
-        let (mut litesvm, alice, merchant, _mint, plan_pda, plan_bump, subscription_pda) =
+        let (mut litesvm, alice, _merchant, _mint, plan_pda, _plan_bump, subscription_pda) =
             setup_with_subscription();
 
-        CancelSubscription::new(
-            &mut litesvm,
-            &alice,
-            merchant.pubkey(),
-            plan_pda,
-            1,
-            plan_bump,
-            subscription_pda,
-        )
-        .execute()
-        .assert_ok();
+        CancelSubscription::new(&mut litesvm, &alice, plan_pda, subscription_pda)
+            .execute()
+            .assert_ok();
 
         // Verify expires_at_ts is set (end of current period)
         let sub_account = litesvm.get_account(&subscription_pda).unwrap();
@@ -184,52 +139,28 @@ mod tests {
 
     #[test]
     fn cancel_subscription_non_subscriber_rejected() {
-        let (mut litesvm, _alice, merchant, _mint, plan_pda, plan_bump, subscription_pda) =
+        let (mut litesvm, _alice, _merchant, _mint, plan_pda, _plan_bump, subscription_pda) =
             setup_with_subscription();
 
         let attacker = init_wallet(&mut litesvm, 10_000_000_000);
-        let res = CancelSubscription::new(
-            &mut litesvm,
-            &attacker,
-            merchant.pubkey(),
-            plan_pda,
-            1,
-            plan_bump,
-            subscription_pda,
-        )
-        .execute();
+        let res =
+            CancelSubscription::new(&mut litesvm, &attacker, plan_pda, subscription_pda).execute();
         res.assert_err(MultiDelegatorError::Unauthorized);
     }
 
     #[test]
     fn cancel_subscription_already_cancelled_rejected() {
-        let (mut litesvm, alice, merchant, _mint, plan_pda, plan_bump, subscription_pda) =
+        let (mut litesvm, alice, _merchant, _mint, plan_pda, _plan_bump, subscription_pda) =
             setup_with_subscription();
 
         // Cancel once
-        CancelSubscription::new(
-            &mut litesvm,
-            &alice,
-            merchant.pubkey(),
-            plan_pda,
-            1,
-            plan_bump,
-            subscription_pda,
-        )
-        .execute()
-        .assert_ok();
+        CancelSubscription::new(&mut litesvm, &alice, plan_pda, subscription_pda)
+            .execute()
+            .assert_ok();
 
         // Cancel again should fail
-        let res = CancelSubscription::new(
-            &mut litesvm,
-            &alice,
-            merchant.pubkey(),
-            plan_pda,
-            1,
-            plan_bump,
-            subscription_pda,
-        )
-        .execute();
+        let res =
+            CancelSubscription::new(&mut litesvm, &alice, plan_pda, subscription_pda).execute();
         res.assert_err(MultiDelegatorError::SubscriptionAlreadyCancelled);
     }
 }

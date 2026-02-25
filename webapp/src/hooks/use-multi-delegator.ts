@@ -450,27 +450,22 @@ export function useMultiDelegatorMutations() {
 
   const cancelSubscription = useMutation({
     mutationFn: async ({
-      merchant,
-      planId,
+      planPda,
       subscriptionPda,
     }: {
-      merchant: string;
-      planId: bigint;
+      planPda: string;
       subscriptionPda: string;
     }) => {
       if (!signer) throw new Error("Wallet not connected");
 
-      const [planPda, planBump] = await getPlanPDA(address(merchant), planId);
       const [eventAuthority] = await getEventAuthorityPDA();
 
       const instruction = getCancelSubscriptionInstruction({
         subscriber: signer,
-        merchant: address(merchant),
-        planPda,
+        planPda: address(planPda),
         subscriptionPda: address(subscriptionPda),
         eventAuthority,
         selfProgram: address(MULTI_DELEGATOR_PROGRAM_ADDRESS),
-        cancelSubscriptionData: { planId, planBump },
       });
 
       const signature = await signAndSend(instruction, signer);
@@ -497,6 +492,41 @@ export function useMultiDelegatorMutations() {
       });
 
       const signature = await signAndSend(instruction, signer);
+      return { signature };
+    },
+    onSuccess: (res) => {
+      toast.onSuccess(res.signature);
+      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
+    },
+    onError: (error) => toast.onError(error),
+  });
+
+  const cancelAndRevokeSubscription = useMutation({
+    mutationFn: async ({
+      planPda,
+      subscriptionPda,
+    }: {
+      planPda: string;
+      subscriptionPda: string;
+    }) => {
+      if (!signer) throw new Error("Wallet not connected");
+
+      const [eventAuthority] = await getEventAuthorityPDA();
+
+      const cancelIx = getCancelSubscriptionInstruction({
+        subscriber: signer,
+        planPda: address(planPda),
+        subscriptionPda: address(subscriptionPda),
+        eventAuthority,
+        selfProgram: address(MULTI_DELEGATOR_PROGRAM_ADDRESS),
+      });
+
+      const revokeIx = getRevokeDelegationInstruction({
+        authority: signer,
+        delegationAccount: address(subscriptionPda),
+      });
+
+      const signature = await signAndSend([cancelIx, revokeIx], signer);
       return { signature };
     },
     onSuccess: (res) => {
@@ -620,6 +650,7 @@ export function useMultiDelegatorMutations() {
     subscribe,
     cancelSubscription,
     revokeSubscription,
+    cancelAndRevokeSubscription,
     collectSubscriptionPayments,
   };
 }
