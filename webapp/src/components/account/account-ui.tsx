@@ -141,7 +141,7 @@ export function WalletBalanceCards({ address: addr }: { address: Address }) {
           </CardHeader>
           <CardContent className="relative pt-4">
             <div className="space-y-1">
-              <div className="text-[28px] sm:text-[40px] leading-tight font-bold tracking-tight text-purple-300">
+              <div className="text-xl sm:text-3xl lg:text-[40px] leading-tight font-bold tracking-tight text-purple-300">
                 {solQuery.data?.value ? (
                   <span className="drop-shadow-[0_0_10px_rgba(168,85,247,0.5)]">{Number(lamportsToSol(solQuery.data.value)).toFixed(4)}</span>
                 ) : (
@@ -165,17 +165,17 @@ export function WalletBalanceCards({ address: addr }: { address: Address }) {
           <CardContent className="relative pt-4">
             <div className="space-y-3">
               {tokenQuery.isLoading ? (
-                <div className="text-[28px] sm:text-[40px] leading-tight font-bold text-muted-foreground">...</div>
+                <div className="text-lg sm:text-2xl lg:text-[36px] leading-tight font-bold text-muted-foreground">...</div>
               ) : (
                 <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <div className="text-[24px] sm:text-[36px] leading-tight font-bold tracking-tight text-emerald-400 drop-shadow-[0_0_10px_rgba(16,185,129,0.5)]">
+                  <div className="min-w-0">
+                    <div className="text-lg sm:text-2xl lg:text-[36px] leading-tight font-bold tracking-tight text-emerald-400 drop-shadow-[0_0_10px_rgba(16,185,129,0.5)]">
                       {usdcBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                     <div className="text-sm font-medium text-gray-500 tracking-wide">Wallet</div>
                   </div>
-                  <div>
-                    <div className="text-[24px] sm:text-[36px] leading-tight font-bold tracking-tight text-emerald-400 drop-shadow-[0_0_10px_rgba(16,185,129,0.5)]">
+                  <div className="min-w-0">
+                    <div className="text-lg sm:text-2xl lg:text-[36px] leading-tight font-bold tracking-tight text-emerald-400 drop-shadow-[0_0_10px_rgba(16,185,129,0.5)]">
                       {(usdcBalance - reservedAmount + incomingAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                     <div className="text-sm font-medium text-gray-500 tracking-wide">Spendable</div>
@@ -186,7 +186,7 @@ export function WalletBalanceCards({ address: addr }: { address: Address }) {
                 </div>
               )}
               {(reservedAmount > 0 || incomingAmount > 0) && (
-                <div className="flex items-center gap-3 text-sm">
+                <div className="flex items-center gap-3 text-sm flex-wrap">
                   {reservedAmount > 0 && (
                     <span className="text-amber-400/80">
                       {reservedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} delegated

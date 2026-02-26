@@ -34,6 +34,7 @@ import { useWalletUiSigner } from "../components/solana/use-wallet-ui-signer";
 import { useWalletTransactionSignAndSend } from "../components/solana/use-wallet-transaction-sign-and-send";
 import { useTransactionToast } from "../components/use-transaction-toast";
 import { invalidateWithDelay } from "@/lib/utils";
+import { packInstructionBatches } from "@/lib/tx-packer";
 import { getBlockTimestamp } from "@/hooks/use-time-travel";
 
 export function useMultiDelegatorMutations() {
@@ -598,25 +599,14 @@ export function useMultiDelegatorMutations() {
 
       const signatures: string[] = [];
       let collected = 0;
+      const batches = packInstructionBatches(transferIxs, signer, [createAtaIx]);
 
-      const FIRST_BATCH_TRANSFERS = 3; // one slot used by ATA creation ix
-      try {
-        const firstBatch = [createAtaIx, ...transferIxs.slice(0, FIRST_BATCH_TRANSFERS)];
-        signatures.push(await signAndSend(firstBatch, signer));
-        collected += Math.min(FIRST_BATCH_TRANSFERS, transferIxs.length);
-      } catch (e) {
-        if (collected === 0) throw e;
-        return { signatures, collected, partial: true };
-      }
-
-      const MAX_TRANSFERS_PER_TX = 4;
-      const firstBatchSize = MAX_TRANSFERS_PER_TX - 1;
-      for (let i = firstBatchSize; i < transferIxs.length; i += MAX_TRANSFERS_PER_TX) {
+      for (let b = 0; b < batches.length; b++) {
         try {
-          const batch = transferIxs.slice(i, i + MAX_TRANSFERS_PER_TX);
-          signatures.push(await signAndSend(batch, signer));
-          collected += batch.length;
+          signatures.push(await signAndSend(batches[b], signer));
+          collected += batches[b].length - (b === 0 ? 1 : 0);
         } catch (err) {
+          if (collected === 0) throw err;
           console.warn(
             `Batch failed after collecting ${collected}/${subscribers.length}:`,
             err instanceof Error ? err.message : err,
@@ -626,6 +616,108 @@ export function useMultiDelegatorMutations() {
       }
 
       return { signatures, collected, partial: false };
+    },
+    onSuccess: (res) => {
+      toast.onSuccess(res.signatures[0]);
+      invalidateWithDelay(queryClient, [
+        ["subscriberCounts"],
+        ["get-token-accounts"],
+      ]);
+    },
+    onError: (error) => toast.onError(error),
+  });
+
+  const collectAllPlanPayments = useMutation({
+    mutationFn: async ({
+      plans,
+    }: {
+      plans: Array<{
+        planAddress: string;
+        subscribers: Array<{ subscriptionAddress: string; delegator: string; amount: bigint }>;
+        mint: string;
+        destinations: string[];
+      }>;
+    }) => {
+      if (!signer) throw new Error("Wallet not connected");
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ataIxs: any[] = [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const transferIxs: any[] = [];
+      const seenAtas = new Set<string>();
+
+      for (const plan of plans) {
+        const mintAddr = address(plan.mint);
+        const planPda = address(plan.planAddress);
+        const firstDest = plan.destinations.find((d) => d !== ZERO_ADDRESS);
+        const receiverOwner = firstDest ? address(firstDest) : signer.address;
+        const [receiverAta] = await findAssociatedTokenPda({
+          mint: mintAddr,
+          owner: receiverOwner,
+          tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+        });
+
+        const ataKey = receiverAta.toString();
+        if (!seenAtas.has(ataKey)) {
+          seenAtas.add(ataKey);
+          ataIxs.push(
+            getCreateAssociatedTokenIdempotentInstruction({
+              payer: signer,
+              ata: receiverAta,
+              owner: receiverOwner,
+              mint: mintAddr,
+              tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+            }),
+          );
+        }
+
+        for (const sub of plan.subscribers) {
+          const delegatorAddr = address(sub.delegator);
+          const [multiDelegate] = await getMultiDelegatePDA(delegatorAddr, mintAddr);
+          const [delegatorAta] = await findAssociatedTokenPda({
+            mint: mintAddr,
+            owner: delegatorAddr,
+            tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+          });
+
+          transferIxs.push(
+            getTransferSubscriptionInstruction({
+              subscriptionPda: address(sub.subscriptionAddress),
+              planPda,
+              multiDelegate,
+              delegatorAta,
+              receiverAta,
+              caller: signer,
+              tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+              transferData: {
+                amount: sub.amount,
+                delegator: delegatorAddr,
+                mint: mintAddr,
+              },
+            }),
+          );
+        }
+      }
+
+      const signatures: string[] = [];
+      let collected = 0;
+      const batches = packInstructionBatches(transferIxs, signer, ataIxs);
+
+      for (let b = 0; b < batches.length; b++) {
+        try {
+          signatures.push(await signAndSend(batches[b], signer));
+          collected += batches[b].length - (b === 0 ? ataIxs.length : 0);
+        } catch (err) {
+          if (collected === 0) throw err;
+          console.warn(
+            `Batch failed after collecting ${collected}/${transferIxs.length}:`,
+            err instanceof Error ? err.message : err,
+          );
+          return { signatures, collected, total: transferIxs.length, partial: true };
+        }
+      }
+
+      return { signatures, collected, total: transferIxs.length, partial: false };
     },
     onSuccess: (res) => {
       toast.onSuccess(res.signatures[0]);
@@ -652,5 +744,6 @@ export function useMultiDelegatorMutations() {
     revokeSubscription,
     cancelAndRevokeSubscription,
     collectSubscriptionPayments,
+    collectAllPlanPayments,
   };
 }

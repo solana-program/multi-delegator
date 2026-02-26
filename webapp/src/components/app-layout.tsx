@@ -1,6 +1,6 @@
 import { Toaster } from './ui/sonner'
 import { AppHeader } from './app-header'
-import { AppFooter } from './app-footer'
+
 import { AppSidebar } from './app-sidebar'
 import React from 'react'
 import { ClusterChecker } from './cluster/cluster-ui'
@@ -18,7 +18,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           </ClusterChecker>
           {children}
         </main>
-        <AppFooter />
       </div>
       <Toaster />
     </div>

@@ -102,7 +102,7 @@ function CollectAllButton({
   const [collecting, setCollecting] = useState(false)
   const [progress, setProgress] = useState('')
   const { url: rpcUrl } = useClusterConfig()
-  const { collectSubscriptionPayments } = useMultiDelegatorMutations()
+  const { collectAllPlanPayments } = useMultiDelegatorMutations()
 
   const eligiblePlans = useMemo(
     () => plansData.filter((p) => p.eligible.length > 0),
@@ -111,26 +111,24 @@ function CollectAllButton({
 
   const handleCollectAll = useCallback(async () => {
     setCollecting(true)
-    const total = eligiblePlans.length
-    let failedCount = 0
+    setProgress('Fetching subscribers...')
 
-    for (let i = 0; i < total; i++) {
-      const pd = eligiblePlans[i]
-      const meta = parsePlanMeta(pd.plan.data.metadataUri)
-      const planName = meta.n || `Plan ${ellipsify(pd.plan.address)}`
-      const amountUsd = Number(pd.plan.data.amount) / USDC_MULTIPLIER
+    try {
+      const ts = await getBlockTimestamp(rpcUrl)
+      const plans: Array<{
+        planAddress: string
+        subscribers: Array<{ subscriptionAddress: string; delegator: string; amount: bigint }>
+        mint: string
+        destinations: string[]
+      }> = []
 
-      setProgress(`Collecting plan ${i + 1}/${total}...`)
-
-      try {
+      for (const pd of eligiblePlans) {
         const subscribers = await fetchPlanSubscriptions(rpcUrl, pd.plan.address)
-        const ts = await getBlockTimestamp(rpcUrl)
         const eligible = computeEligibleSubscribers(
           subscribers, pd.plan.data.amount, pd.plan.data.periodHours, ts,
         )
         if (eligible.length === 0) continue
-
-        const res = await collectSubscriptionPayments.mutateAsync({
+        plans.push({
           planAddress: pd.plan.address,
           subscribers: eligible.map((e) => ({
             subscriptionAddress: e.subscriptionAddress,
@@ -140,25 +138,46 @@ function CollectAllButton({
           mint: pd.plan.data.mint,
           destinations: pd.plan.data.destinations,
         })
+      }
 
+      if (plans.length === 0) {
+        toast.info('No eligible subscribers found')
+        setCollecting(false)
+        setProgress('')
+        return
+      }
+
+      const totalIxs = plans.reduce((sum, p) => sum + p.subscribers.length, 0)
+      setProgress(`Batching ${totalIxs} transfers across ${plans.length} plans...`)
+
+      const res = await collectAllPlanPayments.mutateAsync({ plans })
+
+      for (const pd of eligiblePlans) {
+        const meta = parsePlanMeta(pd.plan.data.metadataUri)
+        const planName = meta.n || `Plan ${ellipsify(pd.plan.address)}`
+        const amountUsd = Number(pd.plan.data.amount) / USDC_MULTIPLIER
         addCollectionRecord(createSuccessRecord(
-          pd.plan.address, planName, res, subscribers.length, amountUsd,
+          pd.plan.address, planName, res, pd.subscribers.length, amountUsd,
         ))
-      } catch (err) {
-        failedCount++
+      }
+
+      toast.success(`Collected ${res.collected}/${res.total} payments`)
+    } catch (err) {
+      for (const pd of eligiblePlans) {
+        const meta = parsePlanMeta(pd.plan.data.metadataUri)
+        const planName = meta.n || `Plan ${ellipsify(pd.plan.address)}`
+        const amountUsd = Number(pd.plan.data.amount) / USDC_MULTIPLIER
         addCollectionRecord(createFailureRecord(
           pd.plan.address, planName, pd.subscribers.length, amountUsd, err,
         ))
       }
+      toast.error('Failed to collect payments')
     }
 
     onComplete?.()
     setCollecting(false)
     setProgress('')
-    if (failedCount === 0) toast.success('Collection complete')
-    else if (failedCount === total) toast.error('All collections failed')
-    else toast.success(`Collection finished with ${failedCount} error(s)`)
-  }, [eligiblePlans, rpcUrl, collectSubscriptionPayments, onComplete])
+  }, [eligiblePlans, rpcUrl, collectAllPlanPayments, onComplete])
 
   return (
     <Button

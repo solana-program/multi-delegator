@@ -440,7 +440,7 @@ function FilterCard({ active, onClick, label, count, subLabel, isActiveCard = tr
     >
       <span className="text-sm text-gray-400 mb-1">{label}</span>
       <div className="flex items-baseline gap-1">
-        <span className={`text-xl font-semibold text-white ${textGlow}`}>{count}</span>
+        <span className={`text-base sm:text-lg lg:text-xl font-semibold text-white ${textGlow}`}>{count}</span>
         <span className="text-sm font-medium text-white">{subLabel}</span>
       </div>
     </button>
@@ -540,19 +540,18 @@ export function ActiveDelegations({ tokenMint, isApproved, onInitSuccess }: Acti
   }, [incoming.all])
 
   const isLoading = activeTab === 'outgoing' ? outgoing.isLoading : incoming.isLoading
-  const isFetching = activeTab === 'outgoing' ? outgoing.isFetching : incoming.isFetching
+  const isFetching = outgoing.isFetching || incoming.isFetching
   const [spinning, setSpinning] = useState(false)
   const isRefreshing = isFetching || spinning
 
   const handleRefresh = async () => {
     setSpinning(true)
     const minSpin = new Promise((r) => setTimeout(r, 600))
-    const refreshBlockTime = queryClient.invalidateQueries({ queryKey: ['blockTime'] })
-    if (activeTab === 'outgoing') {
-      await Promise.all([outgoing.refetch(), refreshBlockTime, minSpin])
-    } else {
-      await Promise.all([incoming.refetch(), refreshBlockTime, minSpin])
-    }
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['delegations'] }),
+      queryClient.invalidateQueries({ queryKey: ['blockTime'] }),
+      minSpin,
+    ])
     setSpinning(false)
   }
 

@@ -81,7 +81,7 @@ export function SummaryCards() {
             <div className="h-px w-full bg-white/5" />
             <div className="flex justify-between items-center text-sm">
               <span className="text-gray-400">Amount</span>
-              <span className="font-bold text-white text-base">${subsCounts.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC</span>
+              <span className="font-bold text-white text-sm sm:text-base truncate">${subsCounts.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC</span>
             </div>
           </div>
         </div>

@@ -190,7 +190,7 @@ function SubscriptionCard({ item }: { item: EnrichedSubscription }) {
           <div className="flex items-baseline gap-1.5">
             {amount !== null && period && (
               <>
-                <span className="text-xl font-bold text-teal-400">${amount}</span>
+                <span className="text-base sm:text-lg lg:text-xl font-bold text-teal-400">${amount}</span>
                 <span className="text-sm text-teal-400/60">/{period.toLowerCase()}</span>
               </>
             )}

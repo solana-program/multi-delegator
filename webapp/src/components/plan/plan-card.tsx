@@ -628,7 +628,7 @@ export function PlanCard({ plan, variant = 'owner', isExpanded = false, onToggle
 
           <div>
             <div className="flex items-baseline gap-1.5">
-              <span className="text-3xl font-black text-emerald-400 tracking-tight">${amount}</span>
+              <span className="text-xl sm:text-2xl lg:text-3xl font-black text-emerald-400 tracking-tight">${amount}</span>
               <span className="text-base font-medium text-emerald-400/60">/{period}</span>
             </div>
             <div className="flex items-center gap-1.5 mt-2">

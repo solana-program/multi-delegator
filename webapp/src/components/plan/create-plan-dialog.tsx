@@ -312,16 +312,20 @@ export function CreatePlanDialog({ open, onOpenChange }: CreatePlanDialogProps) 
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="plan-amount">Amount per Period (USDC)</Label>
-              <Input
-                id="plan-amount"
-                type="number"
-                min="0"
-                step="0.01"
-                value={amount}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAmount(e.target.value)}
-                placeholder="9.99"
-              />
+              <Label htmlFor="plan-amount">Amount per Period</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="plan-amount"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={amount}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAmount(e.target.value)}
+                  placeholder="9.99"
+                  className="flex-1"
+                />
+                <span className="h-10 flex items-center rounded-md border border-input bg-background px-3 text-sm text-muted-foreground">USDC</span>
+              </div>
             </div>
 
             <div className="grid gap-2">
@@ -347,9 +351,6 @@ export function CreatePlanDialog({ open, onOpenChange }: CreatePlanDialogProps) 
                   <option value="months">Months</option>
                 </select>
               </div>
-              {periodHours > 0 && (
-                <p className="text-xs text-muted-foreground">= {periodHours} hours on-chain</p>
-              )}
             </div>
 
             <div className="sm:col-span-2 grid gap-2">
