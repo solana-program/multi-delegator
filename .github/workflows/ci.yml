@@ -11,6 +11,7 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   build:
@@ -142,3 +143,41 @@ jobs:
       - name: Kill validator
         if: always()
         run: just kill-validator
+
+  benchmark:
+    if: github.event_name == 'pull_request'
+    needs: [unit-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: ./.github/actions/setup
+        with:
+          solana-version: "stable"
+          rust-cache-key: "unit-test"
+
+      - name: Run benchmark
+        run: just test-and-benchmark
+
+      - name: Post CU report comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR=${{ github.event.pull_request.number }}
+          MARKER="<!-- cu-report -->"
+          REPORT="$MARKER
+          $(cat programs/multi_delegator/cu_report.md)"
+
+          COMMENT_ID=$(gh api "repos/${{ github.repository }}/issues/${PR}/comments" \
+            --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" | head -1)
+
+          if [ -n "$COMMENT_ID" ]; then
+            gh api "repos/${{ github.repository }}/issues/comments/${COMMENT_ID}" \
+              -X PATCH -f body="$REPORT"
+          else
+            gh api "repos/${{ github.repository }}/issues/${PR}/comments" \
+              -f body="$REPORT"
+          fi

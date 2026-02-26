@@ -100,11 +100,11 @@ pub struct InstructionStats {
     pub max: u64,
     #[tabled(rename = "Avg CUs")]
     pub avg: u64,
-    #[tabled(rename = "Est Cost (Low)")]
+    #[tabled(rename = "Est Cost (Low) [SOL]")]
     pub cost_low: String,
-    #[tabled(rename = "Est Cost (Med)")]
+    #[tabled(rename = "Est Cost (Med) [SOL]")]
     pub cost_med: String,
-    #[tabled(rename = "Est Cost (High)")]
+    #[tabled(rename = "Est Cost (High) [SOL]")]
     pub cost_high: String,
 }
 
