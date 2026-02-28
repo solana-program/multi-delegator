@@ -1,7 +1,7 @@
 use crate::{
-    create_delegation_account, init_header,
-    instructions::create_recurring_delegation::TIME_DRIFT_ALLOWED, state::FixedDelegation,
-    AccountDiscriminator, CreateDelegationAccounts, MultiDelegatorError, DISCRIMINATOR_OFFSET,
+    constants::TIME_DRIFT_ALLOWED_SECS, create_delegation_account, init_header,
+    state::FixedDelegation, AccountDiscriminator, CreateDelegationAccounts, MultiDelegatorError,
+    DISCRIMINATOR_OFFSET,
 };
 use codama::CodamaType;
 use core::mem::{size_of, transmute};
@@ -19,7 +19,7 @@ pub struct CreateFixedDelegationData {
 
 impl CreateFixedDelegationData {
     pub fn validate(&self, current_time: i64) -> Result<(), MultiDelegatorError> {
-        if self.expiry_ts < current_time - TIME_DRIFT_ALLOWED {
+        if self.expiry_ts < current_time.saturating_sub(TIME_DRIFT_ALLOWED_SECS) {
             return Err(MultiDelegatorError::FixedDelegationExpiryInPast);
         }
 

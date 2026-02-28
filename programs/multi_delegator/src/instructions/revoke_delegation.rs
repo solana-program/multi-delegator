@@ -102,6 +102,7 @@ fn resolve_destination<'a>(
         let receiver = accounts
             .receiver
             .ok_or(MultiDelegatorError::NotEnoughAccountKeys)?;
+        WritableAccount::check(receiver)?;
         if receiver.address().as_ref() != payer_bytes {
             return Err(MultiDelegatorError::Unauthorized.into());
         }

@@ -8,7 +8,9 @@ use pinocchio::sysvars::clock::Clock;
 use pinocchio::sysvars::Sysvar;
 use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 
-pub const TIME_DRIFT_ALLOWED: i64 = 120;
+use crate::constants::TIME_DRIFT_ALLOWED_SECS;
+
+pub const MAX_DELEGATION_PERIOD_SECS: u64 = 31_536_000; // 365 days
 
 #[repr(C, packed)]
 #[derive(Debug, Clone, CodamaType)]
@@ -31,12 +33,12 @@ impl CreateRecurringDelegationData {
     }
 
     pub fn validate(&self, current_time: i64) -> Result<(), MultiDelegatorError> {
-        if self.start_ts < current_time - TIME_DRIFT_ALLOWED {
+        if self.start_ts < current_time.saturating_sub(TIME_DRIFT_ALLOWED_SECS) {
             return Err(MultiDelegatorError::RecurringDelegationStartTimeInPast);
         }
 
-        if self.period_length_s == 0 {
-            return Err(MultiDelegatorError::RecurringDelegationZeroPeriod);
+        if self.period_length_s == 0 || self.period_length_s > MAX_DELEGATION_PERIOD_SECS {
+            return Err(MultiDelegatorError::InvalidPeriodLength);
         }
 
         if self.start_ts >= self.expiry_ts {
@@ -223,7 +225,7 @@ mod tests {
         let (res, _delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
             .nonce(nonce)
             .recurring(amount_per_period, period_length_s, start_ts, expiry_ts);
-        res.assert_err(MultiDelegatorError::RecurringDelegationZeroPeriod);
+        res.assert_err(MultiDelegatorError::InvalidPeriodLength);
     }
 
     #[test]
@@ -256,5 +258,37 @@ mod tests {
             .nonce(nonce)
             .recurring(amount_per_period, period_length_s, start_ts, expiry_ts);
         res.assert_err(MultiDelegatorError::RecurringDelegationStartTimeGreaterThanExpiry);
+    }
+
+    #[test]
+    fn create_recurring_delegation_with_period_exceeding_max() {
+        let (litesvm, user) = &mut setup();
+        let payer = user;
+        let amount_per_period: u64 = 50_000_000;
+        let period_length_s: u64 = 31_536_001;
+        let start_ts: i64 = current_ts();
+        let expiry_ts = current_ts() + days(365) as i64;
+        let nonce: u64 = 0;
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(payer.pubkey()),
+            &[],
+        );
+        let _user_ata = init_ata(litesvm, mint, payer.pubkey(), 1_000_000);
+
+        initialize_multidelegate_action(litesvm, payer, mint)
+            .0
+            .assert_ok();
+
+        let delegatee = Pubkey::new_unique();
+
+        let (res, _delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee)
+            .nonce(nonce)
+            .recurring(amount_per_period, period_length_s, start_ts, expiry_ts);
+        res.assert_err(MultiDelegatorError::InvalidPeriodLength);
     }
 }

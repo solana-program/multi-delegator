@@ -1,7 +1,7 @@
 use pinocchio::{cpi::Seed, error::ProgramError, AccountView, Address};
 
 use crate::{
-    state::common::find_delegation_pda, AccountCheck, AccountDiscriminator, Header,
+    state::common::find_delegation_pda, AccountCheck, AccountDiscriminator, Header, MultiDelegate,
     MultiDelegateAccount, MultiDelegatorError, ProgramAccount, ProgramAccountInit, SignerAccount,
     SystemAccount, WritableAccount, CURRENT_VERSION, DELEGATE_BASE_SEED,
 };
@@ -55,6 +55,12 @@ pub fn create_delegation_account(
     nonce: u64,
     space: usize,
 ) -> Result<u8, ProgramError> {
+    {
+        let md_data = accounts.multi_delegate.try_borrow()?;
+        let multi_delegate = MultiDelegate::load(&md_data)?;
+        multi_delegate.check_owner(accounts.delegator.address())?;
+    }
+
     let nonce_bytes = nonce.to_le_bytes();
 
     let (expected_pda, bump) = find_delegation_pda(

@@ -14,6 +14,7 @@ impl TryFrom<u32> for MultiDelegatorError {
 
     fn try_from(code: u32) -> Result<Self, Self::Error> {
         match code {
+            // Generic errors (100-199)
             100 => Ok(Self::NotSigner),
             101 => Ok(Self::InvalidAddress),
             102 => Ok(Self::InvalidEscrowPda),
@@ -46,17 +47,20 @@ impl TryFrom<u32> for MultiDelegatorError {
             129 => Ok(Self::InvalidAmount),
             130 => Ok(Self::Unauthorized),
             131 => Ok(Self::AccountNotWritable),
+            132 => Ok(Self::AtaOwnerMismatch),
+            // Fixed delegation errors (300-399)
             300 => Ok(Self::AmountExceedsLimit),
             301 => Ok(Self::FixedDelegationExpiryInPast),
             302 => Ok(Self::FixedDelegationAmountZero),
+            // Recurring delegation errors (400-499)
             400 => Ok(Self::AmountExceedsPeriodLimit),
             401 => Ok(Self::PeriodNotElapsed),
             402 => Ok(Self::InvalidPeriodLength),
             403 => Ok(Self::InvalidPayerData),
             404 => Ok(Self::RecurringDelegationStartTimeInPast),
-            405 => Ok(Self::RecurringDelegationZeroPeriod),
-            406 => Ok(Self::RecurringDelegationStartTimeGreaterThanExpiry),
-            407 => Ok(Self::RecurringDelegationAmountZero),
+            405 => Ok(Self::RecurringDelegationStartTimeGreaterThanExpiry),
+            406 => Ok(Self::RecurringDelegationAmountZero),
+            // Plan and subscription errors (500-599)
             500 => Ok(Self::PlanSunset),
             501 => Ok(Self::PlanExpired),
             502 => Ok(Self::InvalidPlanPda),
@@ -75,6 +79,7 @@ impl TryFrom<u32> for MultiDelegatorError {
             515 => Ok(Self::PlanNotExpired),
             516 => Ok(Self::PlanClosed),
             517 => Ok(Self::AlreadySubscribed),
+            // Event errors (600-699)
             600 => Ok(Self::InvalidEventAuthority),
             601 => Ok(Self::InvalidEventData),
             602 => Ok(Self::InvalidEventTag),
@@ -86,8 +91,7 @@ impl TryFrom<u32> for MultiDelegatorError {
 
 #[derive(Debug, Copy, Clone, Error, CodamaErrors)]
 pub enum MultiDelegatorError {
-    // Generic errors
-    // Starts with 100
+    // Generic errors (100-199)
     #[error("Account must be a signer")]
     NotSigner = 100,
     #[error("Invalid account address")]
@@ -152,9 +156,10 @@ pub enum MultiDelegatorError {
     Unauthorized,
     #[error("Account must be writable")]
     AccountNotWritable,
+    #[error("Token account owner does not match expected")]
+    AtaOwnerMismatch,
 
-    // Fixed delegation errors
-    // Start with 300
+    // Fixed delegation errors (300-399)
     #[error("Transfer amount exceeds delegation limit")]
     AmountExceedsLimit = 300,
     #[error("Expiry time specified is less than current time")]
@@ -162,8 +167,7 @@ pub enum MultiDelegatorError {
     #[error("zero amount specified")]
     FixedDelegationAmountZero,
 
-    // Recurring delegation errors
-    // Start with 400
+    // Recurring delegation errors (400-499)
     #[error("Transfer amount exceeds period limit")]
     AmountExceedsPeriodLimit = 400,
     #[error("Period has not elapsed yet")]
@@ -174,15 +178,12 @@ pub enum MultiDelegatorError {
     InvalidPayerData,
     #[error("Past start time specified")]
     RecurringDelegationStartTimeInPast,
-    #[error("zero period specified")]
-    RecurringDelegationZeroPeriod,
     #[error("start time specified is greater than expiry")]
     RecurringDelegationStartTimeGreaterThanExpiry,
     #[error("zero amount specified")]
     RecurringDelegationAmountZero,
 
-    // Plan related errors
-    // Start with 500
+    // Plan and subscription errors (500-599)
     #[error("Plan is in sunset status")]
     PlanSunset = 500,
     #[error("Plan has expired")]
@@ -220,8 +221,7 @@ pub enum MultiDelegatorError {
     #[error("Already subscribed to this plan")]
     AlreadySubscribed,
 
-    // Event related errors
-    // Start with 600
+    // Event errors (600-699)
     #[error("Invalid event authority PDA")]
     InvalidEventAuthority = 600,
     #[error("Invalid event data")]

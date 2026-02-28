@@ -60,6 +60,13 @@ impl MultiDelegate {
         Ok(unsafe { &*transmute::<*const u8, *const Self>(bytes.as_ptr()) })
     }
 
+    pub fn check_owner(&self, expected_user: &Address) -> Result<(), ProgramError> {
+        if self.user != *expected_user {
+            return Err(MultiDelegatorError::Unauthorized.into());
+        }
+        Ok(())
+    }
+
     /// Verifies that the given seeds and bump produce a valid PDA.
     /// This is cheaper than find_pda as it doesn't iterate through bumps.
     /// Returns the computed PDA if valid, or an error if the bump is invalid.

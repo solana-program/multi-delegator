@@ -4,9 +4,10 @@ use pinocchio_token::instructions::Approve as ApproveSpl;
 use pinocchio_token_2022::instructions::Approve as Approve2022;
 
 use crate::{
-    constants::TOKEN_2022_PROGRAM_ID, AccountCheck, MintInterface, MultiDelegate,
-    MultiDelegatorError, ProgramAccount, ProgramAccountInit, SignerAccount, SystemAccount,
-    TokenAccountInterface, TokenProgramInterface, WritableAccount,
+    check_token_account_mint, check_token_account_owner, constants::TOKEN_2022_PROGRAM_ID,
+    AccountCheck, MintInterface, MultiDelegate, MultiDelegatorError, ProgramAccount,
+    ProgramAccountInit, SignerAccount, SystemAccount, TokenAccountInterface, TokenProgramInterface,
+    WritableAccount,
 };
 
 pub struct InitializeMultiDelegateAccounts<'a> {
@@ -83,6 +84,12 @@ pub fn process(accounts: &[AccountView]) -> ProgramResult {
             accounts.token_mint.address(),
             bump,
         )?;
+    }
+
+    {
+        let ata_data = accounts.user_ata.try_borrow()?;
+        check_token_account_owner(&ata_data, accounts.user.address())?;
+        check_token_account_mint(&ata_data, accounts.token_mint.address())?;
     }
 
     // Approve delegation on the correct token program (SPL Token vs Token-2022).

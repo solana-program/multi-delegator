@@ -40,9 +40,7 @@ pub fn process(accounts: &[AccountView]) -> ProgramResult {
     let data = accounts.multi_delegate.try_borrow()?;
     let multi_delegate = MultiDelegate::load(&data)?;
 
-    if multi_delegate.user.as_ref() != accounts.user.address().as_ref() {
-        return Err(MultiDelegatorError::Unauthorized.into());
-    }
+    multi_delegate.check_owner(accounts.user.address())?;
 
     // Verify the PDA derivation matches
     let expected_pda = MultiDelegate::verify_pda(

@@ -10,12 +10,12 @@ use crate::{
     helpers::{
         transfer_with_delegate, validate_recurring_transfer, TransferAccounts, TransferData,
     },
-    state::{common::PlanStatus, plan::Plan, subscription_delegation::SubscriptionDelegation},
+    state::{plan::Plan, subscription_delegation::SubscriptionDelegation},
     AccountCheck, MultiDelegateAccount, MultiDelegatorError, ProgramAccount, SignerAccount,
     TokenAccountInterface, TokenProgramInterface, WritableAccount,
 };
 
-use crate::constants::{TOKEN_ACCOUNT_OWNER_END, TOKEN_ACCOUNT_OWNER_OFFSET};
+use crate::get_token_account_owner;
 
 pub const DISCRIMINATOR: &u8 = &10;
 
@@ -42,26 +42,11 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
             return Err(MultiDelegatorError::PlanExpired.into());
         }
 
-        // TODO: decide whether sunset plans should block new transfers or affect the subscription.
-        // When a plan is sunset, existing subscriptions can still pull — but we may want to:
-        //   - Notify the subscriber that the plan is sunsetting
-        //   - Update the subscription state to reflect the sunset
-        //   - Prevent new subscriptions from being created (handled in subscribe instruction)
-        if PlanStatus::try_from(plan.status)? == PlanStatus::Sunset {
-            // Plan is sunset — transfer still allowed for existing subscriptions
-        }
-
         plan.can_pull(accounts_struct.caller.address())?;
 
         // Validate destination: read receiver_ata owner from token account data
         let receiver_data = accounts_struct.receiver_ata.try_borrow()?;
-        if receiver_data.len() < TOKEN_ACCOUNT_OWNER_END {
-            return Err(MultiDelegatorError::InvalidAccountData.into());
-        }
-        let mut owner_bytes = [0u8; 32];
-        owner_bytes
-            .copy_from_slice(&receiver_data[TOKEN_ACCOUNT_OWNER_OFFSET..TOKEN_ACCOUNT_OWNER_END]);
-        receiver_owner = Address::from(owner_bytes);
+        receiver_owner = get_token_account_owner(&receiver_data)?;
         plan.check_destination(&receiver_owner)?;
 
         amount_per_period = plan.data.amount;
@@ -75,14 +60,10 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
         let mut binding = accounts_struct.subscription_pda.try_borrow_mut()?;
         let subscription = SubscriptionDelegation::load_mut(&mut binding)?;
 
-        // The subscription's delegatee field stores the plan PDA address.
-        // Verifying the PDA derivation using [SEED, plan_pda, delegator] confirms that
-        // this subscription belongs to the passed-in plan account.
         let delegator = subscription.header.delegator;
-        let delegatee = subscription.header.delegatee;
 
         // The delegatee must match the plan PDA passed into the instruction
-        if delegatee != *accounts_struct.plan_pda.address() {
+        if subscription.header.delegatee != *accounts_struct.plan_pda.address() {
             return Err(MultiDelegatorError::SubscriptionPlanMismatch.into());
         }
 
@@ -285,9 +266,12 @@ mod tests {
             .execute();
         res.assert_ok();
 
-        // Manually inject subscription delegation
+        // Manually inject subscription delegation (use LiteSVM clock, not system time)
+        let svm_ts = litesvm
+            .get_sysvar::<spl_associated_token_account::solana_program::clock::Clock>()
+            .unix_timestamp;
         let subscription_pda =
-            CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), current_ts()).execute();
+            CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), svm_ts).execute();
 
         let (_, plan_bump) = get_plan_pda(&merchant.pubkey(), 1);
 

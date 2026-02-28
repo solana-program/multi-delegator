@@ -15,7 +15,7 @@ use crate::{
     CreatePlanAccounts, MultiDelegatorError,
 };
 
-pub const MAX_PERIOD_HOURS: u64 = 8760;
+pub const MAX_PLAN_PERIOD_HOURS: u64 = 8760; // 365 days
 pub const MAX_DESTINATIONS: usize = 4;
 pub const MAX_PULLERS: usize = 4;
 
@@ -48,7 +48,7 @@ impl PlanData {
         if self.amount == 0 {
             return Err(MultiDelegatorError::InvalidAmount);
         }
-        if self.period_hours == 0 || self.period_hours > MAX_PERIOD_HOURS {
+        if self.period_hours == 0 || self.period_hours > MAX_PLAN_PERIOD_HOURS {
             return Err(MultiDelegatorError::InvalidPeriodLength);
         }
 

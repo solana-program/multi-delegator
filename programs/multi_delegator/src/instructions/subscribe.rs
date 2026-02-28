@@ -62,6 +62,10 @@ pub fn process(accounts: &[AccountView], data: &SubscribeData) -> ProgramResult 
         let plan_data = accounts_struct.plan_pda.try_borrow()?;
         let plan = Plan::load(&plan_data)?;
 
+        if data.plan_bump != plan.bump {
+            return Err(MultiDelegatorError::InvalidPlanPda.into());
+        }
+
         if PlanStatus::try_from(plan.status)? != PlanStatus::Active {
             return Err(MultiDelegatorError::PlanSunset.into());
         }
@@ -78,9 +82,7 @@ pub fn process(accounts: &[AccountView], data: &SubscribeData) -> ProgramResult 
         let md_data = accounts_struct.multi_delegate_pda.try_borrow()?;
         let multi_delegate = MultiDelegate::load(&md_data)?;
 
-        if multi_delegate.user != *accounts_struct.subscriber.address() {
-            return Err(MultiDelegatorError::Unauthorized.into());
-        }
+        multi_delegate.check_owner(accounts_struct.subscriber.address())?;
         if multi_delegate.token_mint != plan_mint {
             return Err(MultiDelegatorError::MintMismatch.into());
         }
