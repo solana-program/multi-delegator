@@ -81,6 +81,9 @@ pub trait EventSerialize: EventDiscriminator {
 pub enum EventDiscriminators {
     SubscriptionCreated = 0,
     SubscriptionCancelled = 1,
+    SubscriptionTransfer = 2,
+    FixedTransfer = 3,
+    RecurringTransfer = 4,
 }
 
 impl TryFrom<u8> for EventDiscriminators {
@@ -90,6 +93,9 @@ impl TryFrom<u8> for EventDiscriminators {
         match value {
             0 => Ok(Self::SubscriptionCreated),
             1 => Ok(Self::SubscriptionCancelled),
+            2 => Ok(Self::SubscriptionTransfer),
+            3 => Ok(Self::FixedTransfer),
+            4 => Ok(Self::RecurringTransfer),
             _ => Err(value),
         }
     }

@@ -144,6 +144,8 @@ pub enum MultiDelegatorInstruction {
         signer,
         docs = "The delegatee signing the transfer"
     ))]
+    #[codama(account(name = "event_authority", docs = "The event authority PDA"))]
+    #[codama(account(name = "self_program", docs = "This program (for self-CPI)"))]
     TransferFixed(#[codama(name = "transfer_data")] TransferData) = 4,
 
     #[codama(account(
@@ -168,6 +170,8 @@ pub enum MultiDelegatorInstruction {
         signer,
         docs = "The delegatee signing the transfer"
     ))]
+    #[codama(account(name = "event_authority", docs = "The event authority PDA"))]
+    #[codama(account(name = "self_program", docs = "This program (for self-CPI)"))]
     TransferRecurring(#[codama(name = "transfer_data")] TransferData) = 5,
 
     #[codama(account(
@@ -239,6 +243,8 @@ pub enum MultiDelegatorInstruction {
         docs = "The authorized puller (plan owner or whitelisted)"
     ))]
     #[codama(account(name = "token_program", docs = "Token program"))]
+    #[codama(account(name = "event_authority", docs = "The event authority PDA"))]
+    #[codama(account(name = "self_program", docs = "This program (for self-CPI)"))]
     TransferSubscription(#[codama(name = "transfer_data")] TransferData) = 10,
 
     #[codama(account(

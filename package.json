@@ -15,9 +15,11 @@
   },
   "devDependencies": {
     "@codama/cli": "latest",
+    "@codama/nodes": "^1.5.1",
     "@codama/nodes-from-anchor": "latest",
     "@codama/renderers-js": "latest",
     "@codama/renderers-rust": "latest",
+    "@codama/visitors": "^1.5.1",
     "@types/node": "^25.0.10",
     "typescript": "latest"
   },

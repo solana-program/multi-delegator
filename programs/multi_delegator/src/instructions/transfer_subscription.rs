@@ -5,6 +5,8 @@ use pinocchio::{
 };
 
 use crate::{
+    event_engine::{self, EventSerialize},
+    events::SubscriptionTransferEvent,
     helpers::{
         transfer_with_delegate, validate_recurring_transfer, TransferAccounts, TransferData,
     },
@@ -26,6 +28,7 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
     let amount_per_period: u64;
     let period_length_s: u64;
     let plan_end_ts: i64;
+    let receiver_owner: Address;
     {
         let plan_data = accounts_struct.plan_pda.try_borrow()?;
         let plan = Plan::load(&plan_data)?;
@@ -58,13 +61,16 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
         let mut owner_bytes = [0u8; 32];
         owner_bytes
             .copy_from_slice(&receiver_data[TOKEN_ACCOUNT_OWNER_OFFSET..TOKEN_ACCOUNT_OWNER_END]);
-        plan.check_destination(&Address::from(owner_bytes))?;
+        receiver_owner = Address::from(owner_bytes);
+        plan.check_destination(&receiver_owner)?;
 
         amount_per_period = plan.data.amount;
         period_length_s = plan.data.period_hours * 3600;
     }
 
     // Load SubscriptionDelegation (mutable borrow)
+    let period_start: i64;
+    let amount_pulled_in_period: u64;
     {
         let mut binding = accounts_struct.subscription_pda.try_borrow_mut()?;
         let subscription = SubscriptionDelegation::load_mut(&mut binding)?;
@@ -92,19 +98,22 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
         }
 
         // Validate recurring transfer
-        let mut period_start = subscription.current_period_start_ts;
+        let mut ps = subscription.current_period_start_ts;
         let mut pulled = subscription.amount_pulled_in_period;
         validate_recurring_transfer(
             transfer_data.amount,
             amount_per_period,
             period_length_s,
-            &mut period_start,
+            &mut ps,
             &mut pulled,
             plan_end_ts,
             current_ts,
         )?;
-        subscription.current_period_start_ts = period_start;
+        subscription.current_period_start_ts = ps;
         subscription.amount_pulled_in_period = pulled;
+
+        period_start = ps;
+        amount_pulled_in_period = pulled;
     }
 
     // Execute transfer
@@ -120,6 +129,35 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
         },
     )?;
 
+    // Emit TransferSuccess event via self-CPI
+    let period_end_ts = {
+        let end = period_start + period_length_s as i64;
+        if plan_end_ts != 0 && end > plan_end_ts {
+            plan_end_ts
+        } else {
+            end
+        }
+    };
+
+    let event = SubscriptionTransferEvent::new(
+        *accounts_struct.subscription_pda.address(),
+        *accounts_struct.plan_pda.address(),
+        transfer_data.delegator,
+        transfer_data.mint,
+        transfer_data.amount,
+        period_start,
+        period_end_ts,
+        amount_pulled_in_period,
+        receiver_owner,
+    );
+    let event_data = event.to_bytes();
+    event_engine::emit_event(
+        &crate::ID,
+        accounts_struct.event_authority,
+        accounts_struct.self_program,
+        &event_data,
+    )?;
+
     Ok(())
 }
 
@@ -131,13 +169,15 @@ pub struct TransferSubscriptionAccounts<'a> {
     pub receiver_ata: &'a AccountView,
     pub caller: &'a AccountView,
     pub token_program: &'a AccountView,
+    pub event_authority: &'a AccountView,
+    pub self_program: &'a AccountView,
 }
 
 impl<'a> TryFrom<&'a [AccountView]> for TransferSubscriptionAccounts<'a> {
     type Error = ProgramError;
 
     fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> {
-        let [subscription_pda, plan_pda, multi_delegate, delegator_ata, receiver_ata, caller, token_program] =
+        let [subscription_pda, plan_pda, multi_delegate, delegator_ata, receiver_ata, caller, token_program, event_authority, self_program] =
             accounts
         else {
             return Err(MultiDelegatorError::NotEnoughAccountKeys.into());
@@ -167,6 +207,8 @@ impl<'a> TryFrom<&'a [AccountView]> for TransferSubscriptionAccounts<'a> {
             receiver_ata,
             caller,
             token_program,
+            event_authority,
+            self_program,
         })
     }
 }
@@ -174,6 +216,7 @@ impl<'a> TryFrom<&'a [AccountView]> for TransferSubscriptionAccounts<'a> {
 #[cfg(test)]
 mod tests {
     use crate::{
+        event_engine::event_authority_pda,
         state::subscription_delegation::SubscriptionDelegation,
         tests::{
             asserts::TransactionResultExt,
@@ -855,6 +898,8 @@ mod tests {
             &TOKEN_PROGRAM_ID,
         );
 
+        let event_authority = Pubkey::new_from_array(event_authority_pda::ID.to_bytes());
+
         for (idx, _name, is_signer) in &writable {
             let mut accounts = vec![
                 AccountMeta::new(subscription_pda, false),
@@ -864,6 +909,8 @@ mod tests {
                 AccountMeta::new(receiver_ata, false),
                 AccountMeta::new_readonly(merchant.pubkey(), true),
                 AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+                AccountMeta::new_readonly(event_authority, false),
+                AccountMeta::new_readonly(PROGRAM_ID, false),
             ];
 
             let pubkey = accounts[*idx].pubkey;
@@ -917,6 +964,8 @@ mod tests {
             &TOKEN_PROGRAM_ID,
         );
 
+        let event_authority = Pubkey::new_from_array(event_authority_pda::ID.to_bytes());
+
         for (idx, _name, is_writable) in &signers {
             let mut accounts = vec![
                 AccountMeta::new(subscription_pda, false),
@@ -926,6 +975,8 @@ mod tests {
                 AccountMeta::new(receiver_ata, false),
                 AccountMeta::new_readonly(merchant.pubkey(), true),
                 AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+                AccountMeta::new_readonly(event_authority, false),
+                AccountMeta::new_readonly(PROGRAM_ID, false),
             ];
 
             let pubkey = accounts[*idx].pubkey;

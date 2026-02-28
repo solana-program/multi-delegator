@@ -32,7 +32,7 @@ import {
   decodeSubscriptionDelegation,
   type FixedDelegation,
   fetchMaybeMultiDelegate,
-  getCancelSubscriptionInstruction,
+  getCancelSubscriptionInstructionAsync,
   getCloseMultiDelegateInstruction,
   getCreateFixedDelegationInstruction,
   getCreatePlanInstruction,
@@ -40,10 +40,10 @@ import {
   getDeletePlanInstruction,
   getInitMultiDelegateInstruction,
   getRevokeDelegationInstruction,
-  getSubscribeInstruction,
-  getTransferFixedInstruction,
-  getTransferRecurringInstruction,
-  getTransferSubscriptionInstruction,
+  getSubscribeInstructionAsync,
+  getTransferFixedInstructionAsync,
+  getTransferRecurringInstructionAsync,
+  getTransferSubscriptionInstructionAsync,
   getUpdatePlanInstruction,
   MULTI_DELEGATOR_PROGRAM_ADDRESS,
   type Plan,
@@ -53,7 +53,6 @@ import {
 } from './generated/index.js';
 import {
   getDelegationPDA,
-  getEventAuthorityPDA,
   getMultiDelegatePDA,
   getPlanPDA,
   getSubscriptionPDA,
@@ -246,8 +245,8 @@ export class MultiDelegatorClient {
 
     const instruction =
       kind === 'fixed'
-        ? getTransferFixedInstruction(transferParams)
-        : getTransferRecurringInstruction(transferParams);
+        ? await getTransferFixedInstructionAsync(transferParams)
+        : await getTransferRecurringInstructionAsync(transferParams);
 
     const sig = await this.buildAndSendTransaction([instruction], [delegatee]);
     return { signature: sig };
@@ -483,16 +482,12 @@ export class MultiDelegatorClient {
       planPda,
       subscriber.address,
     );
-    const [eventAuthority] = await getEventAuthorityPDA();
-
-    const instruction = getSubscribeInstruction({
+    const instruction = await getSubscribeInstructionAsync({
       subscriber,
       merchant,
       planPda,
       subscriptionPda,
       multiDelegatePda,
-      eventAuthority,
-      selfProgram: MULTI_DELEGATOR_PROGRAM_ADDRESS,
       subscribeData: {
         planId,
         planBump,
@@ -511,14 +506,10 @@ export class MultiDelegatorClient {
     planPda: Address,
     subscriptionPda: Address,
   ): Promise<{ signature: string }> {
-    const [eventAuthority] = await getEventAuthorityPDA();
-
-    const instruction = getCancelSubscriptionInstruction({
+    const instruction = await getCancelSubscriptionInstructionAsync({
       subscriber,
       planPda,
       subscriptionPda,
-      eventAuthority,
-      selfProgram: MULTI_DELEGATOR_PROGRAM_ADDRESS,
     });
 
     const signature = await this.buildAndSendTransaction(
@@ -545,7 +536,7 @@ export class MultiDelegatorClient {
       tokenProgram,
     });
 
-    const instruction = getTransferSubscriptionInstruction({
+    const instruction = await getTransferSubscriptionInstructionAsync({
       subscriptionPda,
       planPda,
       multiDelegate,

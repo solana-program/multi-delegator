@@ -27,7 +27,7 @@ echo -e "${GREEN}  Multi-Delegator Full Stack Launcher${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 
-echo -e "${BLUE}[1/8] Preparing deploy keys...${NC}"
+echo -e "${BLUE}[1/9] Preparing deploy keys...${NC}"
 mkdir -p "target/deploy"
 if [[ -f "$KEYPAIR_FILE" ]]; then
   cp "$KEYPAIR_FILE" "target/deploy/multi_delegator-keypair.json"
@@ -38,25 +38,31 @@ else
 fi
 
 echo ""
-echo -e "${BLUE}[2/8] Checking prerequisites...${NC}"
+echo -e "${BLUE}[2/9] Checking prerequisites...${NC}"
 check_keypair
 check_program_so true
 PROGRAM_ID=$(get_program_id)
 echo -e "  Program ID: ${GREEN}$PROGRAM_ID${NC}"
 
 echo ""
-echo -e "${BLUE}[3/8] Building client library...${NC}"
+echo -e "${BLUE}[3/9] Building client library...${NC}"
 cd clients/typescript && pnpm install --silent && pnpm run build
 cd "$PROJECT_ROOT"
 echo -e "  ${GREEN}Client built${NC}"
 
 echo ""
-echo -e "${BLUE}[4/8] Installing webapp dependencies...${NC}"
+echo -e "${BLUE}[4/9] Installing webapp dependencies...${NC}"
 cd webapp && pnpm install --silent
 cd "$PROJECT_ROOT"
 
 echo ""
-echo -e "${BLUE}[5/8] Starting surfpool...${NC}"
+echo -e "${BLUE}[5/9] Building webapp...${NC}"
+cd webapp && pnpm run build
+cd "$PROJECT_ROOT"
+echo -e "  ${GREEN}Webapp built${NC}"
+
+echo ""
+echo -e "${BLUE}[6/9] Starting surfpool...${NC}"
 if is_validator_running; then
   echo -e "  ${GREEN}Surfpool already running on port $RPC_PORT${NC}"
 else
@@ -68,11 +74,11 @@ else
 fi
 
 echo ""
-echo -e "${BLUE}[6/8] Verifying program deployment...${NC}"
+echo -e "${BLUE}[7/9] Verifying program deployment...${NC}"
 wait_for_program "$PROGRAM_ID" 30 || exit 1
 
 echo ""
-echo -e "${BLUE}[7/8] Initializing test environment & starting API server...${NC}"
+echo -e "${BLUE}[8/9] Initializing test environment & starting API server...${NC}"
 cd webapp/scripts && pnpm install --silent && pnpm run init
 cd "$PROJECT_ROOT"
 echo -e "  ${GREEN}Test environment initialized${NC}"
@@ -88,7 +94,7 @@ echo "  API PID: $API_PID"
 wait_for_http "http://localhost:3001/api/health" "API server" 15 '"status"' || exit 1
 
 echo ""
-echo -e "${BLUE}[8/8] Starting webapp...${NC}"
+echo -e "${BLUE}[9/9] Starting webapp...${NC}"
 if curl -s http://localhost:5173 2>/dev/null | grep -q 'html'; then
   echo -e "  ${GREEN}Webapp already running on port 5173${NC}"
 else

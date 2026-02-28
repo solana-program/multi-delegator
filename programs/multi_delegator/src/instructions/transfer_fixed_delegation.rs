@@ -1,10 +1,13 @@
 use pinocchio::{
     error::ProgramError,
     sysvars::{clock::Clock, Sysvar},
-    AccountView, ProgramResult,
+    AccountView, Address, ProgramResult,
 };
 
 use crate::{
+    constants::{TOKEN_ACCOUNT_OWNER_END, TOKEN_ACCOUNT_OWNER_OFFSET},
+    event_engine::{self, EventSerialize},
+    events::FixedTransferEvent,
     helpers::{
         transfer_with_delegate, validate_fixed_transfer, Delegation, TransferAccounts, TransferData,
     },
@@ -18,6 +21,8 @@ pub const DISCRIMINATOR: &u8 = &4;
 pub fn process(accounts: &[AccountView], transfer: &TransferData) -> ProgramResult {
     let accounts_struct = FixedTransferAccounts::try_from(accounts)?;
 
+    let remaining_amount: u64;
+    let delegatee_address: Address;
     {
         let mut binding = accounts_struct.delegation_pda.try_borrow_mut()?;
         let delegation = FixedDelegation::load_mut(&mut binding)?;
@@ -28,6 +33,8 @@ pub fn process(accounts: &[AccountView], transfer: &TransferData) -> ProgramResu
             &transfer.delegator,
             accounts_struct.delegatee.address(),
         )?;
+
+        delegatee_address = *accounts_struct.delegatee.address();
 
         let current_ts = Clock::get()?.unix_timestamp;
         validate_fixed_transfer(
@@ -41,6 +48,21 @@ pub fn process(accounts: &[AccountView], transfer: &TransferData) -> ProgramResu
             .amount
             .checked_sub(transfer.amount)
             .ok_or(MultiDelegatorError::ArithmeticUnderflow)?;
+
+        remaining_amount = delegation.amount;
+    }
+
+    // Extract receiver owner from token account data
+    let receiver_owner: Address;
+    {
+        let receiver_data = accounts_struct.receiver_ata.try_borrow()?;
+        if receiver_data.len() < TOKEN_ACCOUNT_OWNER_END {
+            return Err(MultiDelegatorError::InvalidAccountData.into());
+        }
+        let mut owner_bytes = [0u8; 32];
+        owner_bytes
+            .copy_from_slice(&receiver_data[TOKEN_ACCOUNT_OWNER_OFFSET..TOKEN_ACCOUNT_OWNER_END]);
+        receiver_owner = Address::from(owner_bytes);
     }
 
     transfer_with_delegate(
@@ -55,6 +77,24 @@ pub fn process(accounts: &[AccountView], transfer: &TransferData) -> ProgramResu
         },
     )?;
 
+    // Emit FixedTransferEvent via self-CPI
+    let event = FixedTransferEvent::new(
+        *accounts_struct.delegation_pda.address(),
+        transfer.delegator,
+        delegatee_address,
+        transfer.mint,
+        transfer.amount,
+        remaining_amount,
+        receiver_owner,
+    );
+    let event_data = event.to_bytes();
+    event_engine::emit_event(
+        &crate::ID,
+        accounts_struct.event_authority,
+        accounts_struct.self_program,
+        &event_data,
+    )?;
+
     Ok(())
 }
 
@@ -65,13 +105,15 @@ pub struct FixedTransferAccounts<'a> {
     pub receiver_ata: &'a AccountView,
     pub token_program: &'a AccountView,
     pub delegatee: &'a AccountView,
+    pub event_authority: &'a AccountView,
+    pub self_program: &'a AccountView,
 }
 
 impl<'a> TryFrom<&'a [AccountView]> for FixedTransferAccounts<'a> {
     type Error = ProgramError;
 
     fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> {
-        let [delegation_pda, multi_delegate, delegator_ata, receiver_ata, token_program, delegatee] =
+        let [delegation_pda, multi_delegate, delegator_ata, receiver_ata, token_program, delegatee, event_authority, self_program] =
             accounts
         else {
             return Err(MultiDelegatorError::NotEnoughAccountKeys.into());
@@ -96,6 +138,8 @@ impl<'a> TryFrom<&'a [AccountView]> for FixedTransferAccounts<'a> {
             receiver_ata,
             token_program,
             delegatee,
+            event_authority,
+            self_program,
         })
     }
 }
@@ -355,6 +399,7 @@ mod tests {
         use spl_associated_token_account::get_associated_token_address_with_program_id;
 
         use crate::{
+            event_engine::event_authority_pda,
             instructions::transfer_fixed_delegation,
             tests::{
                 constants::PROGRAM_ID,
@@ -379,6 +424,7 @@ mod tests {
             get_associated_token_address_with_program_id(&alice.pubkey(), &mint, &TOKEN_PROGRAM_ID);
         let receiver_ata =
             get_associated_token_address_with_program_id(&bob.pubkey(), &mint, &TOKEN_PROGRAM_ID);
+        let event_authority = Pubkey::new_from_array(event_authority_pda::ID.to_bytes());
 
         for (idx, _name, is_signer) in &writable {
             let mut accounts = vec![
@@ -388,6 +434,8 @@ mod tests {
                 AccountMeta::new(receiver_ata, false),
                 AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
                 AccountMeta::new_readonly(bob.pubkey(), true),
+                AccountMeta::new_readonly(event_authority, false),
+                AccountMeta::new_readonly(PROGRAM_ID, false),
             ];
 
             // Flip writable account to readonly, preserving signer flag
@@ -425,6 +473,7 @@ mod tests {
         use spl_associated_token_account::get_associated_token_address_with_program_id;
 
         use crate::{
+            event_engine::event_authority_pda,
             instructions::transfer_fixed_delegation,
             tests::{
                 constants::PROGRAM_ID,
@@ -449,6 +498,7 @@ mod tests {
             get_associated_token_address_with_program_id(&alice.pubkey(), &mint, &TOKEN_PROGRAM_ID);
         let receiver_ata =
             get_associated_token_address_with_program_id(&bob.pubkey(), &mint, &TOKEN_PROGRAM_ID);
+        let event_authority = Pubkey::new_from_array(event_authority_pda::ID.to_bytes());
 
         for (idx, _name, is_writable) in &signers {
             let mut accounts = vec![
@@ -458,6 +508,8 @@ mod tests {
                 AccountMeta::new(receiver_ata, false),
                 AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
                 AccountMeta::new_readonly(bob.pubkey(), true),
+                AccountMeta::new_readonly(event_authority, false),
+                AccountMeta::new_readonly(PROGRAM_ID, false),
             ];
 
             // Flip signer to non-signer, preserving writable flag

@@ -44,7 +44,7 @@ impl EventSerialize for SubscriptionCreatedEvent {
 mod tests {
     use super::*;
     use crate::event_engine::EVENT_IX_TAG_LE;
-    use crate::events::SubscriptionEvent;
+    use crate::events::Event;
     use crate::tests::events::decode_event;
 
     fn plan() -> Address {
@@ -66,7 +66,7 @@ mod tests {
         let decoded = decode_event(&bytes).unwrap();
 
         match decoded {
-            SubscriptionEvent::Created(e) => {
+            Event::SubscriptionCreated(e) => {
                 assert_eq!(e.plan, plan());
                 assert_eq!(e.subscriber, subscriber());
                 assert_eq!(e.mint, mint());
@@ -95,7 +95,7 @@ mod tests {
         let bytes = event.to_bytes();
         let decoded = decode_event(&bytes).unwrap();
         match decoded {
-            SubscriptionEvent::Created(e) => assert_eq!({ e.created_ts }, 0),
+            Event::SubscriptionCreated(e) => assert_eq!({ e.created_ts }, 0),
             _ => panic!("expected Created"),
         }
     }

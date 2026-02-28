@@ -476,6 +476,8 @@ impl<'a> TransferDelegation<'a> {
             )
         });
 
+        let event_authority = Pubkey::new_from_array(event_authority_pda::ID.to_bytes());
+
         let ix = Instruction {
             program_id: PROGRAM_ID,
             accounts: vec![
@@ -485,6 +487,8 @@ impl<'a> TransferDelegation<'a> {
                 AccountMeta::new(receiver_ata, false),
                 AccountMeta::new_readonly(token_program, false),
                 AccountMeta::new_readonly(self.signer.pubkey(), true),
+                AccountMeta::new_readonly(event_authority, false),
+                AccountMeta::new_readonly(PROGRAM_ID, false),
             ],
             data: [
                 vec![discriminator],
@@ -995,6 +999,8 @@ impl<'a> TransferSubscription<'a> {
             )
         });
 
+        let event_authority = Pubkey::new_from_array(event_authority_pda::ID.to_bytes());
+
         let ix = Instruction {
             program_id: PROGRAM_ID,
             accounts: vec![
@@ -1005,6 +1011,8 @@ impl<'a> TransferSubscription<'a> {
                 AccountMeta::new(receiver_ata, false),
                 AccountMeta::new_readonly(self.caller.pubkey(), true),
                 AccountMeta::new_readonly(token_program, false),
+                AccountMeta::new_readonly(event_authority, false),
+                AccountMeta::new_readonly(PROGRAM_ID, false),
             ],
             data: [
                 vec![*transfer_subscription::DISCRIMINATOR],

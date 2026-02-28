@@ -41,7 +41,7 @@ impl EventSerialize for SubscriptionCancelledEvent {
 mod tests {
     use super::*;
     use crate::event_engine::EVENT_IX_TAG_LE;
-    use crate::events::SubscriptionEvent;
+    use crate::events::Event;
     use crate::tests::events::decode_event;
 
     fn plan() -> Address {
@@ -59,7 +59,7 @@ mod tests {
         let decoded = decode_event(&bytes).unwrap();
 
         match decoded {
-            SubscriptionEvent::Cancelled(e) => {
+            Event::SubscriptionCancelled(e) => {
                 assert_eq!(e.plan, plan());
                 assert_eq!(e.subscriber, subscriber());
                 assert_eq!({ e.expires_at_ts }, 1_700_000_000);
@@ -86,7 +86,7 @@ mod tests {
         let bytes = event.to_bytes();
         let decoded = decode_event(&bytes).unwrap();
         match decoded {
-            SubscriptionEvent::Cancelled(e) => assert_eq!({ e.expires_at_ts }, -1),
+            Event::SubscriptionCancelled(e) => assert_eq!({ e.expires_at_ts }, -1),
             _ => panic!("expected Cancelled"),
         }
     }

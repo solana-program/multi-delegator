@@ -250,6 +250,8 @@ export function useMultiDelegatorMutations() {
       tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
     });
 
+    const [eventAuthority] = await getEventAuthorityPDA();
+
     const transferParams = {
       delegationPda: address(params.delegationAccount),
       multiDelegate,
@@ -257,6 +259,8 @@ export function useMultiDelegatorMutations() {
       receiverAta: receiver,
       tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
       delegatee: signer,
+      eventAuthority,
+      selfProgram: address(MULTI_DELEGATOR_PROGRAM_ADDRESS),
       transferData: {
         amount: params.amount,
         delegator: delegatorAddr,
@@ -570,6 +574,8 @@ export function useMultiDelegatorMutations() {
         tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
       });
 
+      const [eventAuthority] = await getEventAuthorityPDA();
+
       const transferIxs = await Promise.all(
         subscribers.map(async (sub) => {
           const delegatorAddr = address(sub.delegator);
@@ -588,6 +594,8 @@ export function useMultiDelegatorMutations() {
             receiverAta,
             caller: signer,
             tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+            eventAuthority,
+            selfProgram: address(MULTI_DELEGATOR_PROGRAM_ADDRESS),
             transferData: {
               amount: sub.amount,
               delegator: delegatorAddr,
@@ -645,6 +653,7 @@ export function useMultiDelegatorMutations() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const transferIxs: any[] = [];
       const seenAtas = new Set<string>();
+      const [eventAuthority] = await getEventAuthorityPDA();
 
       for (const plan of plans) {
         const mintAddr = address(plan.mint);
@@ -689,6 +698,8 @@ export function useMultiDelegatorMutations() {
               receiverAta,
               caller: signer,
               tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+              eventAuthority,
+              selfProgram: address(MULTI_DELEGATOR_PROGRAM_ADDRESS),
               transferData: {
                 amount: sub.amount,
                 delegator: delegatorAddr,
