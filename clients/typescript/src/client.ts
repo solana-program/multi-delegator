@@ -443,10 +443,14 @@ export class MultiDelegatorClient {
     status: PlanStatus,
     endTs: number | bigint,
     metadataUri: string,
+    pullers: Address[] = [],
   ): Promise<{ signature: string }> {
     const uriBytes = new TextEncoder().encode(metadataUri);
     if (uriBytes.length > METADATA_URI_LEN)
       throw new Error(`metadataUri exceeds ${METADATA_URI_LEN} bytes`);
+
+    if (pullers.length > MAX_PLAN_PULLERS)
+      throw new Error(`pullers exceeds max of ${MAX_PLAN_PULLERS}`);
 
     if (endTs !== 0 && endTs !== BigInt(0)) {
       const endTsNum = typeof endTs === 'bigint' ? Number(endTs) : endTs;
@@ -454,10 +458,15 @@ export class MultiDelegatorClient {
         throw new Error('endTs must be in the future');
     }
 
+    const paddedPullers = [
+      ...pullers,
+      ...Array(MAX_PLAN_PULLERS - pullers.length).fill(ZERO_ADDRESS),
+    ] as [Address, Address, Address, Address];
+
     const instruction = getUpdatePlanInstruction({
       owner,
       planPda,
-      updatePlanData: { status, endTs, metadataUri },
+      updatePlanData: { status, endTs, pullers: paddedPullers, metadataUri },
     });
 
     const signature = await this.buildAndSendTransaction(

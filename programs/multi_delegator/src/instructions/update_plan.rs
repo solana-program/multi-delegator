@@ -3,7 +3,7 @@ use core::mem::{size_of, transmute};
 use pinocchio::{
     error::ProgramError,
     sysvars::{clock::Clock, Sysvar},
-    AccountView, ProgramResult,
+    AccountView, Address, ProgramResult,
 };
 
 use crate::{
@@ -16,6 +16,7 @@ use crate::{
 pub struct UpdatePlanData {
     pub status: u8,
     pub end_ts: i64,
+    pub pullers: [Address; 4], // MAX_PULLERS
     #[codama(type = fixed_size(string(utf8), 128))]
     pub metadata_uri: [u8; 128],
 }
@@ -88,6 +89,7 @@ pub fn process(accounts: &[AccountView], data: &UpdatePlanData) -> ProgramResult
 
     plan.status = data.status;
     plan.data.end_ts = data.end_ts;
+    plan.data.pullers = data.pullers;
     plan.data.metadata_uri = data.metadata_uri;
 
     Ok(())
@@ -96,6 +98,7 @@ pub fn process(accounts: &[AccountView], data: &UpdatePlanData) -> ProgramResult
 #[cfg(test)]
 mod tests {
     use solana_pubkey::Pubkey;
+    use solana_signer::Signer;
 
     use crate::{
         state::common::PlanStatus,
@@ -176,12 +179,12 @@ mod tests {
         let period_before = plan_before.data.period_hours;
         let mint_before = plan_before.data.mint;
         let dests_before = plan_before.data.destinations;
-        let pulls_before = plan_before.data.pullers;
         let id_before = plan_before.data.plan_id;
 
         let res = UpdatePlan::new(litesvm, owner, plan_pda)
             .status(PlanStatus::Sunset)
             .end_ts(current_ts() + days(60) as i64)
+            .pullers(vec![puller])
             .metadata_uri("https://example.com/v2.json")
             .execute();
         res.assert_ok();
@@ -192,14 +195,12 @@ mod tests {
         let period_after = plan_after.data.period_hours;
         let mint_after = plan_after.data.mint;
         let dests_after = plan_after.data.destinations;
-        let pulls_after = plan_after.data.pullers;
         let id_after = plan_after.data.plan_id;
         assert_eq!(amount_after, amount_before);
         assert_eq!(period_after, period_before);
         assert_eq!(mint_after.to_bytes(), mint_before.to_bytes());
         for i in 0..4 {
             assert_eq!(dests_after[i].to_bytes(), dests_before[i].to_bytes());
-            assert_eq!(pulls_after[i].to_bytes(), pulls_before[i].to_bytes());
         }
         assert_eq!(id_after, id_before);
     }
@@ -462,5 +463,151 @@ mod tests {
             .end_ts(new_end)
             .execute();
         res.assert_err(crate::MultiDelegatorError::PlanExpired);
+    }
+
+    #[test]
+    fn update_plan_add_pullers() {
+        let (litesvm, owner) = &mut setup();
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            None,
+            &[],
+        );
+
+        let (res, plan_pda) = CreatePlan::new(litesvm, owner, mint)
+            .plan_id(1)
+            .amount(1_000)
+            .period_hours(24)
+            .execute();
+        res.assert_ok();
+
+        let account = litesvm.get_account(&plan_pda).unwrap();
+        let plan = Plan::load(&account.data).unwrap();
+        let zero = [0u8; 32];
+        for p in &plan.data.pullers {
+            assert_eq!(p.to_bytes(), zero);
+        }
+
+        let puller_a = Pubkey::new_unique();
+        let puller_b = Pubkey::new_unique();
+        let res = UpdatePlan::new(litesvm, owner, plan_pda)
+            .pullers(vec![puller_a, puller_b])
+            .execute();
+        res.assert_ok();
+
+        let account = litesvm.get_account(&plan_pda).unwrap();
+        let plan = Plan::load(&account.data).unwrap();
+        assert_eq!(plan.data.pullers[0].to_bytes(), puller_a.to_bytes());
+        assert_eq!(plan.data.pullers[1].to_bytes(), puller_b.to_bytes());
+        assert_eq!(plan.data.pullers[2].to_bytes(), zero);
+        assert_eq!(plan.data.pullers[3].to_bytes(), zero);
+    }
+
+    #[test]
+    fn update_plan_remove_pullers_owner_still_authorized() {
+        let (litesvm, owner) = &mut setup();
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            None,
+            &[],
+        );
+
+        let puller_a = Pubkey::new_unique();
+        let puller_b = Pubkey::new_unique();
+        let (res, plan_pda) = CreatePlan::new(litesvm, owner, mint)
+            .plan_id(1)
+            .amount(1_000)
+            .period_hours(24)
+            .pullers(vec![puller_a, puller_b])
+            .execute();
+        res.assert_ok();
+
+        let res = UpdatePlan::new(litesvm, owner, plan_pda).execute();
+        res.assert_ok();
+
+        let account = litesvm.get_account(&plan_pda).unwrap();
+        let plan = Plan::load(&account.data).unwrap();
+        let zero = [0u8; 32];
+        for p in &plan.data.pullers {
+            assert_eq!(p.to_bytes(), zero);
+        }
+
+        let owner_addr: pinocchio::Address = owner.pubkey().to_bytes().into();
+        assert!(plan.can_pull(&owner_addr).is_ok());
+
+        let random_addr: pinocchio::Address = Pubkey::new_unique().to_bytes().into();
+        assert!(plan.can_pull(&random_addr).is_err());
+    }
+
+    #[test]
+    fn update_plan_replace_pullers() {
+        let (litesvm, owner) = &mut setup();
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            None,
+            &[],
+        );
+
+        let puller_a = Pubkey::new_unique();
+        let (res, plan_pda) = CreatePlan::new(litesvm, owner, mint)
+            .plan_id(1)
+            .amount(1_000)
+            .period_hours(24)
+            .pullers(vec![puller_a])
+            .execute();
+        res.assert_ok();
+
+        let puller_b = Pubkey::new_unique();
+        let res = UpdatePlan::new(litesvm, owner, plan_pda)
+            .pullers(vec![puller_b])
+            .execute();
+        res.assert_ok();
+
+        let account = litesvm.get_account(&plan_pda).unwrap();
+        let plan = Plan::load(&account.data).unwrap();
+        assert_eq!(plan.data.pullers[0].to_bytes(), puller_b.to_bytes());
+        let zero = [0u8; 32];
+        assert_eq!(plan.data.pullers[1].to_bytes(), zero);
+    }
+
+    #[test]
+    fn update_plan_max_pullers() {
+        let (litesvm, owner) = &mut setup();
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            None,
+            &[],
+        );
+
+        let (res, plan_pda) = CreatePlan::new(litesvm, owner, mint)
+            .plan_id(1)
+            .amount(1_000)
+            .period_hours(24)
+            .execute();
+        res.assert_ok();
+
+        let pullers: Vec<Pubkey> = (0..4).map(|_| Pubkey::new_unique()).collect();
+        let res = UpdatePlan::new(litesvm, owner, plan_pda)
+            .pullers(pullers.clone())
+            .execute();
+        res.assert_ok();
+
+        let account = litesvm.get_account(&plan_pda).unwrap();
+        let plan = Plan::load(&account.data).unwrap();
+        for (i, p) in pullers.iter().enumerate() {
+            assert_eq!(plan.data.pullers[i].to_bytes(), p.to_bytes());
+        }
     }
 }

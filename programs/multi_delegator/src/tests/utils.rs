@@ -756,18 +756,22 @@ pub struct UpdatePlan<'a> {
     litesvm: &'a mut LiteSVM,
     owner: &'a Keypair,
     plan_pda: Pubkey,
+    pullers_vec: Vec<Pubkey>,
     data: UpdatePlanData,
 }
 
 impl<'a> UpdatePlan<'a> {
     pub fn new(litesvm: &'a mut LiteSVM, owner: &'a Keypair, plan_pda: Pubkey) -> Self {
+        let zero_addr: pinocchio::Address = [0u8; 32].into();
         Self {
             litesvm,
             owner,
             plan_pda,
+            pullers_vec: vec![],
             data: UpdatePlanData {
                 status: PlanStatus::Active as u8,
                 end_ts: 0,
+                pullers: [zero_addr; MAX_PULLERS],
                 metadata_uri: [0u8; 128],
             },
         }
@@ -788,6 +792,11 @@ impl<'a> UpdatePlan<'a> {
         self
     }
 
+    pub fn pullers(mut self, pullers: Vec<Pubkey>) -> Self {
+        self.pullers_vec = pullers;
+        self
+    }
+
     pub fn metadata_uri(mut self, uri: &str) -> Self {
         let bytes = uri.as_bytes();
         let len = bytes.len().min(128);
@@ -797,7 +806,17 @@ impl<'a> UpdatePlan<'a> {
     }
 
     #[allow(clippy::result_large_err)]
-    pub fn execute(self) -> TransactionResult {
+    pub fn execute(mut self) -> TransactionResult {
+        assert!(
+            self.pullers_vec.len() <= MAX_PULLERS,
+            "max {MAX_PULLERS} pullers"
+        );
+        let mut pullers = [[0u8; 32]; MAX_PULLERS];
+        for (i, p) in self.pullers_vec.iter().enumerate() {
+            pullers[i] = p.to_bytes();
+        }
+        self.data.pullers = pullers.map(|p| p.into());
+
         let data_bytes = unsafe {
             std::slice::from_raw_parts(
                 &self.data as *const UpdatePlanData as *const u8,

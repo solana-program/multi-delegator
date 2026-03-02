@@ -1,5 +1,6 @@
 import { generateKeyPairSigner } from 'gill';
 import { describe, expect, test } from 'vitest';
+import { ZERO_ADDRESS } from '../src/constants.ts';
 import { fetchPlan, PlanStatus } from '../src/generated/index.ts';
 import { initTestSuite } from './setup.ts';
 
@@ -59,6 +60,7 @@ describe('UpdatePlan', () => {
       PlanStatus.Sunset,
       futureEndTs,
       'https://example.com/v2.json',
+      [puller],
     );
 
     const plan = (await fetchPlan(t.rpc, planPda)).data;
@@ -178,5 +180,34 @@ describe('UpdatePlan', () => {
 
     plan = (await fetchPlan(t.rpc, planPda)).data;
     expect(plan.data.endTs).toBe(0n);
+  });
+
+  test('update pullers', async () => {
+    const t = await initTestSuite();
+    const pullerA = (await generateKeyPairSigner()).address;
+
+    const { planPda } = await t.client.createPlan(
+      t.payer,
+      1n,
+      t.tokenMint,
+      1_000_000n,
+      720n,
+      0n,
+      [],
+      [pullerA],
+      '',
+    );
+
+    let plan = (await fetchPlan(t.rpc, planPda)).data;
+    expect(plan.data.pullers[0]).toBe(pullerA);
+
+    const pullerB = (await generateKeyPairSigner()).address;
+    await t.client.updatePlan(t.payer, planPda, PlanStatus.Active, 0n, '', [
+      pullerB,
+    ]);
+
+    plan = (await fetchPlan(t.rpc, planPda)).data;
+    expect(plan.data.pullers[0]).toBe(pullerB);
+    expect(plan.data.pullers[1]).toBe(ZERO_ADDRESS);
   });
 });

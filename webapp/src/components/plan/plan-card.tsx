@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   ExternalLink, Clock, Infinity as InfinityIcon, Pencil, Trash2, Sunset,
-  ChevronDown, Lock, Star,
+  ChevronDown, Lock, Star, Plus, X,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -72,13 +72,19 @@ function EditPlanDialog({ plan, meta, open, onOpenChange }: {
     return new Date(ts * 1000).getHours().toString()
   })
   const [sunsetMode, setSunsetMode] = useState(false)
+  const [pullers, setPullers] = useState<string[]>(() =>
+    plan.data.pullers.filter((p) => p !== ZERO_ADDRESS)
+  )
+
+  const addPuller = () => { if (pullers.length < 4) setPullers([...pullers, '']) }
+  const removePuller = (idx: number) => { setPullers(pullers.filter((_, i) => i !== idx)) }
+  const updatePuller = (idx: number, val: string) => { const next = [...pullers]; next[idx] = val; setPullers(next) }
 
   const selectedIconEntry = PLAN_ICONS.find((i) => i.name === selectedIcon)
   const SelectedIconComponent = selectedIconEntry?.icon
 
   const amount = Number(plan.data.amount) / USDC_MULTIPLIER
   const activeDestinations = plan.data.destinations.filter((d) => d !== ZERO_ADDRESS)
-  const activePullers = plan.data.pullers.filter((p) => p !== ZERO_ADDRESS)
 
   const metadataJson = useMemo(() => {
     const m: Record<string, string> = { n: planName, d: description }
@@ -98,11 +104,14 @@ function EditPlanDialog({ plan, meta, open, onOpenChange }: {
       : 0
     const status = sunsetMode ? PlanStatus.Sunset : PlanStatus.Active
 
+    const filteredPullers = pullers.filter((p) => p.length > 0)
+
     updatePlan.mutate({
       planPda: plan.address,
       status,
       endTs,
       metadataUri: metadataJson,
+      pullers: filteredPullers,
     }, { onSuccess: () => onOpenChange(false) })
   }
 
@@ -253,17 +262,40 @@ function EditPlanDialog({ plan, meta, open, onOpenChange }: {
             </div>
 
             <div className="sm:col-span-2 grid gap-2">
-              <Label className="flex items-center gap-1.5 text-muted-foreground">
-                <Lock className="h-3 w-3" />
-                Pullers
-              </Label>
-              {activePullers.length > 0 ? (
-                activePullers.map((p, i) => (
-                  <Input key={i} value={ellipsify(p, 8)} disabled className="font-mono text-sm opacity-50 cursor-not-allowed" />
-                ))
-              ) : (
-                <p className="text-sm text-muted-foreground/60 italic">Owner only</p>
+              <Label>Pullers <span className="text-muted-foreground font-normal">(optional, max 4)</span></Label>
+              {pullers.map((addr, i) => (
+                <div key={i} className="flex gap-2">
+                  <Input
+                    value={addr}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => updatePuller(i, e.target.value)}
+                    placeholder="Solana address"
+                    className="font-mono text-sm flex-1"
+                    disabled={isSunset}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => removePuller(i)}
+                    disabled={isSunset}
+                    className="shrink-0 text-muted-foreground hover:text-destructive"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+              {pullers.length < 4 && !isSunset && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addPuller}
+                  className="w-fit gap-1"
+                >
+                  <Plus className="h-3 w-3" /> Add
+                </Button>
               )}
+              <p className="text-xs text-muted-foreground">Addresses allowed to pull from this plan (empty = owner only)</p>
             </div>
 
             <div className="sm:col-span-2 h-px bg-border" />

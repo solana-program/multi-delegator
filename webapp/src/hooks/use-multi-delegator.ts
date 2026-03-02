@@ -372,18 +372,25 @@ export function useMultiDelegatorMutations() {
       status,
       endTs,
       metadataUri,
+      pullers = [],
     }: {
       planPda: string;
       status: PlanStatus;
       endTs: number;
       metadataUri: string;
+      pullers?: string[];
     }) => {
       if (!signer) throw new Error("Wallet not connected");
+
+      const paddedPullers = Array.from(
+        { length: MAX_PLAN_PULLERS },
+        (_, i) => address(pullers[i] || ZERO_ADDRESS),
+      );
 
       const instruction = getUpdatePlanInstruction({
         owner: signer,
         planPda: address(planPda),
-        updatePlanData: { status, endTs: BigInt(endTs), metadataUri },
+        updatePlanData: { status, endTs: BigInt(endTs), pullers: paddedPullers, metadataUri },
       });
 
       const signature = await signAndSend(instruction, signer);

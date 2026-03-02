@@ -6,6 +6,7 @@ import {
   signTransactionMessageWithSigners,
 } from 'gill';
 import { describe, expect, test } from 'vitest';
+import { ZERO_ADDRESS } from '../src/constants.ts';
 import {
   fetchMaybePlan,
   getUpdatePlanInstruction,
@@ -55,7 +56,12 @@ describe('DeletePlan', () => {
     const updateIx = getUpdatePlanInstruction({
       owner: t.payer,
       planPda,
-      updatePlanData: { status: PlanStatus.Sunset, endTs, metadataUri: '' },
+      updatePlanData: {
+        status: PlanStatus.Sunset,
+        endTs,
+        pullers: [ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS],
+        metadataUri: '',
+      },
     });
     const { value: latestBlockhash } = await t.rpc.getLatestBlockhash().send();
     const txMsg = createTransaction({
@@ -97,7 +103,12 @@ describe('DeletePlan', () => {
     const updateIx = getUpdatePlanInstruction({
       owner: t.payer,
       planPda,
-      updatePlanData: { status: PlanStatus.Sunset, endTs, metadataUri: '' },
+      updatePlanData: {
+        status: PlanStatus.Sunset,
+        endTs,
+        pullers: [ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS],
+        metadataUri: '',
+      },
     });
     const { value: latestBlockhash } = await t.rpc.getLatestBlockhash().send();
     const txMsg = createTransaction({
@@ -136,7 +147,12 @@ describe('DeletePlan', () => {
     const updateIx = getUpdatePlanInstruction({
       owner: t.payer,
       planPda,
-      updatePlanData: { status: PlanStatus.Active, endTs, metadataUri: '' },
+      updatePlanData: {
+        status: PlanStatus.Active,
+        endTs,
+        pullers: [ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS],
+        metadataUri: '',
+      },
     });
     const { value: latestBlockhash } = await t.rpc.getLatestBlockhash().send();
     const txMsg = createTransaction({
