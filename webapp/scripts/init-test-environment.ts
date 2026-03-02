@@ -4,28 +4,36 @@
  */
 
 import { createSolanaRpc, address } from 'gill'
-import { readConfig, addToken, clearConfig, updateNetwork } from './config-manager'
+import { execFileSync } from 'child_process'
+import { join, dirname } from 'path'
+import { fileURLToPath } from 'url'
+import { readConfig, addToken, clearConfig, setProgramAddress } from './config-manager'
 import { createMockUsdc } from './helpers'
 
-const RPC_URL = 'http://127.0.0.1:8899'
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const KEYPAIR_PATH = join(__dirname, '../../keys/multi_delegator-keypair.json')
+
+function getProgramId(): string {
+  return execFileSync('solana-keygen', ['pubkey', KEYPAIR_PATH], { encoding: 'utf-8' }).trim()
+}
+
+const RPC_URL = process.env.RPC_URL ?? 'http://127.0.0.1:8899'
+const NETWORK = process.env.NETWORK ?? 'localnet'
 
 async function main() {
-  console.log('Initializing test environment...')
+  console.log(`Initializing test environment for ${NETWORK}...`)
 
   try {
     const rpc = createSolanaRpc(RPC_URL)
 
-    // Wait for validator
-    console.log('Waiting for validator...')
+    console.log(`Connecting to ${RPC_URL}...`)
     await rpc.getLatestBlockhash().send()
     await new Promise((r) => setTimeout(r, 1000))
-    console.log('Validator ready')
+    console.log('RPC ready')
 
-    // Read existing config
     const existingConfig = await readConfig()
-
-    // Check if we have existing USDC mint on-chain
-    let usdcMintString = existingConfig.tokens?.[0]?.mint
+    const networkTokens = existingConfig.networks[NETWORK]?.tokens ?? []
+    let usdcMintString = networkTokens.find((t) => t.symbol === 'USDC')?.mint
     let needsNewMint = true
 
     if (usdcMintString) {
@@ -46,12 +54,13 @@ async function main() {
       console.log('New mock USDC created:', usdcMintString)
     }
 
-    // Update config with validated addresses
     console.log('Updating configuration...')
-    await clearConfig()
-    await updateNetwork('localnet')
+    await clearConfig(NETWORK)
+    const programId = getProgramId()
+    console.log('Program ID (from keypair):', programId)
+    await setProgramAddress(NETWORK, programId)
 
-    await addToken({
+    await addToken(NETWORK, {
       symbol: 'USDC',
       name: 'Mock USDC',
       mint: usdcMintString!,

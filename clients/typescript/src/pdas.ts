@@ -19,6 +19,7 @@ const textEncoder = new TextEncoder();
 export async function getMultiDelegatePDA(
   user: Address,
   tokenMint: Address,
+  programId?: Address,
 ): Promise<[Address, number]> {
   const seeds = [
     textEncoder.encode(MULTI_DELEGATE_SEED),
@@ -27,7 +28,7 @@ export async function getMultiDelegatePDA(
   ];
 
   const [pda, bump] = await getProgramDerivedAddress({
-    programAddress: PROGRAM_ID,
+    programAddress: programId ?? PROGRAM_ID,
     seeds,
   });
   return [pda, bump];
@@ -38,6 +39,7 @@ export async function getDelegationPDA(
   delegator: Address,
   delegatee: Address,
   nonce: number | bigint,
+  programId?: Address,
 ): Promise<[Address, number]> {
   const nonceBytes = new Uint8Array(U64_BYTE_SIZE);
   new DataView(nonceBytes.buffer).setBigUint64(0, BigInt(nonce), true);
@@ -51,7 +53,7 @@ export async function getDelegationPDA(
   ];
 
   const [pda, bump] = await getProgramDerivedAddress({
-    programAddress: PROGRAM_ID,
+    programAddress: programId ?? PROGRAM_ID,
     seeds,
   });
   return [pda, bump];
@@ -60,6 +62,7 @@ export async function getDelegationPDA(
 export async function getPlanPDA(
   owner: Address,
   planId: number | bigint,
+  programId?: Address,
 ): Promise<[Address, number]> {
   const planIdBytes = new Uint8Array(U64_BYTE_SIZE);
   new DataView(planIdBytes.buffer).setBigUint64(0, BigInt(planId), true);
@@ -71,17 +74,19 @@ export async function getPlanPDA(
   ];
 
   const [pda, bump] = await getProgramDerivedAddress({
-    programAddress: PROGRAM_ID,
+    programAddress: programId ?? PROGRAM_ID,
     seeds,
   });
   return [pda, bump];
 }
 
-export async function getEventAuthorityPDA(): Promise<[Address, number]> {
+export async function getEventAuthorityPDA(
+  programId?: Address,
+): Promise<[Address, number]> {
   const seeds = [textEncoder.encode(EVENT_AUTHORITY_SEED)];
 
   const [pda, bump] = await getProgramDerivedAddress({
-    programAddress: PROGRAM_ID,
+    programAddress: programId ?? PROGRAM_ID,
     seeds,
   });
   return [pda, bump];
@@ -90,6 +95,7 @@ export async function getEventAuthorityPDA(): Promise<[Address, number]> {
 export async function getSubscriptionPDA(
   planPda: Address,
   subscriber: Address,
+  programId?: Address,
 ): Promise<[Address, number]> {
   const seeds = [
     textEncoder.encode(SUBSCRIPTION_SEED),
@@ -98,7 +104,7 @@ export async function getSubscriptionPDA(
   ];
 
   const [pda, bump] = await getProgramDerivedAddress({
-    programAddress: PROGRAM_ID,
+    programAddress: programId ?? PROGRAM_ID,
     seeds,
   });
   return [pda, bump];

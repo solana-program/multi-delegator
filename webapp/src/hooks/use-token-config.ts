@@ -1,23 +1,30 @@
 import { useQuery } from '@tanstack/react-query'
-import { api } from '@/lib/api-client'
+import { api, clusterIdToNetwork } from '@/lib/api-client'
+import type { NetworkConfigResponse } from '@/lib/api-client'
+import { useClusterConfig } from '@/hooks/use-cluster-config'
 
-/**
- * Hook to fetch token configuration from the API.
- * Tokens are configured server-side and include mint addresses, decimals, etc.
- */
-export function useTokenConfig() {
-  return useQuery({
-    queryKey: ['token-config'],
-    queryFn: () => api.config.getTokens(),
-    staleTime: Infinity, // Config rarely changes during a session
+export function useNetworkConfig() {
+  const { id } = useClusterConfig()
+  const network = clusterIdToNetwork(id)
+
+  return useQuery<NetworkConfigResponse>({
+    queryKey: ['network-config', network],
+    queryFn: () => api.config.getNetworkConfig(network),
+    staleTime: 30_000,
     retry: 2,
   })
 }
 
-/**
- * Hook to get the USDC mint address from the token configuration.
- * Returns null if USDC is not configured or config is still loading.
- */
+export function useTokenConfig() {
+  const { data, ...rest } = useNetworkConfig()
+  return { data: data?.tokens, ...rest }
+}
+
+export function useProgramAddress(): string | null {
+  const { data } = useNetworkConfig()
+  return data?.programAddress ?? null
+}
+
 export function useUsdcMintRaw() {
   const { data: tokens, isLoading } = useTokenConfig()
   return {
@@ -31,9 +38,6 @@ export function useUsdcMint(): string | null {
   return tokens?.find((t) => t.symbol === 'USDC')?.mint ?? null
 }
 
-/**
- * Hook to get the USDC token config including decimals and other metadata.
- */
 export function useUsdcConfig() {
   const { data: tokens, ...rest } = useTokenConfig()
   const usdc = tokens?.find((t) => t.symbol === 'USDC') ?? null

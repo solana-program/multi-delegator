@@ -10,6 +10,7 @@ import { useMyPlans, type PlanItem } from '@/hooks/use-plans'
 import { useSubscriberCounts, fetchPlanSubscriptions } from '@/hooks/use-subscriptions'
 import { useMultiDelegatorMutations } from '@/hooks/use-multi-delegator'
 import { useClusterConfig } from '@/hooks/use-cluster-config'
+import { useProgramAddress } from '@/hooks/use-token-config'
 import { getBlockTimestamp } from '@/hooks/use-time-travel'
 import { computeEligibleSubscribers } from '@/lib/collect-utils'
 import { getCollectionHistory, addCollectionRecord, createSuccessRecord, createFailureRecord, type CollectionRecord } from '@/lib/collection-history'
@@ -46,7 +47,7 @@ export function HistoryEntry({ record }: { record: CollectionRecord }) {
   )
 }
 
-function CollectPlanCard({ plan, subscriberCount }: { plan: PlanItem; subscriberCount: number }) {
+function CollectPlanCard({ plan, subscriberCount, progAddr }: { plan: PlanItem; subscriberCount: number; progAddr: string }) {
   const [expanded, setExpanded] = useState(false)
   const [isCollecting, setIsCollecting] = useState(false)
   const [historyVersion, setHistoryVersion] = useState(0)
@@ -65,7 +66,7 @@ function CollectPlanCard({ plan, subscriberCount }: { plan: PlanItem; subscriber
     setIsCollecting(true)
     const totalSubs = subscriberCount
     try {
-      const subscribers = await fetchPlanSubscriptions(rpcUrl, plan.address)
+      const subscribers = await fetchPlanSubscriptions(rpcUrl, plan.address, progAddr)
       const ts = await getBlockTimestamp(rpcUrl)
       const eligible = computeEligibleSubscribers(
         subscribers,
@@ -112,7 +113,7 @@ function CollectPlanCard({ plan, subscriberCount }: { plan: PlanItem; subscriber
       toast.error(err instanceof Error ? err.message : 'Failed to collect')
       setIsCollecting(false)
     }
-  }, [rpcUrl, plan, subscriberCount, planName, amountUsd, collectSubscriptionPayments])
+  }, [rpcUrl, plan, subscriberCount, planName, amountUsd, collectSubscriptionPayments, progAddr])
 
   return (
     <div className="border border-emerald-500/15 bg-slate-900/60 rounded-xl p-4 space-y-3">
@@ -165,6 +166,7 @@ export function CollectPaymentsPanel({ alwaysShow }: { alwaysShow?: boolean } = 
   const { data: plans, isLoading } = useMyPlans()
   const planAddresses = useMemo(() => plans?.map((p) => p.address) ?? [], [plans])
   const { data: subCounts } = useSubscriberCounts(planAddresses)
+  const progAddr = useProgramAddress()
 
   const plansWithSubs = useMemo(() => {
     if (!plans || !subCounts) return []
@@ -211,6 +213,7 @@ export function CollectPaymentsPanel({ alwaysShow }: { alwaysShow?: boolean } = 
             key={plan.address}
             plan={plan}
             subscriberCount={subCounts?.get(plan.address) ?? 0}
+            progAddr={progAddr!}
           />
         ))}
       </CardContent>

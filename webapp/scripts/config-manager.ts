@@ -15,55 +15,80 @@ export interface TokenConfig {
   description: string
 }
 
-export interface Config {
-  network: string
-  adminWallet: string
+export interface NetworkConfig {
+  programAddress?: string
   tokens: TokenConfig[]
+}
+
+export interface Config {
+  networks: Record<string, NetworkConfig>
+}
+
+function migrateOldConfig(raw: Record<string, unknown>): Config {
+  if ('networks' in raw && typeof raw.networks === 'object') {
+    return raw as unknown as Config
+  }
+  const network = (raw.network as string) ?? 'localnet'
+  const tokens = (raw.tokens as TokenConfig[]) ?? []
+  return { networks: { [network]: { tokens } } }
 }
 
 export async function readConfig(): Promise<Config> {
   if (!existsSync(CONFIG_PATH)) {
-    return {
-      network: 'localnet',
-      adminWallet: '~/.config/solana/id.json',
-      tokens: [],
-    }
+    return { networks: {} }
   }
   const content = await readFile(CONFIG_PATH, 'utf-8')
-  return JSON.parse(content)
+  const raw = JSON.parse(content)
+  return migrateOldConfig(raw)
 }
 
 export async function writeConfig(config: Config): Promise<void> {
   await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2))
 }
 
-export async function addToken(token: TokenConfig): Promise<void> {
+export async function addToken(network: string, token: TokenConfig): Promise<void> {
   const config = await readConfig()
-  const existingIndex = config.tokens.findIndex((t) => t.symbol === token.symbol)
+  if (!config.networks[network]) {
+    config.networks[network] = { tokens: [] }
+  }
+  const tokens = config.networks[network].tokens
+  const existingIndex = tokens.findIndex((t) => t.symbol === token.symbol)
   if (existingIndex >= 0) {
-    config.tokens[existingIndex] = token
+    tokens[existingIndex] = token
   } else {
-    config.tokens.push(token)
+    tokens.push(token)
   }
   await writeConfig(config)
 }
 
-export async function updateNetwork(network: string): Promise<void> {
+export async function clearConfig(network?: string): Promise<void> {
+  if (network) {
+    const config = await readConfig()
+    const existing = config.networks[network]
+    config.networks[network] = { programAddress: existing?.programAddress, tokens: [] }
+    await writeConfig(config)
+  } else {
+    await writeConfig({ networks: {} })
+  }
+}
+
+export async function setProgramAddress(network: string, addr: string): Promise<void> {
   const config = await readConfig()
-  config.network = network
+  if (!config.networks[network]) {
+    config.networks[network] = { tokens: [] }
+  }
+  config.networks[network].programAddress = addr
   await writeConfig(config)
 }
 
-export async function clearConfig(): Promise<void> {
-  await writeConfig({
-    network: 'localnet',
-    adminWallet: '~/.config/solana/id.json',
-    tokens: [],
-  })
+export async function getProgramAddress(network: string): Promise<string | null> {
+  const config = await readConfig()
+  return config.networks[network]?.programAddress ?? null
 }
 
-export async function getUsdcMint(): Promise<string | null> {
+export async function getUsdcMint(network: string): Promise<string | null> {
   const config = await readConfig()
-  const usdc = config.tokens.find((t) => t.symbol === 'USDC')
+  const tokens = config.networks[network]?.tokens ?? []
+  const usdc = tokens.find((t) => t.symbol === 'USDC')
   return usdc?.mint ?? null
 }

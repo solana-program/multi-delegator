@@ -23,9 +23,7 @@ const QUICK_JUMPS = [
 const DRIFT_THRESHOLD_SEC = 30
 
 
-export function TimeTravelButton() {
-  const { cluster } = useWalletUi()
-  const isLocalnet = cluster.id === 'solana:localnet'
+function TimeTravelButtonInner() {
   const { timeTravel, getCurrentTimestamp } = useTimeTravel()
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
@@ -34,8 +32,6 @@ export function TimeTravelButton() {
   const [date, setDate] = useState('')
   const [hour, setHour] = useState('12')
   const [timeTraveled, setTimeTraveled] = useState(false)
-
-  if (!isLocalnet) return null
 
   const updateDrift = useCallback((blockTime: number) => {
     const wallTime = Math.floor(Date.now() / 1000)
@@ -95,6 +91,18 @@ export function TimeTravelButton() {
         if (dateDisplayRef.current) dateDisplayRef.current.style.opacity = '1'
         setAnimating(false)
         animRef.current = 0
+        setLoading(true)
+        timeTravel(endTs)
+          .then(() => fetchTime())
+          .then(() => {
+            queryClient.invalidateQueries()
+            setTimeout(() => queryClient.invalidateQueries(), 500)
+            toast.success('Clock set')
+          })
+          .catch((e: unknown) => {
+            toast.error(e instanceof Error ? e.message : 'Time travel failed')
+          })
+          .finally(() => setLoading(false))
       }
     }
     animRef.current = requestAnimationFrame(step)
@@ -222,4 +230,10 @@ export function TimeTravelButton() {
       </DialogContent>
     </Dialog>
   )
+}
+
+export function TimeTravelButton() {
+  const { cluster } = useWalletUi()
+  if (cluster.id !== 'solana:localnet') return null
+  return <TimeTravelButtonInner />
 }

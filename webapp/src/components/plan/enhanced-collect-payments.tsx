@@ -13,6 +13,7 @@ import { useAllPlanSubscribers, type PlanSubscriberData } from '@/hooks/use-plan
 import { useQueryClient } from '@tanstack/react-query'
 import { useMultiDelegatorMutations } from '@/hooks/use-multi-delegator'
 import { useClusterConfig } from '@/hooks/use-cluster-config'
+import { useProgramAddress } from '@/hooks/use-token-config'
 import { fetchPlanSubscriptions } from '@/hooks/use-subscriptions'
 import { getBlockTimestamp } from '@/hooks/use-time-travel'
 import { computeEligibleSubscribers } from '@/lib/collect-utils'
@@ -102,6 +103,7 @@ function CollectAllButton({
   const [collecting, setCollecting] = useState(false)
   const [progress, setProgress] = useState('')
   const { url: rpcUrl } = useClusterConfig()
+  const progAddr = useProgramAddress()
   const { collectAllPlanPayments } = useMultiDelegatorMutations()
 
   const eligiblePlans = useMemo(
@@ -123,7 +125,7 @@ function CollectAllButton({
       }> = []
 
       for (const pd of eligiblePlans) {
-        const subscribers = await fetchPlanSubscriptions(rpcUrl, pd.plan.address)
+        const subscribers = await fetchPlanSubscriptions(rpcUrl, pd.plan.address, progAddr!)
         const eligible = computeEligibleSubscribers(
           subscribers, pd.plan.data.amount, pd.plan.data.periodHours, ts,
         )
@@ -177,7 +179,7 @@ function CollectAllButton({
     onComplete?.()
     setCollecting(false)
     setProgress('')
-  }, [eligiblePlans, rpcUrl, collectAllPlanPayments, onComplete])
+  }, [eligiblePlans, rpcUrl, progAddr, collectAllPlanPayments, onComplete])
 
   return (
     <Button
@@ -203,6 +205,7 @@ function EnhancedPlanCard({ planData, blockTs }: { planData: PlanSubscriberData;
   const [isCollecting, setIsCollecting] = useState(false)
   const [historyVersion, setHistoryVersion] = useState(0)
   const { url: rpcUrl } = useClusterConfig()
+  const progAddr = useProgramAddress()
   const { collectSubscriptionPayments } = useMultiDelegatorMutations()
 
   const { plan, subscribers, eligible } = planData
@@ -218,7 +221,7 @@ function EnhancedPlanCard({ planData, blockTs }: { planData: PlanSubscriberData;
   const handleCollect = useCallback(async () => {
     setIsCollecting(true)
     try {
-      const subs = await fetchPlanSubscriptions(rpcUrl, plan.address)
+      const subs = await fetchPlanSubscriptions(rpcUrl, plan.address, progAddr!)
       const ts = await getBlockTimestamp(rpcUrl)
       const elig = computeEligibleSubscribers(subs, plan.data.amount, plan.data.periodHours, ts)
 
@@ -260,7 +263,7 @@ function EnhancedPlanCard({ planData, blockTs }: { planData: PlanSubscriberData;
       toast.error(err instanceof Error ? err.message : 'Failed to collect')
       setIsCollecting(false)
     }
-  }, [rpcUrl, plan, planName, amountUsd, subscribers.length, collectSubscriptionPayments])
+  }, [rpcUrl, progAddr, plan, planName, amountUsd, subscribers.length, collectSubscriptionPayments])
 
   const periodHoursSec = Number(plan.data.periodHours) * 3600
 

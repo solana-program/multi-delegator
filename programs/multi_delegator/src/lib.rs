@@ -19,7 +19,7 @@ pub use constants::*;
 
 pub mod tests;
 
-declare_id!("3PuMsYqaLY4Sy1DR8np3aAiHravZXCeyMYDUECLqfswY");
+declare_id!("EPEUTog1kptYkthDJF6MuB1aM4aDAwHYwoF32Rzv5rqg");
 
 fn process_instruction(
     program_id: &Address,

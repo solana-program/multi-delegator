@@ -1,5 +1,4 @@
 import idl from '@idl'
-import { MULTI_DELEGATOR_PROGRAM_ADDRESS } from '@multidelegator/client'
 
 type IdlError = { code: number; name: string; message: string }
 
@@ -16,7 +15,7 @@ const SPL_TOKEN_ERRORS: Record<number, string> = {
   4: 'Owner mismatch',
 }
 
-export function parseProgramError(error: unknown): string {
+export function parseProgramError(error: unknown, programAddress?: string): string {
   if (!(error instanceof Error)) return 'Unknown error'
 
   const hexMatch = error.message.match(/custom program error: 0x([0-9a-fA-F]+)/i)
@@ -33,8 +32,9 @@ export function parseProgramError(error: unknown): string {
   const failLineMatch = error.message.match(/Program (\w+) failed: custom program error:/)
   const failedProgram = failLineMatch?.[1] ?? ''
 
-  if (failedProgram === MULTI_DELEGATOR_PROGRAM_ADDRESS) {
-    return PROGRAM_ERRORS[code] ?? `Program error ${code}`
+  if (!programAddress || failedProgram === programAddress) {
+    const msg = PROGRAM_ERRORS[code]
+    if (msg) return msg
   }
 
   return SPL_TOKEN_ERRORS[code] ?? `Program error ${code}`

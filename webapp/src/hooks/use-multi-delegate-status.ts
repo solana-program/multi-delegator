@@ -4,6 +4,7 @@ import { createSolanaRpc, address, type Address } from 'gill'
 import { TOKEN_PROGRAM_ADDRESS, TOKEN_2022_PROGRAM_ADDRESS } from 'gill/programs/token'
 import { getMultiDelegatePDA, fetchMaybeMultiDelegate } from '@multidelegator/client'
 import { useClusterConfig } from '@/hooks/use-cluster-config'
+import { useProgramAddress } from '@/hooks/use-token-config'
 import type { TokenAccountEntry } from '@/lib/types'
 
 const TOKEN_PROGRAMS: Address[] = [TOKEN_PROGRAM_ADDRESS, TOKEN_2022_PROGRAM_ADDRESS]
@@ -31,6 +32,7 @@ export interface MultiDelegateStatus {
 export function useMultiDelegateStatus(tokenMint: string | null) {
   const { account, cluster } = useWalletUi()
   const clusterConfig = useClusterConfig()
+  const progAddr = useProgramAddress()
   const queryClient = useQueryClient()
 
   const query = useQuery({
@@ -41,7 +43,8 @@ export function useMultiDelegateStatus(tokenMint: string | null) {
       }
 
       const rpc = createSolanaRpc(clusterConfig.url)
-      const [pda] = await getMultiDelegatePDA(address(account.address), address(tokenMint))
+      const progId = progAddr ? address(progAddr) : undefined
+      const [pda] = await getMultiDelegatePDA(address(account.address), address(tokenMint), progId)
       const multiDelegate = await fetchMaybeMultiDelegate(rpc, pda)
 
       const exists = multiDelegate && 'exists' in multiDelegate ? multiDelegate.exists : false
@@ -78,7 +81,7 @@ export function useMultiDelegateStatus(tokenMint: string | null) {
         data: exists && multiDelegate && 'data' in multiDelegate ? multiDelegate.data as unknown as MultiDelegateData : null,
       }
     },
-    enabled: !!account?.address && !!tokenMint,
+    enabled: !!account?.address && !!tokenMint && !!progAddr,
     retry: 2,
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 5000),
   })

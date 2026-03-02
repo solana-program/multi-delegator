@@ -1,9 +1,14 @@
 import { Link, useLocation } from 'react-router'
+import { useWalletUi } from '@wallet-ui/react'
 import { NAV_ITEMS, type NavItem } from './nav-items'
 import solanaLogo from '@/assets/solana-logo.svg'
 
 export function AppSidebar() {
   const { pathname } = useLocation()
+  const { cluster } = useWalletUi()
+  const filteredItems = NAV_ITEMS.filter(
+    (item) => !item.clusterFilter || item.clusterFilter.includes(cluster.id),
+  )
 
   function isActive(path: string) {
     return path === '/' ? pathname === '/' : pathname === path
@@ -21,7 +26,7 @@ export function AppSidebar() {
         <img src={solanaLogo} alt="Solana" className="h-5 w-5 shrink-0" />
       </div>
       <nav className="flex flex-col gap-2 px-4 pt-8">
-        {NAV_ITEMS.map((item) => {
+        {filteredItems.map((item) => {
           const { label, path, icon: Icon, children } = item
           const active = isParentActive(item)
           return (

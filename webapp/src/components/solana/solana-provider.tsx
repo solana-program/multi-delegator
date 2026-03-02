@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import {
   createSolanaDevnet,
   createSolanaLocalnet,
+  createSolanaTestnet,
   createWalletUiConfig,
   WalletUi,
   WalletUiClusterDropdown,
@@ -11,8 +12,18 @@ import { WalletSignerProvider } from './use-wallet-ui-signer'
 
 export { WalletUiDropdown as WalletButton, WalletUiClusterDropdown as ClusterButton }
 
+const defaultClusterId = import.meta.env.VITE_DEFAULT_CLUSTER ?? 'solana:localnet'
+
+const allClusters = [
+  createSolanaDevnet(),
+  createSolanaTestnet(),
+  createSolanaLocalnet(),
+]
+
 const config = createWalletUiConfig({
-  clusters: [createSolanaDevnet(), createSolanaLocalnet()],
+  clusters: allClusters.sort((a, b) =>
+    a.id === defaultClusterId ? -1 : b.id === defaultClusterId ? 1 : 0
+  ),
 })
 
 export function SolanaProvider({ children }: { children: ReactNode }) {

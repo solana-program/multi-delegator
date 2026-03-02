@@ -9,7 +9,7 @@ export function Faucet() {
     return (
       <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4">
         <h1 className="text-2xl font-bold">Connect your wallet to get started</h1>
-        <p className="text-muted-foreground">Request devnet tokens to test the application.</p>
+        <p className="text-muted-foreground">Request test tokens to try the application.</p>
       </div>
     )
   }
@@ -29,7 +29,7 @@ export function Faucet() {
         <Droplets className="h-8 w-8 text-blue-400" />
         <div>
           <h1 className="text-2xl font-bold">Development Faucet</h1>
-          <p className="text-sm text-muted-foreground">Request devnet tokens for testing</p>
+          <p className="text-sm text-muted-foreground">Request test tokens for development</p>
         </div>
       </div>
 

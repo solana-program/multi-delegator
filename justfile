@@ -11,7 +11,6 @@ webapp_dir := "webapp"
 deploy_key := "keys/multi_delegator-keypair.json"
 target_deploy_key := "target/deploy/multi_delegator-keypair.json"
 idl_file := program_dir / "idl/multi_delegator.json"
-program_id := "3PuMsYqaLY4Sy1DR8np3aAiHravZXCeyMYDUECLqfswY"
 
 # List available recipes
 default:
@@ -42,6 +41,10 @@ setup-hooks:
     git config core.hooksPath .githooks
     @echo "✓ Git hooks configured"
 
+# Print program ID from keypair
+program-id:
+    @solana-keygen pubkey "{{deploy_key}}"
+
 # Copy deployment keypair to build directory
 prepare-deploy-keys:
     #!/usr/bin/env bash
@@ -49,13 +52,24 @@ prepare-deploy-keys:
 
     mkdir -p "target/deploy"
 
-    if [[ -f "{{deploy_key}}" ]]; then
-        cp "{{deploy_key}}" "{{target_deploy_key}}"
-        echo "✓ Deploy key copied"
-    else
-        echo "Error: {{deploy_key}} not found"
+    if [[ ! -f "{{deploy_key}}" ]]; then
+        echo "Error: {{deploy_key}} not found."
+        echo "This keypair defines the program identity. Do not generate a random one."
+        echo "Restore it from git history: git show <commit>^:keys/multi_delegator-keypair.json > {{deploy_key}}"
         exit 1
     fi
+
+    PROG_ID=$(solana-keygen pubkey "{{deploy_key}}")
+    DECLARED_ID=$(sed -n 's/.*declare_id!("\([^"]*\)").*/\1/p' "{{program_dir}}/src/lib.rs")
+
+    if [[ "$DECLARED_ID" != "$PROG_ID" ]]; then
+        echo "Error: declare_id! ($DECLARED_ID) does not match keypair ($PROG_ID)"
+        echo "Update declare_id! in {{program_dir}}/src/lib.rs or restore the correct keypair."
+        exit 1
+    fi
+
+    cp "{{deploy_key}}" "{{target_deploy_key}}"
+    echo "✓ Deploy key ready (program: $PROG_ID)"
 
 # ============================================
 # Build recipes
@@ -138,7 +152,6 @@ ensure-surfpool:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    # Check if validator is already running
     if curl -sf -X POST http://localhost:8899 \
         -H "Content-Type: application/json" \
         -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' &>/dev/null; then
@@ -146,19 +159,20 @@ ensure-surfpool:
         exit 0
     fi
 
+    PROG_ID=$(solana-keygen pubkey "{{deploy_key}}")
+
     echo "Starting surfpool validator..."
     mkdir -p .surfpool
     nohup surfpool start --ci --no-tui --block-production-mode transaction \
         > /tmp/surfpool.log 2>&1 &
     echo $! > .surfpool/pid.txt
 
-    # Wait for program deployment
     for i in {1..7}; do
         if curl -sf -X POST http://localhost:8899 \
             -H "Content-Type: application/json" \
-            -d '{"jsonrpc":"2.0","id":1,"method":"getAccountInfo","params":["{{program_id}}",{"encoding":"base64"}]}' \
+            -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getAccountInfo\",\"params\":[\"$PROG_ID\",{\"encoding\":\"base64\"}]}" \
             | grep -q '"executable":true'; then
-            echo "✓ Program deployed successfully"
+            echo "✓ Program deployed successfully ($PROG_ID)"
             exit 0
         fi
         echo "Waiting for program deployment... ($i/7)"
@@ -191,7 +205,7 @@ kill-validator:
 # Webapp recipes
 # ============================================
 
-# Start full webapp stack (builds program, installs deps, starts all services)
+# Start webapp stack (builds client, starts API + Vite)
 webapp-run:
     ./scripts/start-webapp.sh
 
@@ -209,7 +223,6 @@ webapp-clean:
     echo "Removing generated state..."
     rm -rf target/deploy/
     rm -rf {{webapp_dir}}/{dist,node_modules,api/node_modules,scripts/node_modules}
-    rm -rf {{webapp_dir}}/config.json
     rm -rf .validator-ledger .surfpool
     rm -f /tmp/{surfpool,api,webapp,validator}.log
 

@@ -1,21 +1,64 @@
-import { spawn } from 'child_process'
+import { spawn, type ChildProcess, execFileSync } from 'child_process'
 import { createServer } from 'node:http'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readFile } from 'fs/promises'
+import { readFile, writeFile, stat } from 'fs/promises'
+import crypto from 'node:crypto'
+import { checkProgramStatus } from './lib/program-status.js'
+import { buildDeployPlan, buildUpgradePlan } from './lib/deploy-builder.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const PROJECT_ROOT = join(__dirname, '../..')
 
 const PORT = 3001
-const RPC_URL = 'http://127.0.0.1:8899'
+const RPC_URL = process.env.RPC_URL ?? 'http://127.0.0.1:8899'
 const CONFIG_PATH = join(__dirname, '../config.json')
+
+let surfpoolProcess: ChildProcess | null = null
+let startingValidator = false
 
 const MIN_SOL_AIRDROP = 0.1
 const MAX_SOL_AIRDROP = 10
 
+const SO_PATH = join(__dirname, '../../target/deploy/multi_delegator.so')
+const KEYPAIR_PATH = join(__dirname, '../../keys/multi_delegator-keypair.json')
+
+let cachedKeypairAddress: string | null = null
+function getProgramAddressFromKeypair(): string {
+  if (cachedKeypairAddress) return cachedKeypairAddress
+  try {
+    cachedKeypairAddress = execFileSync('solana-keygen', ['pubkey', KEYPAIR_PATH], { encoding: 'utf-8' }).trim()
+    return cachedKeypairAddress
+  } catch {
+    log('error', 'Failed to read program address from keypair', { path: KEYPAIR_PATH })
+    throw new Error(`Cannot derive program address: keypair not found at ${KEYPAIR_PATH}. Run "just prepare-deploy-keys" first.`)
+  }
+}
+
+interface TokenEntry {
+  symbol: string
+  mint: string
+  decimals: number
+}
+
+interface NetworkConfig {
+  programAddress?: string
+  tokens: TokenEntry[]
+}
+
 interface Config {
-  network: string
-  tokens: Array<{ symbol: string; mint: string; decimals: number }>
+  networks: Record<string, NetworkConfig>
+}
+
+function networkFromRpcUrl(rpcUrl: string): string {
+  if (rpcUrl.includes('devnet')) return 'devnet'
+  if (rpcUrl.includes('testnet')) return 'testnet'
+  if (rpcUrl.includes('mainnet')) return 'mainnet'
+  return 'localnet'
+}
+
+function getNetworkTokens(config: Config, network: string): TokenEntry[] {
+  return config.networks[network]?.tokens ?? []
 }
 
 function log(level: 'info' | 'warn' | 'error', message: string, meta?: Record<string, unknown>) {
@@ -27,32 +70,50 @@ function log(level: 'info' | 'warn' | 'error', message: string, meta?: Record<st
 async function readConfig(): Promise<Config> {
   try {
     const content = await readFile(CONFIG_PATH, 'utf-8')
-    return JSON.parse(content)
+    const raw = JSON.parse(content)
+    if ('networks' in raw && typeof raw.networks === 'object') {
+      return raw as Config
+    }
+    const network = (raw.network as string) ?? 'localnet'
+    const tokens = (raw.tokens as TokenEntry[]) ?? []
+    return { networks: { [network]: { tokens } } }
   } catch (error) {
     log('warn', 'Failed to read config, using defaults', { error: String(error), path: CONFIG_PATH })
-    return { network: 'localnet', tokens: [] }
+    return { networks: {} }
   }
 }
 
-function corsHeaders() {
+const ALLOWED_RPC_HOSTS = ['127.0.0.1', 'localhost', 'api.devnet.solana.com', 'api.testnet.solana.com']
+
+const ALLOWED_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:4173']
+
+function corsHeaders(origin?: string | null) {
+  const allowedOrigin = origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
   return {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': allowedOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
   }
 }
 
-function jsonResponse(data: unknown, status = 200) {
+const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/
+
+function jsonResponse(data: unknown, status = 200, origin?: string | null) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'Content-Type': 'application/json', ...corsHeaders() },
+    headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
   })
 }
 
 async function handleSolAirdrop(recipient: string, amount: number): Promise<Response> {
-  if (!recipient || !amount || amount < MIN_SOL_AIRDROP || amount > MAX_SOL_AIRDROP) {
+  if (!recipient || !BASE58_RE.test(recipient)) {
+    return jsonResponse({ error: 'Invalid recipient address' }, 400)
+  }
+  if (!amount || !Number.isFinite(amount) || amount < MIN_SOL_AIRDROP || amount > MAX_SOL_AIRDROP) {
     return jsonResponse({ error: `Invalid parameters. Amount must be between ${MIN_SOL_AIRDROP} and ${MAX_SOL_AIRDROP}` }, 400)
   }
+
+  log('info', 'SOL airdrop requested', { recipient, amount })
 
   return new Promise((resolve) => {
     const child = spawn('solana', ['airdrop', String(amount), recipient, '--url', RPC_URL])
@@ -85,19 +146,28 @@ async function handleSolAirdrop(recipient: string, amount: number): Promise<Resp
 }
 
 async function handleUsdcAirdrop(recipient: string, amount: number): Promise<Response> {
-  if (!recipient || !amount || amount <= 0) {
+  if (!recipient || !BASE58_RE.test(recipient)) {
+    return jsonResponse({ error: 'Invalid recipient address' }, 400)
+  }
+  if (!amount || amount <= 0) {
     return jsonResponse({ error: 'Invalid parameters' }, 400)
   }
 
   const config = await readConfig()
-  const usdcMint = config.tokens.find((t) => t.symbol === 'USDC')?.mint
+  const network = networkFromRpcUrl(RPC_URL)
+  const tokens = getNetworkTokens(config, network)
+  const usdcMint = tokens.find((t) => t.symbol === 'USDC')?.mint
   if (!usdcMint) {
     return jsonResponse({ error: 'USDC mint not configured. Run init-test-environment.ts first.' }, 500)
   }
 
+  log('info', 'USDC airdrop requested', { recipient, amount, mint: usdcMint })
+
   return new Promise((resolve) => {
     const scriptPath = join(__dirname, '../scripts/mint-usdc.ts')
-    const child = spawn('tsx', [scriptPath, recipient, String(amount)])
+    const child = spawn('tsx', [scriptPath, recipient, String(amount)], {
+      env: { ...process.env, RPC_URL },
+    })
 
     let stdout = ''
     let stderr = ''
@@ -136,12 +206,278 @@ async function parseJsonBody(req: Request): Promise<{ success: true; data: unkno
   }
 }
 
+function extractFields<T extends Record<string, unknown>>(
+  data: unknown,
+  schema: Record<keyof T, 'string' | 'number' | 'boolean' | 'object' | 'optional_string' | 'optional_number' | 'optional_boolean' | 'optional_object'>,
+): T {
+  if (typeof data !== 'object' || data === null) throw new Error('Expected object')
+  const obj = data as Record<string, unknown>
+  const result: Record<string, unknown> = {}
+  for (const [key, type] of Object.entries(schema)) {
+    const val = obj[key]
+    const isOptional = type.startsWith('optional_')
+    const baseType = isOptional ? type.replace('optional_', '') : type
+    if (val === undefined || val === null) {
+      if (!isOptional) throw new Error(`Missing required field: ${key}`)
+      result[key] = undefined
+      continue
+    }
+    if (typeof val !== baseType) throw new Error(`Field ${key} must be ${baseType}, got ${typeof val}`)
+    result[key] = val
+  }
+  return result as T
+}
+
+async function handleProgramStatus(rpcUrl: string, programAddr: string): Promise<Response> {
+  try {
+    const status = await checkProgramStatus(rpcUrl, programAddr)
+    return jsonResponse(status)
+  } catch (error) {
+    return jsonResponse({ error: 'Failed to check program status', details: String(error) }, 500)
+  }
+}
+
+async function handleBinaryInfo(): Promise<Response> {
+  try {
+    const soBytes = await readFile(SO_PATH)
+    const hash = crypto.createHash('sha256').update(soBytes).digest('hex')
+    const fileStats = await stat(SO_PATH)
+    return jsonResponse({ hash, size: fileStats.size })
+  } catch (error) {
+    return jsonResponse({ error: 'Binary not found', details: String(error) }, 404)
+  }
+}
+
+async function handlePrepareDeploy(body: {
+  isUpgrade?: boolean
+  rpcUrl?: string
+}): Promise<Response> {
+  const { isUpgrade, rpcUrl } = body
+
+  try {
+    const soBytes = await readFile(SO_PATH)
+
+    let plan
+    if (isUpgrade) {
+      const config = await readConfig()
+      const network = networkFromRpcUrl(rpcUrl ?? RPC_URL)
+      const programAddr = config.networks[network]?.programAddress ?? getProgramAddressFromKeypair()
+      plan = await buildUpgradePlan(soBytes, programAddr)
+    } else {
+      const keypairJson = await readFile(KEYPAIR_PATH, 'utf-8')
+      const programKeypairBytes = new Uint8Array(JSON.parse(keypairJson))
+      plan = await buildDeployPlan(soBytes, programKeypairBytes)
+    }
+
+    return jsonResponse(plan)
+  } catch (error) {
+    log('error', 'Failed to prepare deploy', { error: String(error) })
+    return jsonResponse({ error: 'Failed to prepare deploy', details: String(error) }, 500)
+  }
+}
+
+async function handleStartValidator(): Promise<Response> {
+  if (startingValidator) {
+    return jsonResponse({ success: true, alreadyStarting: true })
+  }
+  if (surfpoolProcess && !surfpoolProcess.killed) {
+    return jsonResponse({ success: true, pid: surfpoolProcess.pid, alreadyRunning: true })
+  }
+
+  try {
+    const healthRes = await fetch('http://127.0.0.1:8899', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getHealth' }),
+      signal: AbortSignal.timeout(10_000),
+    })
+    const healthJson = await healthRes.json() as { result?: string }
+    if (healthJson.result === 'ok') {
+      return jsonResponse({ success: true, alreadyRunning: true })
+    }
+  } catch {
+    // not running, proceed to start
+  }
+
+  startingValidator = true
+  return new Promise((resolve) => {
+    const child = spawn('surfpool', ['start', '--no-tui', '--port', '8899', '--offline', '--yes'], {
+      cwd: PROJECT_ROOT,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: false,
+    })
+
+    surfpoolProcess = child
+    child.stdout?.on('data', (d) => log('info', `[surfpool] ${d.toString().trim()}`))
+    child.stderr?.on('data', (d) => log('warn', `[surfpool] ${d.toString().trim()}`))
+    child.on('exit', (code) => {
+      log('info', `Surfpool exited with code ${code}`)
+      surfpoolProcess = null
+      startingValidator = false
+    })
+    child.on('error', (err) => {
+      log('error', 'Failed to start surfpool', { error: err.message })
+      surfpoolProcess = null
+      startingValidator = false
+    })
+
+    resolve(jsonResponse({ success: true, pid: child.pid }))
+  })
+}
+
+async function handleValidatorStatus(): Promise<Response> {
+  let validatorRunning = false
+  let programDeployed = false
+  const programAddress = getProgramAddressFromKeypair()
+
+  try {
+    const healthRes = await fetch('http://127.0.0.1:8899', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getHealth' }),
+      signal: AbortSignal.timeout(10_000),
+    })
+    const healthJson = await healthRes.json() as { result?: string }
+    validatorRunning = healthJson.result === 'ok'
+  } catch (err) {
+    log('info', 'Validator health check failed', { error: String(err) })
+  }
+
+  if (validatorRunning) {
+    try {
+      const acctRes = await fetch('http://127.0.0.1:8899', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0', id: 1, method: 'getAccountInfo',
+          params: [programAddress, { encoding: 'base64' }],
+        }),
+        signal: AbortSignal.timeout(10_000),
+      })
+      const acctJson = await acctRes.json() as { result?: { value?: { executable?: boolean } } }
+      programDeployed = acctJson.result?.value?.executable === true
+      if (programDeployed) {
+        const config = await readConfig()
+        if (config.networks['localnet']?.programAddress !== programAddress) {
+          if (!config.networks['localnet']) config.networks['localnet'] = { tokens: [] }
+          config.networks['localnet'].programAddress = programAddress
+          await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n')
+          log('info', 'Updated localnet programAddress in config', { programAddress })
+        }
+      }
+    } catch (err) {
+      log('info', 'Program account check failed', { error: String(err) })
+    }
+  }
+
+  return jsonResponse({ validatorRunning, programDeployed, programAddress })
+}
+
+async function handleCreateMockUsdc(): Promise<Response> {
+  try {
+    const config = await readConfig()
+    const localTokens = getNetworkTokens(config, 'localnet')
+    const existingMint = localTokens.find((t) => t.symbol === 'USDC')?.mint
+
+    if (existingMint) {
+      try {
+        const acctRes = await fetch('http://127.0.0.1:8899', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0', id: 1, method: 'getAccountInfo',
+            params: [existingMint, { encoding: 'base64' }],
+          }),
+          signal: AbortSignal.timeout(10_000),
+        })
+        const acctJson = await acctRes.json() as { result?: { value?: unknown } }
+        if (acctJson.result?.value) {
+          return jsonResponse({ mint: existingMint, alreadyExisted: true })
+        }
+      } catch (err) {
+        log('info', 'Existing USDC mint check failed', { error: String(err) })
+      }
+    }
+
+    return new Promise((resolve) => {
+      const child = spawn('spl-token', [
+        'create-token', '--decimals', '6',
+        '--program-id', 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
+        '--url', 'http://127.0.0.1:8899',
+        '--fee-payer', `${process.env.HOME}/.config/solana/id.json`,
+      ])
+
+      let stdout = ''
+      let stderr = ''
+      child.stdout.on('data', (d) => (stdout += d.toString()))
+      child.stderr.on('data', (d) => (stderr += d.toString()))
+
+      child.on('close', async (code) => {
+        if (code !== 0) {
+          resolve(jsonResponse({ error: 'Failed to create token', details: stderr || stdout }, 500))
+          return
+        }
+
+        const match = stdout.match(/Creating token ([A-Za-z0-9]+)/)
+        if (!match) {
+          resolve(jsonResponse({ error: 'Could not parse mint address', details: stdout }, 500))
+          return
+        }
+
+        const mint = match[1]
+
+        try {
+          const cfg = await readConfig()
+          if (!cfg.networks['localnet']) cfg.networks['localnet'] = { tokens: [] }
+          cfg.networks['localnet'].programAddress = cfg.networks['localnet'].programAddress ?? getProgramAddressFromKeypair()
+          const tokens = cfg.networks['localnet'].tokens
+          const usdcIdx = tokens.findIndex((t) => t.symbol === 'USDC')
+          const usdcToken = { symbol: 'USDC', mint, decimals: 6 }
+          if (usdcIdx >= 0) tokens[usdcIdx] = usdcToken
+          else tokens.push(usdcToken)
+          await writeFile(CONFIG_PATH, JSON.stringify(cfg, null, 2))
+        } catch (e) {
+          log('warn', 'Failed to update config after USDC creation', { error: String(e) })
+        }
+
+        resolve(jsonResponse({ mint, alreadyExisted: false }))
+      })
+
+      child.on('error', (err) => {
+        resolve(jsonResponse({ error: 'Failed to start spl-token', details: err.message }, 500))
+      })
+    })
+  } catch (error) {
+    return jsonResponse({ error: 'Failed to create mock USDC', details: String(error) }, 500)
+  }
+}
+
+async function handleSaveConfig(body: { network?: string; programAddress?: string; tokens?: Array<{ symbol: string; mint: string; decimals: number }> }): Promise<Response> {
+  try {
+    const network = body.network ?? networkFromRpcUrl(RPC_URL)
+    const existing = await readConfig()
+    const prev = existing.networks[network] ?? { tokens: [] }
+    if (body.tokens) {
+      prev.tokens = body.tokens
+    }
+    if (body.programAddress) {
+      prev.programAddress = body.programAddress
+    }
+    existing.networks[network] = prev
+    await writeFile(CONFIG_PATH, JSON.stringify(existing, null, 2))
+    return jsonResponse({ success: true })
+  } catch (error) {
+    return jsonResponse({ error: 'Failed to save config', details: String(error) }, 500)
+  }
+}
+
 async function handleRequest(req: Request): Promise<Response> {
   const url = new URL(req.url)
   const startTime = Date.now()
+  const origin = req.headers.get('origin')
 
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders() })
+    return new Response(null, { headers: corsHeaders(origin) })
   }
 
   let response: Response
@@ -152,14 +488,25 @@ async function handleRequest(req: Request): Promise<Response> {
     const config = await readConfig()
     response = jsonResponse(config)
   } else if (url.pathname === '/api/tokens' && req.method === 'GET') {
-    const config = await readConfig()
-    response = jsonResponse(config.tokens)
+    const network = url.searchParams.get('network')
+    if (!network) {
+      response = jsonResponse({ error: 'Missing required query param: network' }, 400)
+    } else {
+      const config = await readConfig()
+      const netConfig = config.networks[network]
+      response = jsonResponse({
+        programAddress: netConfig?.programAddress ?? null,
+        tokens: netConfig?.tokens ?? [],
+      })
+    }
   } else if (url.pathname === '/api/airdrop/sol' && req.method === 'POST') {
     const parseResult = await parseJsonBody(req)
     if (!parseResult.success) {
       response = jsonResponse({ error: parseResult.error }, 400)
     } else {
-      const body = parseResult.data as { recipient?: string; amount?: number }
+      const body = extractFields<{ recipient?: string; amount?: number }>(parseResult.data, {
+        recipient: 'optional_string', amount: 'optional_number',
+      })
       response = await handleSolAirdrop(body.recipient ?? '', body.amount ?? 0)
     }
   } else if (url.pathname === '/api/airdrop/usdc' && req.method === 'POST') {
@@ -167,8 +514,69 @@ async function handleRequest(req: Request): Promise<Response> {
     if (!parseResult.success) {
       response = jsonResponse({ error: parseResult.error }, 400)
     } else {
-      const body = parseResult.data as { recipient?: string; amount?: number }
+      const body = extractFields<{ recipient?: string; amount?: number }>(parseResult.data, {
+        recipient: 'optional_string', amount: 'optional_number',
+      })
       response = await handleUsdcAirdrop(body.recipient ?? '', body.amount ?? 0)
+    }
+  } else if (url.pathname === '/api/program/status' && req.method === 'GET') {
+    const rpcUrl = url.searchParams.get('rpcUrl') ?? RPC_URL
+    try {
+      const rpcHost = new URL(rpcUrl).hostname
+      if (!ALLOWED_RPC_HOSTS.includes(rpcHost)) {
+        response = jsonResponse({ error: 'RPC URL not allowed' }, 400)
+        const duration = Date.now() - startTime
+        log('info', `${req.method} ${url.pathname}`, { status: response.status, duration: `${duration}ms` })
+        return response
+      }
+    } catch {
+      response = jsonResponse({ error: 'Invalid RPC URL' }, 400)
+      const duration = Date.now() - startTime
+      log('info', `${req.method} ${url.pathname}`, { status: response.status, duration: `${duration}ms` })
+      return response
+    }
+    const programAddrParam = url.searchParams.get('programAddress')
+    if (programAddrParam && !BASE58_RE.test(programAddrParam)) {
+      response = jsonResponse({ error: 'Invalid program address' }, 400)
+      const duration = Date.now() - startTime
+      log('info', `${req.method} ${url.pathname}`, { status: response.status, duration: `${duration}ms` })
+      return response
+    }
+    let programAddr = programAddrParam
+    if (!programAddr) {
+      const config = await readConfig()
+      const network = networkFromRpcUrl(rpcUrl)
+      programAddr = config.networks[network]?.programAddress ?? getProgramAddressFromKeypair()
+    }
+    response = await handleProgramStatus(rpcUrl, programAddr)
+  } else if (url.pathname === '/api/program/binary-info' && req.method === 'GET') {
+    response = await handleBinaryInfo()
+  } else if (url.pathname === '/api/program/prepare-deploy' && req.method === 'POST') {
+    const parseResult = await parseJsonBody(req)
+    if (!parseResult.success) {
+      response = jsonResponse({ error: parseResult.error }, 400)
+    } else {
+      const deployBody = extractFields<{ isUpgrade?: boolean; rpcUrl?: string }>(parseResult.data, {
+        isUpgrade: 'optional_boolean',
+        rpcUrl: 'optional_string',
+      })
+      response = await handlePrepareDeploy(deployBody)
+    }
+  } else if (url.pathname === '/api/setup/start-validator' && req.method === 'POST') {
+    response = await handleStartValidator()
+  } else if (url.pathname === '/api/setup/validator-status' && req.method === 'GET') {
+    response = await handleValidatorStatus()
+  } else if (url.pathname === '/api/setup/create-mock-usdc' && req.method === 'POST') {
+    response = await handleCreateMockUsdc()
+  } else if (url.pathname === '/api/setup/save-config' && req.method === 'POST') {
+    const parseResult = await parseJsonBody(req)
+    if (!parseResult.success) {
+      response = jsonResponse({ error: parseResult.error }, 400)
+    } else {
+      const configBody = extractFields<{ network?: string; programAddress?: string; tokens?: object }>(parseResult.data, {
+        network: 'optional_string', programAddress: 'optional_string', tokens: 'optional_object',
+      })
+      response = await handleSaveConfig(configBody as { network?: string; programAddress?: string; tokens?: Array<{ symbol: string; mint: string; decimals: number }> })
     }
   } else {
     response = jsonResponse({ error: 'Not found' }, 404)
@@ -187,13 +595,32 @@ const server = createServer(async (req, res) => {
     if (value) headers.set(key, Array.isArray(value) ? value.join(', ') : value)
   }
 
+  const MAX_BODY_SIZE = 10 * 1024 * 1024
   let body: string | undefined
   if (req.method === 'POST' || req.method === 'PUT') {
-    body = await new Promise<string>((resolve) => {
+    body = await new Promise<string>((resolve, reject) => {
       let data = ''
-      req.on('data', (chunk) => (data += chunk))
+      let size = 0
+      req.on('data', (chunk: Buffer) => {
+        size += chunk.length
+        if (size > MAX_BODY_SIZE) {
+          req.destroy()
+          reject(new Error('Request body too large'))
+          return
+        }
+        data += chunk
+      })
       req.on('end', () => resolve(data))
+      req.on('error', reject)
+    }).catch((err) => {
+      log('warn', 'Body read error', { error: String(err) })
+      return undefined
     })
+    if (body === undefined) {
+      res.writeHead(413, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Request body too large' }))
+      return
+    }
   }
 
   const request = new Request(url, { method: req.method ?? 'GET', headers, body })
@@ -214,4 +641,11 @@ server.listen(PORT, () => {
   console.log(`  GET  http://localhost:${PORT}/api/tokens`)
   console.log(`  POST http://localhost:${PORT}/api/airdrop/sol`)
   console.log(`  POST http://localhost:${PORT}/api/airdrop/usdc`)
+  console.log(`  GET  http://localhost:${PORT}/api/program/status`)
+  console.log(`  GET  http://localhost:${PORT}/api/program/binary-info`)
+  console.log(`  POST http://localhost:${PORT}/api/program/prepare-deploy`)
+  console.log(`  POST http://localhost:${PORT}/api/setup/start-validator`)
+  console.log(`  GET  http://localhost:${PORT}/api/setup/validator-status`)
+  console.log(`  POST http://localhost:${PORT}/api/setup/create-mock-usdc`)
+  console.log(`  POST http://localhost:${PORT}/api/setup/save-config`)
 })

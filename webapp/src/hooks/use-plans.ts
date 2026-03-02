@@ -2,13 +2,13 @@ import { useQuery } from '@tanstack/react-query'
 import { useWalletUi } from '@wallet-ui/react'
 import { createSolanaRpc, address } from 'gill'
 import {
-  MULTI_DELEGATOR_PROGRAM_ADDRESS,
   PLAN_SIZE,
   PLAN_OWNER_OFFSET,
   decodePlan,
 } from '@multidelegator/client'
 import type { PlanData } from '@multidelegator/client'
 import { useClusterConfig } from '@/hooks/use-cluster-config'
+import { useProgramAddress } from '@/hooks/use-token-config'
 import type { DelegationAccountRaw } from '@/lib/types'
 import { decodeBase64ToUint8Array } from '@/lib/utils'
 
@@ -19,11 +19,11 @@ export interface PlanItem {
   data: PlanData
 }
 
-async function fetchPlansByMerchant(rpcUrl: string, merchantAddress: string): Promise<PlanItem[]> {
+async function fetchPlansByMerchant(rpcUrl: string, merchantAddress: string, progAddr: string): Promise<PlanItem[]> {
   const rpc = createSolanaRpc(rpcUrl)
 
   const response = await rpc
-    .getProgramAccounts(address(MULTI_DELEGATOR_PROGRAM_ADDRESS), {
+    .getProgramAccounts(address(progAddr), {
       filters: [
         { dataSize: BigInt(PLAN_SIZE) },
         {
@@ -53,7 +53,7 @@ async function fetchPlansByMerchant(rpcUrl: string, merchantAddress: string): Pr
         executable: entry.account.executable,
         lamports: entry.account.lamports,
         owner: entry.account.owner,
-        programAddress: address(MULTI_DELEGATOR_PROGRAM_ADDRESS),
+        programAddress: address(progAddr),
         space: BigInt(data.length),
       }
 
@@ -78,21 +78,23 @@ async function fetchPlansByMerchant(rpcUrl: string, merchantAddress: string): Pr
 
 export function useMerchantPlans(merchantAddress: string | null) {
   const clusterConfig = useClusterConfig()
+  const progAddr = useProgramAddress()
 
   return useQuery({
     queryKey: ['plans', merchantAddress, clusterConfig.id],
-    queryFn: () => fetchPlansByMerchant(clusterConfig.url, merchantAddress!),
-    enabled: !!merchantAddress && merchantAddress.length > 30,
+    queryFn: () => fetchPlansByMerchant(clusterConfig.url, merchantAddress!, progAddr!),
+    enabled: !!merchantAddress && merchantAddress.length > 30 && !!progAddr,
   })
 }
 
 export function useMyPlans() {
   const { account } = useWalletUi()
   const clusterConfig = useClusterConfig()
+  const progAddr = useProgramAddress()
 
   return useQuery({
     queryKey: ['plans', 'my', account?.address, clusterConfig.id],
-    queryFn: () => fetchPlansByMerchant(clusterConfig.url, account!.address),
-    enabled: !!account?.address,
+    queryFn: () => fetchPlansByMerchant(clusterConfig.url, account!.address, progAddr!),
+    enabled: !!account?.address && !!progAddr,
   })
 }

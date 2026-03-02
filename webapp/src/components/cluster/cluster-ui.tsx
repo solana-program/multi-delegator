@@ -6,12 +6,21 @@ import { useWalletUi } from '@wallet-ui/react'
 import { useClusterVersion } from './use-cluster-version'
 
 const SURFPOOL_STUDIO = 'http://127.0.0.1:18488'
+const SOLANA_EXPLORER = 'https://explorer.solana.com'
 
-function getSurfpoolLink(link: Record<string, unknown>): string {
-  if ('transaction' in link && link.transaction) return `${SURFPOOL_STUDIO}/transaction/${link.transaction}`
-  if ('address' in link && link.address) return `${SURFPOOL_STUDIO}/account/${link.address}`
-  if ('block' in link && link.block) return `${SURFPOOL_STUDIO}/block/${link.block}`
-  return SURFPOOL_STUDIO
+function getExplorerUrl(link: Record<string, unknown>, clusterId: string): string {
+  if (clusterId === 'solana:localnet') {
+    if ('transaction' in link && link.transaction) return `${SURFPOOL_STUDIO}/transaction/${link.transaction}`
+    if ('address' in link && link.address) return `${SURFPOOL_STUDIO}/account/${link.address}`
+    if ('block' in link && link.block) return `${SURFPOOL_STUDIO}/block/${link.block}`
+    return SURFPOOL_STUDIO
+  }
+
+  const clusterParam = clusterId === 'solana:mainnet' ? '' : `?cluster=${clusterId === 'solana:devnet' ? 'devnet' : 'testnet'}`
+  if ('transaction' in link && link.transaction) return `${SOLANA_EXPLORER}/tx/${link.transaction}${clusterParam}`
+  if ('address' in link && link.address) return `${SOLANA_EXPLORER}/address/${link.address}${clusterParam}`
+  if ('block' in link && link.block) return `${SOLANA_EXPLORER}/block/${link.block}${clusterParam}`
+  return `${SOLANA_EXPLORER}${clusterParam}`
 }
 
 export function ExplorerLink({
@@ -22,9 +31,10 @@ export function ExplorerLink({
   className?: string
   label: string
 }) {
+  const { cluster } = useWalletUi()
   return (
     <a
-      href={getSurfpoolLink(link)}
+      href={getExplorerUrl(link, cluster.id)}
       target="_blank"
       rel="noopener noreferrer"
       className={className ? className : `link font-mono`}

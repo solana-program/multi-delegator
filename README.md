@@ -1,151 +1,64 @@
-# Multi Delegator
+# Multi Delegator Webapp
 
-Solana program and clients for managed delegations on both SPL Token and Token-2022.
+> **⚠️ Note:** This webapp is currently in **Beta mode**. Features and capabilities are subject to change.
 
-## Overview
+A React/Vite demonstration web application for the Solana Multi-Delegator program. This app provides a comprehensive UI to interact with the multi-delegator smart contract, allowing users to manage recurring subscriptions, delegate tokens, and test the full lifecycle of managed delegations on Solana.
 
-For each `(user, mint)` pair, the program creates a Multi Delegate PDA and sets it as the single delegate authority on the user's token account. This works for both token programs: SPL Token and Token-2022.
+## Features & Capabilities
 
-The program then routes transfer requests through delegation accounts and enforces delegation rules before any token movement.
+The webapp is built with React, Vite, `@solana/kit`, `@tanstack/react-query`, Jotai, and TailwindCSS/shadcn. It includes the following core capabilities:
 
-Currently supported delegation kinds:
+### 1. Program Management & Setup
+- **Program Deployment:** Deploy the multi-delegator Solana program directly from the UI.
+- **Program Status:** Check and monitor the on-chain status of the deployed program.
+- **Setup Wizard:** An onboarding flow to initialize the environment, configure tokens, and set up necessary on-chain state.
 
-- **Fixed delegation**: authorize a delegatee to spend up to a total amount until an expiry time.
-- **Recurring delegation**: authorize a delegatee to spend up to a per-period amount that resets each period until expiry.
+### 2. Subscription Plans & Marketplace
+- **Plan Management:** Merchants and creators can create, configure, and manage recurring subscription plans.
+- **Plan Marketplace:** A storefront directory where users can browse and subscribe to available plans.
 
-This repository contains:
+### 3. Subscriptions & Delegations
+- **My Subscriptions:** View and manage active plan subscriptions.
+- **Delegation Management:** Delegate funds or authority to the smart contract to handle recurring payments automatically.
+- **Active Delegations Dashboard:** Monitor active delegations, their current balances, and status.
 
-- A Rust Solana program built with [Pinocchio](https://github.com/febo/pinocchio)
-- IDL generation via [Shank](https://github.com/metaplex-foundation/shank)
-- Generated clients via [Codama](https://github.com/codama-js/codama):
-  - TypeScript client in `clients/typescript`
-  - Rust client in `clients/rust`
-- A local demo webapp in `webapp/`
+### 4. Payment Collection
+- **Collect Payments:** A dedicated interface for merchants to trigger the collection of due payments from their subscribers based on active delegations.
 
-## Project Structure
+### 5. Developer & Testing Tools
+- **Time Travel:** A specialized testing utility to simulate the passage of time on localnet/devnet, allowing developers to test recurring billing cycles without waiting.
+- **Faucet:** Built-in tool to request test SOL or SPL tokens for testing purposes.
+- **Cluster Switching:** Easily switch between different Solana networks (e.g., Localnet, Devnet, Mainnet).
 
-```text
-multi-delegator/
-├── programs/multi_delegator/     # Rust Solana program
-│   ├── src/
-│   │   ├── instructions/          # Instruction handlers + helpers
-│   │   ├── state/                 # Account/state types (fixed, recurring, header, MDA)
-│   │   └── tests/                 # Rust tests (litesvm)
-│   └── idl/                       # Shank-generated IDL
-├── clients/
-│   ├── typescript/                # TypeScript SDK + tests
-│   └── rust/                      # Rust generated client
-├── webapp/                        # Local demo UI + local API
-├── scripts/                       # Validator / full-stack launcher scripts
-├── docs/                          # Architecture docs
-├── runbooks/                      # Deployment runbooks
-├── justfile                       # Build/test/dev task entrypoint
-└── codama.js                      # Codama generation config
-```
+### 6. Account & Wallet Integration
+- **Wallet Connection:** Standard Solana wallet connection and transaction signing capabilities.
+- **Account Dashboard:** High-level overview of the user's account, showing balances, active plans, and recent activity.
 
 ## Quick Start
 
+### Prerequisites
+- Node.js (v18+)
+- pnpm or npm
+
+### Installation
+
 ```bash
-git clone git@github.com:Moonsong-Labs/multi-delegator.git
-cd multi-delegator
-just setup
+# Install dependencies
+pnpm install
 
-# If missing, create the local development keypair expected by the justfile
-mkdir -p keys
-[ -f keys/multi_delegator-keypair.json ] || solana-keygen new --no-bip39-passphrase -o keys/multi_delegator-keypair.json
-
-just build
-just test-program
+# Start the development server
+pnpm run dev
 ```
 
-For the full suite (program + client tests):
+### Local API & Validator
+The webapp includes a local API (`api/`) and scripts to run a local Solana test validator for development.
 
 ```bash
-just test
-```
-
-## Prerequisites
-
-`just setup` checks for these tools: `bun`, `cargo`, `pnpm`, `solana-keygen`, and `surfpool`.
-
-Install the toolchain:
-
-1. Rust
-   ```bash
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-   ```
-2. Solana CLI (includes `solana-keygen` and `solana-test-validator`)
-   ```bash
-   sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
-   ```
-3. Pnpm
-   ```bash
-   curl -fsSL https://get.pnpm.io/install.sh | sh -
-   ```
-4. Just
-   ```bash
-   curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to ~/.local/bin
-   ```
-5. Surfpool CLI
-   ```bash
-   curl -sL https://run.surfpool.run/ | bash
-   ```
-6. Node.js + npm (required by `webapp/` scripts)
-
-## Keypair and Program ID
-
-Local workflows use `keys/multi_delegator-keypair.json` as the source keypair for deployment artifacts and program ID derivation in the `justfile`.
-
-- If the file exists, `just build` and validator scripts reuse it.
-- If the file is missing, generate it before build/test commands:
-
-```bash
-mkdir -p keys
-solana-keygen new --no-bip39-passphrase -o keys/multi_delegator-keypair.json
-```
-
-The keypair is automatically copied into the deploy directory when you run `just build` or `just build-program`.
-
-## Build and Test
-
-The `justfile` is the main entrypoint for day-to-day development.
-
-- `just build` builds program, clients, and webapp
-- `just build-program` compiles the SBF program
-- `just generate-idl` regenerates `programs/multi_delegator/idl/multi_delegator.json`
-- `just generate-client` regenerates clients from IDL via Codama
-- `just build-client` builds `clients/typescript` into `clients/typescript/dist`
-- `just test-program` runs Rust SBF tests (`cargo test-sbf`)
-- `just test-client` runs TypeScript integration tests (`bun test`)
-- `just test` runs setup + program + client tests
-- `just fmt-check` and `just lint-check` run formatting/lint checks
-
-### Validator Modes
-
-Two local validator flows are used in this repo:
-
-- `just test-client` uses `surfpool` (auto-start via `ensure-surfpool` in `justfile`)
-- `just webapp` uses `solana-test-validator` (via `scripts/start-webapp.sh`)
-
-Both default to `http://localhost:8899`, but they are started by different tooling.
-
-## Webapp Demo (Quickstart)
-
-The demo app in `webapp/` provides a local UI + local API for development flows (including faucet utilities).
-
-```bash
-just build          # builds program, clients, and webapp (includes npm install)
-just webapp         # starts validator + init + API + web UI
+# Start the local validator and API
+pnpm run start:api
 ```
 
 Expected local endpoints:
-
-- Validator RPC: `http://localhost:8899`
-- API: `http://localhost:3001`
 - Web UI: `http://localhost:5173`
-
-Stop local validators:
-
-```bash
-just kill-validator
-```
+- API: `http://localhost:3001`
+- Validator RPC: `http://localhost:8899`

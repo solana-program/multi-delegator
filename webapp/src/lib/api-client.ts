@@ -12,10 +12,11 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiClient<T>(endpoint: string, options?: RequestInit): Promise<T> {
+export async function apiClient<T>(endpoint: string, options?: RequestInit & { timeout?: number }): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 15_000)
+  const timeoutMs = options?.timeout ?? 15_000
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
     const response = await fetch(url, {
@@ -29,7 +30,10 @@ export async function apiClient<T>(endpoint: string, options?: RequestInit): Pro
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
-      throw new ApiError(errorData.error ?? 'API request failed', response.status, errorData)
+      const msg = errorData.details
+        ? `${errorData.error ?? 'API request failed'}: ${errorData.details}`
+        : errorData.error ?? 'API request failed'
+      throw new ApiError(msg, response.status, errorData)
     }
 
     return await response.json()
@@ -59,10 +63,47 @@ export interface TokenConfig {
   decimals: number
 }
 
+export interface ProgramStatus {
+  deployed: boolean
+  upgradeable: boolean
+  upgradeAuthority: string | null
+  lastDeploySlot: number | null
+  lastDeployTime: number | null
+  programDataAddress: string | null
+  dataSize: number | null
+}
+
+export interface DeployPlan {
+  bufferKeypair: number[]
+  bufferAddress: string
+  programKeypair?: number[]
+  chunks: string[]
+  totalChunks: number
+  programAddress: string
+  soHash: string
+  soSize: number
+}
+
+export interface NetworkConfigResponse {
+  programAddress: string | null
+  tokens: TokenConfig[]
+}
+
+export interface FullConfig {
+  networks: Record<string, NetworkConfigResponse>
+}
+
+export function clusterIdToNetwork(id: string): string {
+  if (id.includes('devnet')) return 'devnet'
+  if (id.includes('testnet')) return 'testnet'
+  if (id.includes('mainnet')) return 'mainnet'
+  return 'localnet'
+}
+
 export const api = {
   config: {
-    getAll: () => apiClient<{ network: string; tokens: TokenConfig[] }>('/api/config'),
-    getTokens: () => apiClient<TokenConfig[]>('/api/tokens'),
+    getAll: () => apiClient<FullConfig>('/api/config'),
+    getNetworkConfig: (network: string) => apiClient<NetworkConfigResponse>(`/api/tokens?network=${encodeURIComponent(network)}`),
   },
   airdrop: {
     sol: (params: { recipient: string; amount: number }) =>
@@ -75,5 +116,30 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(params),
       }),
+  },
+  setup: {
+    startValidator: () =>
+      apiClient<{ success: boolean; pid?: number; alreadyRunning?: boolean }>('/api/setup/start-validator', { method: 'POST' }),
+    validatorStatus: () =>
+      apiClient<{ validatorRunning: boolean; programDeployed: boolean; programAddress: string }>('/api/setup/validator-status'),
+    createMockUsdc: () =>
+      apiClient<{ mint: string; alreadyExisted: boolean }>('/api/setup/create-mock-usdc', { method: 'POST', timeout: 30_000 }),
+    saveConfig: (params: { network: string; programAddress?: string; tokens: Array<{ symbol: string; mint: string; decimals: number }> }) =>
+      apiClient<{ success: boolean }>('/api/setup/save-config', {
+        method: 'POST',
+        body: JSON.stringify(params),
+      }),
+  },
+  program: {
+    status: (programAddress: string, rpcUrl: string) =>
+      apiClient<ProgramStatus>(`/api/program/status?programAddress=${encodeURIComponent(programAddress)}&rpcUrl=${encodeURIComponent(rpcUrl)}`),
+    prepareDeploy: (params: { payerAddress: string; rpcUrl: string; isUpgrade: boolean }) =>
+      apiClient<DeployPlan>('/api/program/prepare-deploy', {
+        method: 'POST',
+        body: JSON.stringify(params),
+        timeout: 30_000,
+      }),
+    binaryInfo: () =>
+      apiClient<{ hash: string; size: number }>('/api/program/binary-info'),
   },
 }

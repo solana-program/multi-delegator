@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useMyPlans, type PlanItem } from '@/hooks/use-plans'
 import { useSubscriberCounts, fetchPlanSubscriptions, type PlanSubscriber } from '@/hooks/use-subscriptions'
 import { useClusterConfig } from '@/hooks/use-cluster-config'
+import { useProgramAddress } from '@/hooks/use-token-config'
 import { getBlockTimestamp } from '@/hooks/use-time-travel'
 import { computeEligibleSubscribers, type EligibleSubscriber } from '@/lib/collect-utils'
 import { useMemo } from 'react'
@@ -28,6 +29,7 @@ export function useAllPlanSubscribers() {
   const planAddresses = useMemo(() => plans?.map((p) => p.address) ?? [], [plans])
   const { data: subCounts, isLoading: countsLoading } = useSubscriberCounts(planAddresses)
   const { url: rpcUrl } = useClusterConfig()
+  const progAddr = useProgramAddress()
 
   const plansWithSubs = useMemo(() => {
     if (!plans || !subCounts) return []
@@ -41,7 +43,7 @@ export function useAllPlanSubscribers() {
 
       const planDataArr = await Promise.all(
         plansWithSubs.map(async (plan): Promise<PlanSubscriberData> => {
-          const subscribers = await fetchPlanSubscriptions(rpcUrl, plan.address)
+          const subscribers = await fetchPlanSubscriptions(rpcUrl, plan.address, progAddr!)
           const eligible = computeEligibleSubscribers(
             subscribers,
             plan.data.amount,
@@ -64,7 +66,7 @@ export function useAllPlanSubscribers() {
 
       return { plans: planDataArr, totalPendingAmount, totalActiveSubscribers, plansWithPending, blockTimestamp }
     },
-    enabled: plansWithSubs.length > 0,
+    enabled: plansWithSubs.length > 0 && !!progAddr,
     refetchInterval: 60_000,
   })
 

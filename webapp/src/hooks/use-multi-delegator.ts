@@ -23,7 +23,6 @@ import {
   getPlanPDA,
   getSubscriptionPDA,
   getEventAuthorityPDA,
-  MULTI_DELEGATOR_PROGRAM_ADDRESS,
   MAX_PLAN_DESTINATIONS,
   MAX_PLAN_PULLERS,
   ZERO_ADDRESS,
@@ -36,6 +35,7 @@ import { useTransactionToast } from "../components/use-transaction-toast";
 import { invalidateWithDelay } from "@/lib/utils";
 import { packInstructionBatches } from "@/lib/tx-packer";
 import { getBlockTimestamp } from "@/hooks/use-time-travel";
+import { useProgramAddress } from "@/hooks/use-token-config";
 
 export function useMultiDelegatorMutations() {
   const signer = useWalletUiSigner();
@@ -43,6 +43,10 @@ export function useMultiDelegatorMutations() {
   const queryClient = useQueryClient();
   const toast = useTransactionToast();
   const { url: rpcUrl } = useClusterConfig();
+  const programAddress = useProgramAddress();
+
+  const progId = programAddress ? address(programAddress) : undefined;
+  const progConfig = progId ? { programAddress: progId } : undefined;
 
   const initMultiDelegate = useMutation({
     mutationFn: async ({
@@ -55,11 +59,13 @@ export function useMultiDelegatorMutations() {
       tokenProgram: string;
     }) => {
       if (!signer) throw new Error("Wallet not connected");
+      if (!progId) throw new Error("Program address not configured");
 
       const user = signer.address;
       const [multiDelegate] = await getMultiDelegatePDA(
         user,
         address(tokenMint),
+        progId,
       );
 
       const instruction = getInitMultiDelegateInstruction({
@@ -68,7 +74,7 @@ export function useMultiDelegatorMutations() {
         tokenMint: address(tokenMint),
         userAta: address(userAta),
         tokenProgram: address(tokenProgram),
-      });
+      }, progConfig);
 
       const signature = await signAndSend(instruction, signer);
       return { signature };
@@ -100,17 +106,20 @@ export function useMultiDelegatorMutations() {
       expiryTs: number | bigint;
     }) => {
       if (!signer) throw new Error("Wallet not connected");
+      if (!progId) throw new Error("Program address not configured");
 
       const user = signer.address;
       const [multiDelegate] = await getMultiDelegatePDA(
         user,
         address(tokenMint),
+        progId,
       );
       const [delegationAccount] = await getDelegationPDA(
         multiDelegate,
         user,
         address(delegatee),
         nonce,
+        progId,
       );
 
       const instruction = getCreateFixedDelegationInstruction({
@@ -119,7 +128,7 @@ export function useMultiDelegatorMutations() {
         delegationAccount,
         delegatee: address(delegatee),
         fixedDelegation: { nonce, amount, expiryTs },
-      });
+      }, progConfig);
 
       const signature = await signAndSend(instruction, signer);
       return { signature };
@@ -150,17 +159,20 @@ export function useMultiDelegatorMutations() {
       startTs?: number | bigint;
     }) => {
       if (!signer) throw new Error("Wallet not connected");
+      if (!progId) throw new Error("Program address not configured");
 
       const user = signer.address;
       const [multiDelegate] = await getMultiDelegatePDA(
         user,
         address(tokenMint),
+        progId,
       );
       const [delegationAccount] = await getDelegationPDA(
         multiDelegate,
         user,
         address(delegatee),
         nonce,
+        progId,
       );
 
       const instruction = getCreateRecurringDelegationInstruction({
@@ -175,7 +187,7 @@ export function useMultiDelegatorMutations() {
           startTs: startTs ?? await getBlockTimestamp(rpcUrl),
           expiryTs,
         },
-      });
+      }, progConfig);
 
       const signature = await signAndSend(instruction, signer);
       return { signature };
@@ -198,7 +210,7 @@ export function useMultiDelegatorMutations() {
       const instruction = getRevokeDelegationInstruction({
         authority: signer,
         delegationAccount: address(delegationAccount),
-      });
+      }, progConfig);
 
       const signature = await signAndSend(instruction, signer);
       return { signature };
@@ -223,10 +235,11 @@ export function useMultiDelegatorMutations() {
     kind: "fixed" | "recurring",
   ) => {
     if (!signer) throw new Error("Wallet not connected");
+    if (!progId) throw new Error("Program address not configured");
 
     const mint = address(params.tokenMint);
     const delegatorAddr = address(params.delegator);
-    const [multiDelegate] = await getMultiDelegatePDA(delegatorAddr, mint);
+    const [multiDelegate] = await getMultiDelegatePDA(delegatorAddr, mint, progId);
     const [delegatorAta] = await findAssociatedTokenPda({
       mint,
       owner: delegatorAddr,
@@ -250,7 +263,7 @@ export function useMultiDelegatorMutations() {
       tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
     });
 
-    const [eventAuthority] = await getEventAuthorityPDA();
+    const [eventAuthority] = await getEventAuthorityPDA(progId);
 
     const transferParams = {
       delegationPda: address(params.delegationAccount),
@@ -260,7 +273,7 @@ export function useMultiDelegatorMutations() {
       tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
       delegatee: signer,
       eventAuthority,
-      selfProgram: address(MULTI_DELEGATOR_PROGRAM_ADDRESS),
+      selfProgram: progId!,
       transferData: {
         amount: params.amount,
         delegator: delegatorAddr,
@@ -270,8 +283,8 @@ export function useMultiDelegatorMutations() {
 
     const transferIx =
       kind === "fixed"
-        ? getTransferFixedInstruction(transferParams)
-        : getTransferRecurringInstruction(transferParams);
+        ? getTransferFixedInstruction(transferParams, progConfig)
+        : getTransferRecurringInstruction(transferParams, progConfig);
 
     return { instructions: [createAtaIx, transferIx], signer };
   };
@@ -327,6 +340,7 @@ export function useMultiDelegatorMutations() {
       metadataUri: string;
     }) => {
       if (!signer) throw new Error("Wallet not connected");
+      if (!progId) throw new Error("Program address not configured");
 
       const paddedDestinations = Array.from(
         { length: MAX_PLAN_DESTINATIONS },
@@ -337,7 +351,7 @@ export function useMultiDelegatorMutations() {
         (_, i) => address(pullers[i] || ZERO_ADDRESS),
       );
 
-      const [planPda] = await getPlanPDA(signer.address, planId);
+      const [planPda] = await getPlanPDA(signer.address, planId, progId);
 
       const instruction = getCreatePlanInstruction({
         merchant: signer,
@@ -354,7 +368,7 @@ export function useMultiDelegatorMutations() {
           pullers: paddedPullers,
           metadataUri,
         },
-      });
+      }, progConfig);
 
       const signature = await signAndSend(instruction, signer);
       return { signature };
@@ -391,7 +405,7 @@ export function useMultiDelegatorMutations() {
         owner: signer,
         planPda: address(planPda),
         updatePlanData: { status, endTs: BigInt(endTs), pullers: paddedPullers, metadataUri },
-      });
+      }, progConfig);
 
       const signature = await signAndSend(instruction, signer);
       return { signature };
@@ -410,7 +424,7 @@ export function useMultiDelegatorMutations() {
       const instruction = getDeletePlanInstruction({
         owner: signer,
         planPda: address(planPda),
-      });
+      }, progConfig);
 
       const signature = await signAndSend(instruction, signer);
       return { signature };
@@ -433,11 +447,12 @@ export function useMultiDelegatorMutations() {
       tokenMint: string;
     }) => {
       if (!signer) throw new Error("Wallet not connected");
+      if (!progId) throw new Error("Program address not configured");
 
-      const [planPda, planBump] = await getPlanPDA(address(merchant), planId);
-      const [subscriptionPda] = await getSubscriptionPDA(planPda, signer.address);
-      const [multiDelegatePda] = await getMultiDelegatePDA(signer.address, address(tokenMint));
-      const [eventAuthority] = await getEventAuthorityPDA();
+      const [planPda, planBump] = await getPlanPDA(address(merchant), planId, progId);
+      const [subscriptionPda] = await getSubscriptionPDA(planPda, signer.address, progId);
+      const [multiDelegatePda] = await getMultiDelegatePDA(signer.address, address(tokenMint), progId);
+      const [eventAuthority] = await getEventAuthorityPDA(progId);
 
       const instruction = getSubscribeInstruction({
         subscriber: signer,
@@ -446,9 +461,9 @@ export function useMultiDelegatorMutations() {
         subscriptionPda,
         multiDelegatePda,
         eventAuthority,
-        selfProgram: address(MULTI_DELEGATOR_PROGRAM_ADDRESS),
+        selfProgram: progId,
         subscribeData: { planId, planBump },
-      });
+      }, progConfig);
 
       const signature = await signAndSend(instruction, signer);
       return { signature };
@@ -469,16 +484,17 @@ export function useMultiDelegatorMutations() {
       subscriptionPda: string;
     }) => {
       if (!signer) throw new Error("Wallet not connected");
+      if (!progId) throw new Error("Program address not configured");
 
-      const [eventAuthority] = await getEventAuthorityPDA();
+      const [eventAuthority] = await getEventAuthorityPDA(progId);
 
       const instruction = getCancelSubscriptionInstruction({
         subscriber: signer,
         planPda: address(planPda),
         subscriptionPda: address(subscriptionPda),
         eventAuthority,
-        selfProgram: address(MULTI_DELEGATOR_PROGRAM_ADDRESS),
-      });
+        selfProgram: progId,
+      }, progConfig);
 
       const signature = await signAndSend(instruction, signer);
       return { signature };
@@ -501,7 +517,7 @@ export function useMultiDelegatorMutations() {
       const instruction = getRevokeDelegationInstruction({
         authority: signer,
         delegationAccount: address(subscriptionPda),
-      });
+      }, progConfig);
 
       const signature = await signAndSend(instruction, signer);
       return { signature };
@@ -522,21 +538,22 @@ export function useMultiDelegatorMutations() {
       subscriptionPda: string;
     }) => {
       if (!signer) throw new Error("Wallet not connected");
+      if (!progId) throw new Error("Program address not configured");
 
-      const [eventAuthority] = await getEventAuthorityPDA();
+      const [eventAuthority] = await getEventAuthorityPDA(progId);
 
       const cancelIx = getCancelSubscriptionInstruction({
         subscriber: signer,
         planPda: address(planPda),
         subscriptionPda: address(subscriptionPda),
         eventAuthority,
-        selfProgram: address(MULTI_DELEGATOR_PROGRAM_ADDRESS),
-      });
+        selfProgram: progId,
+      }, progConfig);
 
       const revokeIx = getRevokeDelegationInstruction({
         authority: signer,
         delegationAccount: address(subscriptionPda),
-      });
+      }, progConfig);
 
       const signature = await signAndSend([cancelIx, revokeIx], signer);
       return { signature };
@@ -561,6 +578,7 @@ export function useMultiDelegatorMutations() {
       destinations: string[];
     }) => {
       if (!signer) throw new Error("Wallet not connected");
+      if (!progId) throw new Error("Program address not configured");
 
       const mintAddr = address(mint);
       const planPda = address(planAddress);
@@ -581,12 +599,12 @@ export function useMultiDelegatorMutations() {
         tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
       });
 
-      const [eventAuthority] = await getEventAuthorityPDA();
+      const [eventAuthority] = await getEventAuthorityPDA(progId);
 
       const transferIxs = await Promise.all(
         subscribers.map(async (sub) => {
           const delegatorAddr = address(sub.delegator);
-          const [multiDelegate] = await getMultiDelegatePDA(delegatorAddr, mintAddr);
+          const [multiDelegate] = await getMultiDelegatePDA(delegatorAddr, mintAddr, progId);
           const [delegatorAta] = await findAssociatedTokenPda({
             mint: mintAddr,
             owner: delegatorAddr,
@@ -602,13 +620,13 @@ export function useMultiDelegatorMutations() {
             caller: signer,
             tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
             eventAuthority,
-            selfProgram: address(MULTI_DELEGATOR_PROGRAM_ADDRESS),
+            selfProgram: progId,
             transferData: {
               amount: sub.amount,
               delegator: delegatorAddr,
               mint: mintAddr,
             },
-          });
+          }, progConfig);
         })
       );
 
@@ -654,13 +672,14 @@ export function useMultiDelegatorMutations() {
       }>;
     }) => {
       if (!signer) throw new Error("Wallet not connected");
+      if (!progId) throw new Error("Program address not configured");
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const ataIxs: any[] = [];
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const transferIxs: any[] = [];
       const seenAtas = new Set<string>();
-      const [eventAuthority] = await getEventAuthorityPDA();
+      const [eventAuthority] = await getEventAuthorityPDA(progId);
 
       for (const plan of plans) {
         const mintAddr = address(plan.mint);
@@ -689,7 +708,7 @@ export function useMultiDelegatorMutations() {
 
         for (const sub of plan.subscribers) {
           const delegatorAddr = address(sub.delegator);
-          const [multiDelegate] = await getMultiDelegatePDA(delegatorAddr, mintAddr);
+          const [multiDelegate] = await getMultiDelegatePDA(delegatorAddr, mintAddr, progId);
           const [delegatorAta] = await findAssociatedTokenPda({
             mint: mintAddr,
             owner: delegatorAddr,
@@ -706,13 +725,13 @@ export function useMultiDelegatorMutations() {
               caller: signer,
               tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
               eventAuthority,
-              selfProgram: address(MULTI_DELEGATOR_PROGRAM_ADDRESS),
+              selfProgram: progId!,
               transferData: {
                 amount: sub.amount,
                 delegator: delegatorAddr,
                 mint: mintAddr,
               },
-            }),
+            }, progConfig),
           );
         }
       }

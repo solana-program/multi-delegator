@@ -2,7 +2,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useWalletUi } from '@wallet-ui/react'
 import { createSolanaRpc, address } from 'gill'
 import {
-  MULTI_DELEGATOR_PROGRAM_ADDRESS,
   DISCRIMINATOR_OFFSET,
   DELEGATOR_OFFSET,
   DELEGATEE_OFFSET,
@@ -11,6 +10,7 @@ import {
   AccountDiscriminator,
 } from '@multidelegator/client'
 import { useClusterConfig } from '@/hooks/use-cluster-config'
+import { useProgramAddress } from '@/hooks/use-token-config'
 import type { DelegationAccountRaw } from '@/lib/types'
 import { decodeBase64ToUint8Array } from '@/lib/utils'
 
@@ -44,13 +44,14 @@ export type DelegationRole = 'delegator' | 'delegatee'
 async function fetchDelegationsByRole(
   rpcUrl: string,
   walletAddress: string,
-  role: DelegationRole
+  role: DelegationRole,
+  progAddr: string,
 ): Promise<GroupedDelegations> {
   const rpc = createSolanaRpc(rpcUrl)
   const offset = role === 'delegator' ? DELEGATOR_OFFSET : DELEGATEE_OFFSET
 
   const response = await rpc
-    .getProgramAccounts(address(MULTI_DELEGATOR_PROGRAM_ADDRESS), {
+    .getProgramAccounts(address(progAddr), {
       filters: [
         {
           memcmp: {
@@ -81,7 +82,7 @@ async function fetchDelegationsByRole(
         lamports: accountEntry.account.lamports,
         owner: accountEntry.account.owner,
         rentEpoch: accountEntry.account.rentEpoch,
-        programAddress: address(MULTI_DELEGATOR_PROGRAM_ADDRESS),
+        programAddress: address(progAddr),
         space: BigInt(data.length),
       }
 
@@ -120,6 +121,7 @@ async function fetchDelegationsByRole(
 function useDelegationsByRole(role: DelegationRole) {
   const { account, cluster } = useWalletUi()
   const clusterConfig = useClusterConfig()
+  const progAddr = useProgramAddress()
   const queryClient = useQueryClient()
 
   const query = useQuery({
@@ -128,9 +130,9 @@ function useDelegationsByRole(role: DelegationRole) {
       if (!account?.address) {
         return { fixed: [], recurring: [], all: [] }
       }
-      return fetchDelegationsByRole(clusterConfig.url, account.address, role)
+      return fetchDelegationsByRole(clusterConfig.url, account.address, role, progAddr!)
     },
-    enabled: !!account?.address,
+    enabled: !!account?.address && !!progAddr,
   })
 
   const refetch = async () => {

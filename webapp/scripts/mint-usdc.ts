@@ -25,8 +25,9 @@ async function main() {
   }
 
   try {
-    // Get USDC mint from config
-    const usdcMint = await getUsdcMint()
+    const rpcUrl = process.env.RPC_URL ?? 'http://127.0.0.1:8899'
+    const network = rpcUrl.includes('devnet') ? 'devnet' : rpcUrl.includes('testnet') ? 'testnet' : rpcUrl.includes('mainnet') ? 'mainnet' : 'localnet'
+    const usdcMint = await getUsdcMint(network)
     if (!usdcMint) {
       console.error('USDC mint not configured. Run init-test-environment.ts first.')
       process.exit(1)

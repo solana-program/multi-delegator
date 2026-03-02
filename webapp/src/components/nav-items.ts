@@ -1,4 +1,4 @@
-import { LayoutDashboard, Droplets, ClipboardPen, ShoppingBag, Users, Calendar, Banknote } from 'lucide-react'
+import { LayoutDashboard, Droplets, ClipboardPen, ShoppingBag, Users, Calendar, Banknote, Code2 } from 'lucide-react'
 import { type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
@@ -6,6 +6,7 @@ export interface NavItem {
   path: string
   icon: LucideIcon
   children?: NavItem[]
+  clusterFilter?: string[]
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -19,5 +20,6 @@ export const NAV_ITEMS: NavItem[] = [
       { label: 'Collect Payments', path: '/plans/collect', icon: Banknote },
     ],
   },
-  { label: 'Faucet', path: '/faucet', icon: Droplets },
+  { label: 'Faucet', path: '/faucet', icon: Droplets, clusterFilter: ['solana:localnet', 'solana:devnet'] },
+  { label: 'Program', path: '/program', icon: Code2, clusterFilter: ['solana:devnet', 'solana:testnet'] },
 ]

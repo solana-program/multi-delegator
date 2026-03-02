@@ -3,7 +3,6 @@ import { useWalletUi } from '@wallet-ui/react'
 import { createSolanaRpc, address } from 'gill'
 import type { Address } from 'gill'
 import {
-  MULTI_DELEGATOR_PROGRAM_ADDRESS,
   SUBSCRIPTION_SIZE,
   DELEGATOR_OFFSET,
   DELEGATEE_OFFSET,
@@ -12,6 +11,7 @@ import {
 } from '@multidelegator/client'
 import type { SubscriptionDelegation, Plan } from '@multidelegator/client'
 import { useClusterConfig } from '@/hooks/use-cluster-config'
+import { useProgramAddress } from '@/hooks/use-token-config'
 import type { DelegationAccountRaw } from '@/lib/types'
 import { decodeBase64ToUint8Array } from '@/lib/utils'
 
@@ -23,7 +23,7 @@ export interface PlanSubscriber {
   expiresAtTs: bigint
 }
 
-function decodeSubscriptionFromRaw(entry: DelegationAccountRaw): SubscriptionDelegation {
+function decodeSubscriptionFromRaw(entry: DelegationAccountRaw, progAddr: string): SubscriptionDelegation {
   const [base64Data] = entry.account.data
   const data = decodeBase64ToUint8Array(base64Data)
   const encodedAccount = {
@@ -32,7 +32,7 @@ function decodeSubscriptionFromRaw(entry: DelegationAccountRaw): SubscriptionDel
     executable: entry.account.executable,
     lamports: entry.account.lamports,
     owner: entry.account.owner,
-    programAddress: address(MULTI_DELEGATOR_PROGRAM_ADDRESS),
+    programAddress: address(progAddr),
     space: BigInt(data.length),
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -47,11 +47,11 @@ export interface EnrichedSubscription {
   plan: Plan | null
 }
 
-async function fetchMySubscriptions(rpcUrl: string, walletAddress: string): Promise<EnrichedSubscription[]> {
+async function fetchMySubscriptions(rpcUrl: string, walletAddress: string, progAddr: string): Promise<EnrichedSubscription[]> {
   const rpc = createSolanaRpc(rpcUrl)
 
   const response = await rpc
-    .getProgramAccounts(address(MULTI_DELEGATOR_PROGRAM_ADDRESS), {
+    .getProgramAccounts(address(progAddr), {
       filters: [
         { dataSize: BigInt(SUBSCRIPTION_SIZE) },
         {
@@ -74,7 +74,7 @@ async function fetchMySubscriptions(rpcUrl: string, walletAddress: string): Prom
 
   for (const entry of accounts) {
     try {
-      subs.push({ address: entry.pubkey, subscription: decodeSubscriptionFromRaw(entry) })
+      subs.push({ address: entry.pubkey, subscription: decodeSubscriptionFromRaw(entry, progAddr) })
     } catch {
       console.warn('Failed to decode subscription account:', entry.pubkey)
     }
@@ -95,11 +95,11 @@ async function fetchMySubscriptions(rpcUrl: string, walletAddress: string): Prom
   }))
 }
 
-export async function fetchPlanSubscriptions(rpcUrl: string, planAddress: string): Promise<PlanSubscriber[]> {
+export async function fetchPlanSubscriptions(rpcUrl: string, planAddress: string, progAddr: string): Promise<PlanSubscriber[]> {
   const rpc = createSolanaRpc(rpcUrl)
 
   const response = await rpc
-    .getProgramAccounts(address(MULTI_DELEGATOR_PROGRAM_ADDRESS), {
+    .getProgramAccounts(address(progAddr), {
       filters: [
         { dataSize: BigInt(SUBSCRIPTION_SIZE) },
         {
@@ -122,7 +122,7 @@ export async function fetchPlanSubscriptions(rpcUrl: string, planAddress: string
 
   for (const entry of accounts) {
     try {
-      const sub = decodeSubscriptionFromRaw(entry)
+      const sub = decodeSubscriptionFromRaw(entry, progAddr)
       subscribers.push({
         subscriptionAddress: entry.pubkey,
         delegator: sub.header.delegator,
@@ -141,19 +141,20 @@ export async function fetchPlanSubscriptions(rpcUrl: string, planAddress: string
 export function useMySubscriptions() {
   const { account } = useWalletUi()
   const clusterConfig = useClusterConfig()
+  const progAddr = useProgramAddress()
 
   return useQuery({
     queryKey: ['subscriptions', 'my', account?.address, clusterConfig.id],
-    queryFn: () => fetchMySubscriptions(clusterConfig.url, account!.address),
-    enabled: !!account?.address,
+    queryFn: () => fetchMySubscriptions(clusterConfig.url, account!.address, progAddr!),
+    enabled: !!account?.address && !!progAddr,
   })
 }
 
-async function fetchSubscriberCount(rpcUrl: string, planAddress: string): Promise<number> {
+async function fetchSubscriberCount(rpcUrl: string, planAddress: string, progAddr: string): Promise<number> {
   const rpc = createSolanaRpc(rpcUrl)
 
   const response = await rpc
-    .getProgramAccounts(address(MULTI_DELEGATOR_PROGRAM_ADDRESS), {
+    .getProgramAccounts(address(progAddr), {
       filters: [
         { dataSize: BigInt(SUBSCRIPTION_SIZE) },
         {
@@ -175,17 +176,18 @@ async function fetchSubscriberCount(rpcUrl: string, planAddress: string): Promis
 
 export function useSubscriberCount(planAddress: string | null) {
   const clusterConfig = useClusterConfig()
+  const progAddr = useProgramAddress()
 
   return useQuery({
     queryKey: ['subscriberCount', planAddress, clusterConfig.id],
-    queryFn: () => fetchSubscriberCount(clusterConfig.url, planAddress!),
-    enabled: !!planAddress,
+    queryFn: () => fetchSubscriberCount(clusterConfig.url, planAddress!, progAddr!),
+    enabled: !!planAddress && !!progAddr,
   })
 }
 
-async function fetchSubscriberCounts(rpcUrl: string, planAddresses: string[]): Promise<Map<string, number>> {
+async function fetchSubscriberCounts(rpcUrl: string, planAddresses: string[], progAddr: string): Promise<Map<string, number>> {
   const counts = await Promise.all(
-    planAddresses.map((addr) => fetchSubscriberCount(rpcUrl, addr))
+    planAddresses.map((addr) => fetchSubscriberCount(rpcUrl, addr, progAddr))
   )
   const map = new Map<string, number>()
   planAddresses.forEach((addr, i) => map.set(addr, counts[i]))
@@ -194,11 +196,12 @@ async function fetchSubscriberCounts(rpcUrl: string, planAddresses: string[]): P
 
 export function useSubscriberCounts(planAddresses: string[]) {
   const clusterConfig = useClusterConfig()
+  const progAddr = useProgramAddress()
   const key = planAddresses.slice().sort().join(',')
 
   return useQuery({
     queryKey: ['subscriberCounts', key, clusterConfig.id],
-    queryFn: () => fetchSubscriberCounts(clusterConfig.url, planAddresses),
-    enabled: planAddresses.length > 0,
+    queryFn: () => fetchSubscriberCounts(clusterConfig.url, planAddresses, progAddr!),
+    enabled: planAddresses.length > 0 && !!progAddr,
   })
 }
