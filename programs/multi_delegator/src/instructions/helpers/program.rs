@@ -8,9 +8,11 @@ use pinocchio::{
 };
 use pinocchio_system::instructions::{Allocate, Assign, CreateAccount, Transfer};
 
+/// Account check and lifecycle operations for accounts owned by this program.
 pub struct ProgramAccount;
 
 impl AccountCheck for ProgramAccount {
+    /// Verifies that the account is owned by the multi-delegator program.
     fn check(account: &AccountView) -> Result<(), ProgramError> {
         if !account.owned_by(&crate::ID) {
             return Err(ProgramError::InvalidAccountOwner);

@@ -1,3 +1,10 @@
+//! Token account validation, initialization, and interface helpers.
+//!
+//! Provides [`AccountCheck`] and init implementations for both SPL Token and
+//! Token-2022 mints and token accounts, along with unified interface types
+//! ([`MintInterface`], [`TokenAccountInterface`], [`TokenProgramInterface`])
+//! that dispatch to the correct variant based on account ownership.
+
 use pinocchio::{
     error::ProgramError,
     sysvars::{rent::Rent, Sysvar},
@@ -22,7 +29,6 @@ use crate::{
     MultiDelegatorError,
 };
 
-// Blocked Token-2022 extension types (u16 discriminators from ExtensionType enum)
 const EXTENSION_TYPE_TRANSFER_FEE_CONFIG: u16 = 1;
 const EXTENSION_TYPE_MINT_CLOSE_AUTHORITY: u16 = 3;
 const EXTENSION_TYPE_CONFIDENTIAL_TRANSFER_MINT: u16 = 4;
@@ -31,11 +37,13 @@ const EXTENSION_TYPE_PERMANENT_DELEGATE: u16 = 12;
 const EXTENSION_TYPE_TRANSFER_HOOK: u16 = 14;
 const EXTENSION_TYPE_PAUSABLE: u16 = 26;
 
-// TLV extensions start after: base Mint (82 bytes) + padding (83 bytes) + AccountType discriminator (1 byte)
 const TLV_EXTENSIONS_START: usize = 166;
 
 /// Validates that a Token-2022 mint does not contain any blocked extensions.
-/// The `data` slice must be the full account data (including base mint, padding, and TLV).
+///
+/// Walks the TLV extension entries starting at byte 166 and rejects mints
+/// that have ConfidentialTransfer, NonTransferable, PermanentDelegate,
+/// TransferHook, TransferFee, MintCloseAuthority, or Pausable extensions.
 fn validate_mint_extensions(data: &[u8]) -> Result<(), ProgramError> {
     let mut offset = TLV_EXTENSIONS_START;
 
@@ -137,6 +145,7 @@ fn init_token_helper(
 
 // MintAccount (SPL Token)
 
+/// Validation for SPL Token mint accounts.
 pub struct MintAccount;
 
 impl AccountCheck for MintAccount {
@@ -187,6 +196,7 @@ impl MintInit for MintAccount {
 
 // TokenAccount (SPL Token)
 
+/// Validation for SPL Token token accounts.
 pub struct TokenAccount;
 
 impl AccountCheck for TokenAccount {
@@ -228,6 +238,11 @@ impl TokenInit for TokenAccount {
 
 // Mint2022Account
 
+/// Validation for Token-2022 mint accounts.
+///
+/// Checks ownership by the Token-2022 program, minimum data length, the
+/// `0x01` discriminator at byte 165, and rejects blocked extensions via
+/// [`validate_mint_extensions`].
 pub struct Mint2022Account;
 
 impl AccountCheck for Mint2022Account {
@@ -286,6 +301,7 @@ impl MintInit for Mint2022Account {
 
 // TokenAccount2022Account
 
+/// Validation for Token-2022 token accounts.
 pub struct TokenAccount2022Account;
 
 impl AccountCheck for TokenAccount2022Account {
@@ -338,8 +354,7 @@ impl TokenInit for TokenAccount2022Account {
     }
 }
 
-// Interfaces
-
+/// Unified validator that accepts either SPL Token or Token-2022 program accounts.
 pub struct TokenProgramInterface;
 
 impl TokenProgramInterface {
@@ -353,6 +368,7 @@ impl TokenProgramInterface {
     }
 }
 
+/// Unified validator/initializer for mint accounts across both SPL Token and Token-2022.
 pub struct MintInterface;
 
 impl AccountCheck for MintInterface {
@@ -380,6 +396,7 @@ impl MintInterface {
     }
 }
 
+/// Unified validator/initializer for token accounts across both SPL Token and Token-2022.
 pub struct TokenAccountInterface;
 
 impl AccountCheck for TokenAccountInterface {
@@ -421,6 +438,7 @@ impl TokenAccountInterface {
     }
 }
 
+/// Unified ATA check and creation for both SPL Token and Token-2022.
 pub struct AssociatedTokenAccount;
 
 impl AssociatedTokenAccount {

@@ -1,11 +1,18 @@
+//! Shared account types, PDA derivation helpers, and enums used across all state modules.
+
 use codama::CodamaType;
 use pinocchio::error::ProgramError;
 use pinocchio::Address;
 
 use crate::MultiDelegatorError;
 
+/// PDA seed prefix used for delegation accounts (fixed, recurring).
 pub const DELEGATE_BASE_SEED: &[u8] = b"delegation";
 
+/// Verifies a delegation PDA by re-deriving with the given bump.
+///
+/// Returns the derived address on success, or [`MultiDelegatorError::InvalidDelegatePda`]
+/// if the bump is invalid.
 pub fn verify_delegation_pda(
     multi_delegate: &Address,
     delegator: &Address,
@@ -27,6 +34,7 @@ pub fn verify_delegation_pda(
     .map_err(|_| MultiDelegatorError::InvalidDelegatePda.into())
 }
 
+/// Finds the canonical delegation PDA and bump for the given seeds.
 pub fn find_delegation_pda(
     multi_delegate: &Address,
     delegator: &Address,
@@ -45,13 +53,21 @@ pub fn find_delegation_pda(
     )
 }
 
+/// One-byte discriminator identifying the type of a program-owned account.
+///
+/// Stored at byte offset 0 of every account created by this program.
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Debug, CodamaType)]
 pub enum AccountDiscriminator {
+    /// [`MultiDelegate`](super::multi_delegate::MultiDelegate) account.
     MultiDelegate = 0,
+    /// [`Plan`](super::plan::Plan) account.
     Plan = 1,
+    /// [`FixedDelegation`](super::fixed_delegation::FixedDelegation) account.
     FixedDelegation = 2,
+    /// [`RecurringDelegation`](super::recurring_delegation::RecurringDelegation) account.
     RecurringDelegation = 3,
+    /// [`SubscriptionDelegation`](super::subscription_delegation::SubscriptionDelegation) account.
     SubscriptionDelegation = 4,
 }
 
@@ -81,10 +97,14 @@ impl From<AccountDiscriminator> for u8 {
     }
 }
 
+/// Lifecycle status of a subscription [`Plan`](super::plan::Plan).
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Debug, CodamaType)]
 pub enum PlanStatus {
+    /// The plan is in sunset mode -- no new subscriptions are accepted, but
+    /// existing subscriptions remain active until their end timestamp.
     Sunset = 0,
+    /// The plan is active and accepting new subscriptions.
     Active = 1,
 }
 
@@ -99,6 +119,10 @@ impl TryFrom<u8> for PlanStatus {
     }
 }
 
+/// Verifies a plan PDA by re-deriving with the given bump.
+///
+/// Returns the derived address on success, or [`MultiDelegatorError::InvalidPlanPda`]
+/// if the bump is invalid.
 pub fn verify_plan_pda(owner: &Address, plan_id: u64, bump: u8) -> Result<Address, ProgramError> {
     Address::create_program_address(
         &[
@@ -112,6 +136,7 @@ pub fn verify_plan_pda(owner: &Address, plan_id: u64, bump: u8) -> Result<Addres
     .map_err(|_| MultiDelegatorError::InvalidPlanPda.into())
 }
 
+/// Finds the canonical plan PDA and bump for the given owner and plan id.
 pub fn find_plan_pda(owner: &Address, plan_id: u64) -> (Address, u8) {
     Address::find_program_address(
         &[
@@ -123,6 +148,7 @@ pub fn find_plan_pda(owner: &Address, plan_id: u64) -> (Address, u8) {
     )
 }
 
+/// Finds the canonical subscription PDA and bump for a given plan and subscriber.
 pub fn find_subscription_pda(plan_pda: &Address, subscriber: &Address) -> (Address, u8) {
     Address::find_program_address(
         &[

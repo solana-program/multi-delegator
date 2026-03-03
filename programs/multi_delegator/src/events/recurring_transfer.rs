@@ -4,22 +4,34 @@ use pinocchio::Address;
 
 use crate::event_engine::{EventDiscriminator, EventDiscriminators, EventSerialize};
 
+/// Emitted when a transfer is executed against a recurring delegation.
 #[repr(C, packed)]
 pub struct RecurringTransferEvent {
+    /// The recurring delegation PDA.
     pub delegation: Address,
+    /// The token owner whose ATA was debited.
     pub delegator: Address,
+    /// The party that initiated the transfer.
     pub delegatee: Address,
+    /// The SPL token mint.
     pub mint: Address,
+    /// Token amount transferred.
     pub amount: u64,
+    /// Start of the period during which the transfer occurred.
     pub period_start_ts: i64,
+    /// End of the period during which the transfer occurred.
     pub period_end_ts: i64,
+    /// Cumulative amount pulled so far in this period (including this transfer).
     pub amount_pulled_in_period: u64,
+    /// The receiver wallet that received the tokens.
     pub receiver: Address,
 }
 
 impl RecurringTransferEvent {
+    /// Wire-format payload size (excluding tag and discriminator).
     pub const DATA_LEN: usize = size_of::<Self>();
 
+    /// Constructs a new event.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         delegation: Address,

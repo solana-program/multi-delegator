@@ -1,3 +1,5 @@
+//! Shared helper types, account check traits, and utility functions used by instruction processors.
+
 pub mod delegation;
 mod plan;
 pub mod program;

@@ -10,6 +10,7 @@ use crate::{
     WritableAccount,
 };
 
+/// Validated accounts for the [`InitMultiDelegate`](crate::MultiDelegatorInstruction::InitMultiDelegate) instruction.
 pub struct InitializeMultiDelegateAccounts<'a> {
     pub user: &'a AccountView,
     pub multi_delegate: &'a AccountView,
@@ -48,8 +49,15 @@ impl<'a> TryFrom<&'a [AccountView]> for InitializeMultiDelegateAccounts<'a> {
     }
 }
 
+/// Instruction discriminator byte for `InitMultiDelegate`.
 pub const DISCRIMINATOR: &u8 = &0;
 
+/// Creates a [`MultiDelegate`] PDA for the given user and token mint, then
+/// approves this PDA as the SPL Token delegate on the user's ATA with
+/// `u64::MAX` allowance.
+///
+/// If the PDA already exists (e.g., pre-funded by an attacker), the account
+/// is reclaimed idempotently.
 pub fn process(accounts: &[AccountView]) -> ProgramResult {
     let accounts = InitializeMultiDelegateAccounts::try_from(accounts)?;
 

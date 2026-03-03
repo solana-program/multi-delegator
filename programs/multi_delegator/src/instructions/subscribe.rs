@@ -22,18 +22,24 @@ use crate::{
     ProgramAccountInit, SignerAccount, SystemAccount, WritableAccount,
 };
 
+/// Instruction discriminator byte for `Subscribe`.
 pub const DISCRIMINATOR: &u8 = &11;
 
+/// Instruction data payload for subscribing to a plan.
 #[repr(C, packed)]
 #[derive(CodamaType, Debug, Clone)]
 pub struct SubscribeData {
+    /// The plan's `plan_id` (used together with the merchant address to derive the plan PDA).
     pub plan_id: u64,
+    /// The plan PDA's bump seed (avoids an on-chain `find_program_address` call).
     pub plan_bump: u8,
 }
 
 impl SubscribeData {
+    /// Serialized size in bytes.
     pub const LEN: usize = size_of::<SubscribeData>();
 
+    /// Zero-copy deserialize from raw instruction bytes.
     pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
         if data.len() != Self::LEN {
             return Err(MultiDelegatorError::InvalidInstructionData.into());
@@ -42,6 +48,13 @@ impl SubscribeData {
     }
 }
 
+/// Creates a [`SubscriptionDelegation`] PDA that
+/// links the subscriber to a plan.
+///
+/// Validates the plan is active and not expired, verifies the subscriber's
+/// [`MultiDelegate`] matches the plan's mint, creates
+/// the subscription account, and emits a
+/// [`SubscriptionCreatedEvent`].
 pub fn process(accounts: &[AccountView], data: &SubscribeData) -> ProgramResult {
     let accounts_struct = SubscribeAccounts::try_from(accounts)?;
     let current_ts = Clock::get()?.unix_timestamp;
@@ -159,6 +172,7 @@ pub fn process(accounts: &[AccountView], data: &SubscribeData) -> ProgramResult 
     Ok(())
 }
 
+/// Validated accounts for the [`Subscribe`](crate::MultiDelegatorInstruction::Subscribe) instruction.
 pub struct SubscribeAccounts<'a> {
     pub subscriber: &'a AccountView,
     pub merchant: &'a AccountView,

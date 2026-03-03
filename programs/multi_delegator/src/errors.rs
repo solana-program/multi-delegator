@@ -89,9 +89,17 @@ impl TryFrom<u32> for MultiDelegatorError {
     }
 }
 
+/// Program-specific error codes for the multi-delegator program.
+///
+/// Error codes are grouped by category:
+/// - **100--199**: Generic account and data validation errors.
+/// - **300--399**: Fixed delegation errors.
+/// - **400--499**: Recurring delegation errors.
+/// - **500--599**: Plan and subscription errors.
+/// - **600--699**: Event emission errors.
 #[derive(Debug, Copy, Clone, Error, CodamaErrors)]
 pub enum MultiDelegatorError {
-    // Generic errors (100-199)
+    // --- Generic errors (100--199) ---
     #[error("Account must be a signer")]
     NotSigner = 100,
     #[error("Invalid account address")]
@@ -159,7 +167,7 @@ pub enum MultiDelegatorError {
     #[error("Token account owner does not match expected")]
     AtaOwnerMismatch,
 
-    // Fixed delegation errors (300-399)
+    // --- Fixed delegation errors (300--399) ---
     #[error("Transfer amount exceeds delegation limit")]
     AmountExceedsLimit = 300,
     #[error("Expiry time specified is less than current time")]
@@ -167,7 +175,7 @@ pub enum MultiDelegatorError {
     #[error("zero amount specified")]
     FixedDelegationAmountZero,
 
-    // Recurring delegation errors (400-499)
+    // --- Recurring delegation errors (400--499) ---
     #[error("Transfer amount exceeds period limit")]
     AmountExceedsPeriodLimit = 400,
     #[error("Period has not elapsed yet")]
@@ -183,7 +191,7 @@ pub enum MultiDelegatorError {
     #[error("zero amount specified")]
     RecurringDelegationAmountZero,
 
-    // Plan and subscription errors (500-599)
+    // --- Plan and subscription errors (500--599) ---
     #[error("Plan is in sunset status")]
     PlanSunset = 500,
     #[error("Plan has expired")]
@@ -221,7 +229,7 @@ pub enum MultiDelegatorError {
     #[error("Already subscribed to this plan")]
     AlreadySubscribed,
 
-    // Event errors (600-699)
+    // --- Event errors (600--699) ---
     #[error("Invalid event authority PDA")]
     InvalidEventAuthority = 600,
     #[error("Invalid event data")]

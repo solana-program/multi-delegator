@@ -1,3 +1,9 @@
+//! Event emission engine using Anchor-compatible self-CPI.
+//!
+//! Events are emitted by invoking this program's own [`EmitEvent`](crate::instructions::emit_event)
+//! instruction via CPI, signed by the event authority PDA. Indexers detect these
+//! inner instructions by the 8-byte `EVENT_IX_TAG` prefix in the instruction data.
+
 use core::mem::size_of;
 
 use const_crypto::ed25519;
@@ -31,7 +37,10 @@ pub mod event_authority_pda {
     const EVENT_AUTHORITY_AND_BUMP: ([u8; 32], u8) =
         ed25519::derive_program_address(&[EVENT_AUTHORITY_SEED], crate::ID.as_array());
 
+    /// The event authority PDA address, derived at compile time.
     pub const ID: Address = Address::new_from_array(EVENT_AUTHORITY_AND_BUMP.0);
+
+    /// The PDA bump seed for the event authority.
     pub const BUMP: u8 = EVENT_AUTHORITY_AND_BUMP.1;
 }
 
@@ -77,12 +86,21 @@ pub trait EventSerialize: EventDiscriminator {
 }
 
 /// Registry of all event discriminator values.
+///
+/// Each variant's `u8` value is written as the 9th byte of the event wire format
+/// (after the 8-byte [`EVENT_IX_TAG_LE`] prefix), allowing indexers to identify
+/// the event type.
 #[repr(u8)]
 pub enum EventDiscriminators {
+    /// A new subscription was created.
     SubscriptionCreated = 0,
+    /// An existing subscription was cancelled by the subscriber.
     SubscriptionCancelled = 1,
+    /// A transfer was executed against a subscription delegation.
     SubscriptionTransfer = 2,
+    /// A transfer was executed against a fixed delegation.
     FixedTransfer = 3,
+    /// A transfer was executed against a recurring delegation.
     RecurringTransfer = 4,
 }
 
@@ -101,6 +119,7 @@ impl TryFrom<u8> for EventDiscriminators {
     }
 }
 
+/// Verifies that the given account matches the compile-time event authority PDA.
 #[inline(always)]
 pub fn verify_event_authority(account: &AccountView) -> Result<(), ProgramError> {
     if account.address() != &event_authority_pda::ID {

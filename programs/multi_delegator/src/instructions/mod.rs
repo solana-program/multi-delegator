@@ -1,3 +1,9 @@
+//! Instruction definitions and dispatch for the multi-delegator program.
+//!
+//! Each instruction variant carries its own discriminator (the first byte of
+//! instruction data) and, where applicable, an inline data payload. The Codama
+//! annotations on each variant describe the required accounts.
+
 pub mod cancel_subscription;
 pub mod close_multidelegate;
 pub mod create_fixed_delegation;
@@ -29,6 +35,11 @@ use crate::instructions::subscribe::SubscribeData;
 use crate::instructions::update_plan::UpdatePlanData;
 use crate::MultiDelegatorError;
 
+/// All instructions supported by the multi-delegator program.
+///
+/// The discriminator byte (`repr(u8)` value) is serialized as the first byte of
+/// instruction data. Codama `#[codama(account(...))]` annotations describe the
+/// expected account list for each variant.
 #[derive(Debug, CodamaInstructions)]
 #[repr(u8)]
 #[allow(clippy::large_enum_variant)]

@@ -16,8 +16,14 @@ use pinocchio::{
     AccountView, Address, ProgramResult,
 };
 
+/// Instruction discriminator byte for `TransferRecurring`.
 pub const DISCRIMINATOR: &u8 = &5;
 
+/// Executes a transfer against a [`RecurringDelegation`].
+///
+/// Validates authorization and per-period limits, advances the period if
+/// necessary, performs the SPL token transfer via the [`MultiDelegate`](crate::MultiDelegate)
+/// PDA, and emits a [`RecurringTransferEvent`].
 pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> ProgramResult {
     let accounts_struct = RecurringTransferAccounts::try_from(accounts)?;
 
@@ -107,6 +113,7 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
     Ok(())
 }
 
+/// Validated accounts for the [`TransferRecurring`](crate::MultiDelegatorInstruction::TransferRecurring) instruction.
 pub struct RecurringTransferAccounts<'a> {
     pub delegation_pda: &'a AccountView,
     pub multi_delegate: &'a AccountView,

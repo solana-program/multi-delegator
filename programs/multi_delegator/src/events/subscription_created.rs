@@ -4,17 +4,24 @@ use pinocchio::Address;
 
 use crate::event_engine::{EventDiscriminator, EventDiscriminators, EventSerialize};
 
+/// Emitted when a user subscribes to a plan.
 #[repr(C, packed)]
 pub struct SubscriptionCreatedEvent {
+    /// The plan PDA the subscription was created against.
     pub plan: Address,
+    /// The subscriber's wallet address.
     pub subscriber: Address,
+    /// The SPL token mint for this subscription.
     pub mint: Address,
+    /// Unix timestamp when the subscription was created.
     pub created_ts: i64,
 }
 
 impl SubscriptionCreatedEvent {
+    /// Wire-format payload size (excluding tag and discriminator).
     pub const DATA_LEN: usize = size_of::<Self>();
 
+    /// Constructs a new event.
     pub fn new(plan: Address, subscriber: Address, mint: Address, created_ts: i64) -> Self {
         Self {
             plan,
