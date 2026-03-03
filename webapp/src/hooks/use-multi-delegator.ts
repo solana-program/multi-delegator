@@ -6,25 +6,18 @@ import {
   getCreateAssociatedTokenIdempotentInstruction,
 } from "gill/programs/token";
 import {
-  getInitMultiDelegateInstruction,
-  getCreateFixedDelegationInstruction,
-  getCreateRecurringDelegationInstruction,
-  getRevokeDelegationInstruction,
-  getTransferFixedInstruction,
-  getTransferRecurringInstruction,
-  getCreatePlanInstruction,
-  getUpdatePlanInstruction,
-  getDeletePlanInstruction,
-  getSubscribeInstruction,
-  getCancelSubscriptionInstruction,
-  getTransferSubscriptionInstruction,
-  getMultiDelegatePDA,
-  getDelegationPDA,
-  getPlanPDA,
-  getSubscriptionPDA,
-  getEventAuthorityPDA,
-  MAX_PLAN_DESTINATIONS,
-  MAX_PLAN_PULLERS,
+  buildInitMultiDelegate,
+  buildCreateFixedDelegation,
+  buildCreateRecurringDelegation,
+  buildRevokeDelegation,
+  buildTransferFixed,
+  buildTransferRecurring,
+  buildTransferSubscription,
+  buildCreatePlan,
+  buildUpdatePlan,
+  buildDeletePlan,
+  buildSubscribe,
+  buildCancelSubscription,
   ZERO_ADDRESS,
   PlanStatus,
 } from "@multidelegator/client";
@@ -46,7 +39,6 @@ export function useMultiDelegatorMutations() {
   const programAddress = useProgramAddress();
 
   const progId = programAddress ? address(programAddress) : undefined;
-  const progConfig = progId ? { programAddress: progId } : undefined;
 
   const initMultiDelegate = useMutation({
     mutationFn: async ({
@@ -61,22 +53,15 @@ export function useMultiDelegatorMutations() {
       if (!signer) throw new Error("Wallet not connected");
       if (!progId) throw new Error("Program address not configured");
 
-      const user = signer.address;
-      const [multiDelegate] = await getMultiDelegatePDA(
-        user,
-        address(tokenMint),
-        progId,
-      );
-
-      const instruction = getInitMultiDelegateInstruction({
+      const { instructions } = await buildInitMultiDelegate({
         owner: signer,
-        multiDelegate,
         tokenMint: address(tokenMint),
         userAta: address(userAta),
         tokenProgram: address(tokenProgram),
-      }, progConfig);
+        programAddress: progId,
+      });
 
-      const signature = await signAndSend(instruction, signer);
+      const signature = await signAndSend(instructions, signer);
       return { signature };
     },
     onSuccess: (res) => {
@@ -108,29 +93,17 @@ export function useMultiDelegatorMutations() {
       if (!signer) throw new Error("Wallet not connected");
       if (!progId) throw new Error("Program address not configured");
 
-      const user = signer.address;
-      const [multiDelegate] = await getMultiDelegatePDA(
-        user,
-        address(tokenMint),
-        progId,
-      );
-      const [delegationAccount] = await getDelegationPDA(
-        multiDelegate,
-        user,
-        address(delegatee),
-        nonce,
-        progId,
-      );
-
-      const instruction = getCreateFixedDelegationInstruction({
+      const { instructions } = await buildCreateFixedDelegation({
         delegator: signer,
-        multiDelegate,
-        delegationAccount,
+        tokenMint: address(tokenMint),
         delegatee: address(delegatee),
-        fixedDelegation: { nonce, amount, expiryTs },
-      }, progConfig);
+        nonce,
+        amount,
+        expiryTs,
+        programAddress: progId,
+      });
 
-      const signature = await signAndSend(instruction, signer);
+      const signature = await signAndSend(instructions, signer);
       return { signature };
     },
     onSuccess: (res) => {
@@ -161,35 +134,19 @@ export function useMultiDelegatorMutations() {
       if (!signer) throw new Error("Wallet not connected");
       if (!progId) throw new Error("Program address not configured");
 
-      const user = signer.address;
-      const [multiDelegate] = await getMultiDelegatePDA(
-        user,
-        address(tokenMint),
-        progId,
-      );
-      const [delegationAccount] = await getDelegationPDA(
-        multiDelegate,
-        user,
-        address(delegatee),
-        nonce,
-        progId,
-      );
-
-      const instruction = getCreateRecurringDelegationInstruction({
+      const { instructions } = await buildCreateRecurringDelegation({
         delegator: signer,
-        multiDelegate,
-        delegationAccount,
+        tokenMint: address(tokenMint),
         delegatee: address(delegatee),
-        recurringDelegation: {
-          nonce,
-          amountPerPeriod,
-          periodLengthS,
-          startTs: startTs ?? await getBlockTimestamp(rpcUrl),
-          expiryTs,
-        },
-      }, progConfig);
+        nonce,
+        amountPerPeriod,
+        periodLengthS,
+        startTs: startTs ?? await getBlockTimestamp(rpcUrl),
+        expiryTs,
+        programAddress: progId,
+      });
 
-      const signature = await signAndSend(instruction, signer);
+      const signature = await signAndSend(instructions, signer);
       return { signature };
     },
     onSuccess: (res) => {
@@ -207,12 +164,13 @@ export function useMultiDelegatorMutations() {
     }) => {
       if (!signer) throw new Error("Wallet not connected");
 
-      const instruction = getRevokeDelegationInstruction({
+      const { instructions } = buildRevokeDelegation({
         authority: signer,
         delegationAccount: address(delegationAccount),
-      }, progConfig);
+        programAddress: progId,
+      });
 
-      const signature = await signAndSend(instruction, signer);
+      const signature = await signAndSend(instructions, signer);
       return { signature };
     },
     onSuccess: (res) => {
@@ -230,7 +188,7 @@ export function useMultiDelegatorMutations() {
     receiverAta?: string;
   };
 
-  const buildTransferInstructions = async (
+  const buildTransferIxs = async (
     params: TransferParams,
     kind: "fixed" | "recurring",
   ) => {
@@ -239,7 +197,6 @@ export function useMultiDelegatorMutations() {
 
     const mint = address(params.tokenMint);
     const delegatorAddr = address(params.delegator);
-    const [multiDelegate] = await getMultiDelegatePDA(delegatorAddr, mint, progId);
     const [delegatorAta] = await findAssociatedTokenPda({
       mint,
       owner: delegatorAddr,
@@ -263,36 +220,26 @@ export function useMultiDelegatorMutations() {
       tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
     });
 
-    const [eventAuthority] = await getEventAuthorityPDA(progId);
-
-    const transferParams = {
-      delegationPda: address(params.delegationAccount),
-      multiDelegate,
+    const buildFn = kind === "fixed" ? buildTransferFixed : buildTransferRecurring;
+    const { instructions: transferIxs } = await buildFn({
+      delegatee: signer,
+      delegator: delegatorAddr,
       delegatorAta,
+      tokenMint: mint,
+      delegationPda: address(params.delegationAccount),
+      amount: params.amount,
       receiverAta: receiver,
       tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
-      delegatee: signer,
-      eventAuthority,
-      selfProgram: progId!,
-      transferData: {
-        amount: params.amount,
-        delegator: delegatorAddr,
-        mint,
-      },
-    };
+      programAddress: progId,
+    });
 
-    const transferIx =
-      kind === "fixed"
-        ? getTransferFixedInstruction(transferParams, progConfig)
-        : getTransferRecurringInstruction(transferParams, progConfig);
-
-    return { instructions: [createAtaIx, transferIx], signer };
+    return { instructions: [createAtaIx, ...transferIxs], signer };
   };
 
   const transferFixed = useMutation({
     mutationFn: async (params: TransferParams) => {
       const { instructions, signer: txSigner } =
-        await buildTransferInstructions(params, "fixed");
+        await buildTransferIxs(params, "fixed");
       const signature = await signAndSend(instructions, txSigner);
       return { signature };
     },
@@ -307,7 +254,7 @@ export function useMultiDelegatorMutations() {
   const transferRecurring = useMutation({
     mutationFn: async (params: TransferParams) => {
       const { instructions, signer: txSigner } =
-        await buildTransferInstructions(params, "recurring");
+        await buildTransferIxs(params, "recurring");
       const signature = await signAndSend(instructions, txSigner);
       return { signature };
     },
@@ -342,35 +289,21 @@ export function useMultiDelegatorMutations() {
       if (!signer) throw new Error("Wallet not connected");
       if (!progId) throw new Error("Program address not configured");
 
-      const paddedDestinations = Array.from(
-        { length: MAX_PLAN_DESTINATIONS },
-        (_, i) => address(destinations[i] || ZERO_ADDRESS),
-      );
-      const paddedPullers = Array.from(
-        { length: MAX_PLAN_PULLERS },
-        (_, i) => address(pullers[i] || ZERO_ADDRESS),
-      );
-
-      const [planPda] = await getPlanPDA(signer.address, planId, progId);
-
-      const instruction = getCreatePlanInstruction({
-        merchant: signer,
-        planPda,
-        tokenMint: address(mint),
+      const { instructions } = await buildCreatePlan({
+        owner: signer,
+        planId,
+        mint: address(mint),
+        amount,
+        periodHours: BigInt(periodHours),
+        endTs: BigInt(endTs),
+        destinations: destinations.map((d) => address(d)),
+        pullers: pullers.map((p) => address(p)),
+        metadataUri,
         tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
-        planData: {
-          planId,
-          mint: address(mint),
-          amount,
-          periodHours: BigInt(periodHours),
-          endTs: BigInt(endTs),
-          destinations: paddedDestinations,
-          pullers: paddedPullers,
-          metadataUri,
-        },
-      }, progConfig);
+        programAddress: progId,
+      });
 
-      const signature = await signAndSend(instruction, signer);
+      const signature = await signAndSend(instructions, signer);
       return { signature };
     },
     onSuccess: (res) => {
@@ -396,18 +329,17 @@ export function useMultiDelegatorMutations() {
     }) => {
       if (!signer) throw new Error("Wallet not connected");
 
-      const paddedPullers = Array.from(
-        { length: MAX_PLAN_PULLERS },
-        (_, i) => address(pullers[i] || ZERO_ADDRESS),
-      );
-
-      const instruction = getUpdatePlanInstruction({
+      const { instructions } = buildUpdatePlan({
         owner: signer,
         planPda: address(planPda),
-        updatePlanData: { status, endTs: BigInt(endTs), pullers: paddedPullers, metadataUri },
-      }, progConfig);
+        status,
+        endTs: BigInt(endTs),
+        metadataUri,
+        pullers: pullers.map((p) => address(p)),
+        programAddress: progId,
+      });
 
-      const signature = await signAndSend(instruction, signer);
+      const signature = await signAndSend(instructions, signer);
       return { signature };
     },
     onSuccess: (res) => {
@@ -421,12 +353,13 @@ export function useMultiDelegatorMutations() {
     mutationFn: async ({ planPda }: { planPda: string }) => {
       if (!signer) throw new Error("Wallet not connected");
 
-      const instruction = getDeletePlanInstruction({
+      const { instructions } = buildDeletePlan({
         owner: signer,
         planPda: address(planPda),
-      }, progConfig);
+        programAddress: progId,
+      });
 
-      const signature = await signAndSend(instruction, signer);
+      const signature = await signAndSend(instructions, signer);
       return { signature };
     },
     onSuccess: (res) => {
@@ -449,23 +382,15 @@ export function useMultiDelegatorMutations() {
       if (!signer) throw new Error("Wallet not connected");
       if (!progId) throw new Error("Program address not configured");
 
-      const [planPda, planBump] = await getPlanPDA(address(merchant), planId, progId);
-      const [subscriptionPda] = await getSubscriptionPDA(planPda, signer.address, progId);
-      const [multiDelegatePda] = await getMultiDelegatePDA(signer.address, address(tokenMint), progId);
-      const [eventAuthority] = await getEventAuthorityPDA(progId);
-
-      const instruction = getSubscribeInstruction({
+      const { instructions } = await buildSubscribe({
         subscriber: signer,
         merchant: address(merchant),
-        planPda,
-        subscriptionPda,
-        multiDelegatePda,
-        eventAuthority,
-        selfProgram: progId,
-        subscribeData: { planId, planBump },
-      }, progConfig);
+        planId,
+        tokenMint: address(tokenMint),
+        programAddress: progId,
+      });
 
-      const signature = await signAndSend(instruction, signer);
+      const signature = await signAndSend(instructions, signer);
       return { signature };
     },
     onSuccess: (res) => {
@@ -486,17 +411,14 @@ export function useMultiDelegatorMutations() {
       if (!signer) throw new Error("Wallet not connected");
       if (!progId) throw new Error("Program address not configured");
 
-      const [eventAuthority] = await getEventAuthorityPDA(progId);
-
-      const instruction = getCancelSubscriptionInstruction({
+      const { instructions } = await buildCancelSubscription({
         subscriber: signer,
         planPda: address(planPda),
         subscriptionPda: address(subscriptionPda),
-        eventAuthority,
-        selfProgram: progId,
-      }, progConfig);
+        programAddress: progId,
+      });
 
-      const signature = await signAndSend(instruction, signer);
+      const signature = await signAndSend(instructions, signer);
       return { signature };
     },
     onSuccess: (res) => {
@@ -514,12 +436,13 @@ export function useMultiDelegatorMutations() {
     }) => {
       if (!signer) throw new Error("Wallet not connected");
 
-      const instruction = getRevokeDelegationInstruction({
+      const { instructions } = buildRevokeDelegation({
         authority: signer,
         delegationAccount: address(subscriptionPda),
-      }, progConfig);
+        programAddress: progId,
+      });
 
-      const signature = await signAndSend(instruction, signer);
+      const signature = await signAndSend(instructions, signer);
       return { signature };
     },
     onSuccess: (res) => {
@@ -540,22 +463,20 @@ export function useMultiDelegatorMutations() {
       if (!signer) throw new Error("Wallet not connected");
       if (!progId) throw new Error("Program address not configured");
 
-      const [eventAuthority] = await getEventAuthorityPDA(progId);
-
-      const cancelIx = getCancelSubscriptionInstruction({
+      const { instructions: cancelIxs } = await buildCancelSubscription({
         subscriber: signer,
         planPda: address(planPda),
         subscriptionPda: address(subscriptionPda),
-        eventAuthority,
-        selfProgram: progId,
-      }, progConfig);
+        programAddress: progId,
+      });
 
-      const revokeIx = getRevokeDelegationInstruction({
+      const { instructions: revokeIxs } = buildRevokeDelegation({
         authority: signer,
         delegationAccount: address(subscriptionPda),
-      }, progConfig);
+        programAddress: progId,
+      });
 
-      const signature = await signAndSend([cancelIx, revokeIx], signer);
+      const signature = await signAndSend([...cancelIxs, ...revokeIxs], signer);
       return { signature };
     },
     onSuccess: (res) => {
@@ -599,34 +520,20 @@ export function useMultiDelegatorMutations() {
         tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
       });
 
-      const [eventAuthority] = await getEventAuthorityPDA(progId);
-
       const transferIxs = await Promise.all(
         subscribers.map(async (sub) => {
-          const delegatorAddr = address(sub.delegator);
-          const [multiDelegate] = await getMultiDelegatePDA(delegatorAddr, mintAddr, progId);
-          const [delegatorAta] = await findAssociatedTokenPda({
-            mint: mintAddr,
-            owner: delegatorAddr,
-            tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
-          });
-
-          return getTransferSubscriptionInstruction({
+          const { instructions } = await buildTransferSubscription({
+            caller: signer,
+            delegator: address(sub.delegator),
+            tokenMint: mintAddr,
             subscriptionPda: address(sub.subscriptionAddress),
             planPda,
-            multiDelegate,
-            delegatorAta,
+            amount: sub.amount,
             receiverAta,
-            caller: signer,
             tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
-            eventAuthority,
-            selfProgram: progId,
-            transferData: {
-              amount: sub.amount,
-              delegator: delegatorAddr,
-              mint: mintAddr,
-            },
-          }, progConfig);
+            programAddress: progId,
+          });
+          return instructions[0];
         })
       );
 
@@ -679,7 +586,6 @@ export function useMultiDelegatorMutations() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const transferIxs: any[] = [];
       const seenAtas = new Set<string>();
-      const [eventAuthority] = await getEventAuthorityPDA(progId);
 
       for (const plan of plans) {
         const mintAddr = address(plan.mint);
@@ -707,32 +613,18 @@ export function useMultiDelegatorMutations() {
         }
 
         for (const sub of plan.subscribers) {
-          const delegatorAddr = address(sub.delegator);
-          const [multiDelegate] = await getMultiDelegatePDA(delegatorAddr, mintAddr, progId);
-          const [delegatorAta] = await findAssociatedTokenPda({
-            mint: mintAddr,
-            owner: delegatorAddr,
+          const { instructions } = await buildTransferSubscription({
+            caller: signer,
+            delegator: address(sub.delegator),
+            tokenMint: mintAddr,
+            subscriptionPda: address(sub.subscriptionAddress),
+            planPda,
+            amount: sub.amount,
+            receiverAta,
             tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+            programAddress: progId,
           });
-
-          transferIxs.push(
-            getTransferSubscriptionInstruction({
-              subscriptionPda: address(sub.subscriptionAddress),
-              planPda,
-              multiDelegate,
-              delegatorAta,
-              receiverAta,
-              caller: signer,
-              tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
-              eventAuthority,
-              selfProgram: progId!,
-              transferData: {
-                amount: sub.amount,
-                delegator: delegatorAddr,
-                mint: mintAddr,
-              },
-            }, progConfig),
-          );
+          transferIxs.push(instructions[0]);
         }
       }
 

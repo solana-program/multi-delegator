@@ -35,14 +35,3 @@ export interface TokenAccountEntry {
   }
   pubkey: string
 }
-
-export interface DelegationAccountRaw {
-  pubkey: string
-  account: {
-    data: [string, string]
-    executable: boolean
-    lamports: number
-    owner: string
-    rentEpoch: number
-  }
-}

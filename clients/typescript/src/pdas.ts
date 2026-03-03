@@ -16,6 +16,12 @@ import {
 const addressEncoder = getAddressEncoder();
 const textEncoder = new TextEncoder();
 
+function encodeU64Le(value: number | bigint): Uint8Array {
+  const bytes = new Uint8Array(U64_BYTE_SIZE);
+  new DataView(bytes.buffer).setBigUint64(0, BigInt(value), true);
+  return bytes;
+}
+
 export async function getMultiDelegatePDA(
   user: Address,
   tokenMint: Address,
@@ -41,15 +47,12 @@ export async function getDelegationPDA(
   nonce: number | bigint,
   programId?: Address,
 ): Promise<[Address, number]> {
-  const nonceBytes = new Uint8Array(U64_BYTE_SIZE);
-  new DataView(nonceBytes.buffer).setBigUint64(0, BigInt(nonce), true);
-
   const seeds = [
     textEncoder.encode(DELEGATION_SEED),
     addressEncoder.encode(multiDelegate),
     addressEncoder.encode(delegator),
     addressEncoder.encode(delegatee),
-    nonceBytes,
+    encodeU64Le(nonce),
   ];
 
   const [pda, bump] = await getProgramDerivedAddress({
@@ -64,13 +67,10 @@ export async function getPlanPDA(
   planId: number | bigint,
   programId?: Address,
 ): Promise<[Address, number]> {
-  const planIdBytes = new Uint8Array(U64_BYTE_SIZE);
-  new DataView(planIdBytes.buffer).setBigUint64(0, BigInt(planId), true);
-
   const seeds = [
     textEncoder.encode(PLAN_SEED),
     addressEncoder.encode(owner),
-    planIdBytes,
+    encodeU64Le(planId),
   ];
 
   const [pda, bump] = await getProgramDerivedAddress({

@@ -4,7 +4,14 @@ import {
   fetchMaybeMultiDelegate,
   fetchMultiDelegate,
 } from '../src/generated/index.ts';
+import {
+  buildCloseMultiDelegate,
+  buildCreateFixedDelegation,
+  buildInitMultiDelegate,
+  buildRevokeDelegation,
+} from '../src/instructions/delegation.ts';
 import { getDelegationPDA, getMultiDelegatePDA } from '../src/pdas.ts';
+import { addressAsSigner } from '../src/wallet.ts';
 import {
   DEFAULT_TEST_BALANCE,
   getWalletProviders,
@@ -26,12 +33,13 @@ describe.each(getWalletProviders())('Fixed Delegation Lifecycle ($name)', ({
     );
 
     // 1. Init multi-delegate
-    await t.client.initMultiDelegate(
-      wallet,
-      t.tokenMint,
+    const { instructions: initIxs } = await buildInitMultiDelegate({
+      owner: addressAsSigner(wallet.address),
+      tokenMint: t.tokenMint,
       userAta,
-      t.tokenProgram,
-    );
+      tokenProgram: t.tokenProgram,
+    });
+    await wallet.sendInstructions(initIxs);
 
     const [multiDelegatePda] = await getMultiDelegatePDA(
       wallet.address,
@@ -52,14 +60,15 @@ describe.each(getWalletProviders())('Fixed Delegation Lifecycle ($name)', ({
     const currentTs = await t.getValidatorTime();
     const expiryS = currentTs + BigInt(ONE_HOUR_IN_SECONDS);
 
-    await t.client.createFixedDelegation(
-      wallet,
-      t.tokenMint,
-      delegatee.address,
+    const { instructions: createIxs } = await buildCreateFixedDelegation({
+      delegator: addressAsSigner(wallet.address),
+      tokenMint: t.tokenMint,
+      delegatee: delegatee.address,
       nonce,
       amount,
-      expiryS,
-    );
+      expiryTs: expiryS,
+    });
+    await wallet.sendInstructions(createIxs);
 
     const [delegationPda] = await getDelegationPDA(
       multiDelegatePda,
@@ -72,7 +81,7 @@ describe.each(getWalletProviders())('Fixed Delegation Lifecycle ($name)', ({
     expect(delegationAccount.data.amount).toBe(amount);
     expect(delegationAccount.data.expiryTs).toBe(expiryS);
 
-    // 3. Transfer 100k
+    // 3. Transfer 100k (delegatee signs, not the wallet)
     const delegateeAta = await t.createAtaWithBalance(
       t.tokenMint,
       delegatee.address,
@@ -80,16 +89,16 @@ describe.each(getWalletProviders())('Fixed Delegation Lifecycle ($name)', ({
     );
 
     const transferAmount = 100_000n;
-    await t.client.transferFixed(
+    await t.client.transferFixed({
       delegatee,
-      wallet.address,
-      userAta,
-      t.tokenMint,
+      delegator: wallet.address,
+      delegatorAta: userAta,
+      tokenMint: t.tokenMint,
       delegationPda,
-      transferAmount,
-      delegateeAta,
-      t.tokenProgram,
-    );
+      amount: transferAmount,
+      receiverAta: delegateeAta,
+      tokenProgram: t.tokenProgram,
+    });
 
     const balance = await t.rpc.getTokenAccountBalance(delegateeAta).send();
     expect(balance.value.amount).toBe(transferAmount.toString());
@@ -101,13 +110,21 @@ describe.each(getWalletProviders())('Fixed Delegation Lifecycle ($name)', ({
     expect(delegationAfterTransfer.data.amount).toBe(amount - transferAmount);
 
     // 4. Revoke delegation
-    await t.client.revokeDelegation(wallet, delegationPda);
+    const { instructions: revokeIxs } = buildRevokeDelegation({
+      authority: addressAsSigner(wallet.address),
+      delegationAccount: delegationPda,
+    });
+    await wallet.sendInstructions(revokeIxs);
     await expect(fetchFixedDelegation(t.rpc, delegationPda)).rejects.toThrow();
 
     // 5. Close multi-delegate
     const balanceBefore = await t.rpc.getBalance(wallet.address).send();
 
-    await t.client.closeMultiDelegate(wallet, t.tokenMint);
+    const { instructions: closeIxs } = await buildCloseMultiDelegate({
+      user: addressAsSigner(wallet.address),
+      tokenMint: t.tokenMint,
+    });
+    await wallet.sendInstructions(closeIxs);
 
     const accountAfter = await fetchMaybeMultiDelegate(t.rpc, multiDelegatePda);
     expect(accountAfter.exists).toBe(false);

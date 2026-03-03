@@ -12,38 +12,38 @@ describe('Subscription Lifecycle', () => {
     const planAmount = 500_000n;
 
     // 1. Merchant creates a plan
-    const { planPda } = await t.client.createPlan(
-      t.payer,
-      1n,
-      t.tokenMint,
-      planAmount,
-      1n, // 1 hour period
-      0n, // perpetual
-      [],
-      [],
-      'https://example.com/plan.json',
-    );
+    const { planPda } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 1n,
+      mint: t.tokenMint,
+      amount: planAmount,
+      periodHours: 1n,
+      endTs: 0n,
+      destinations: [],
+      pullers: [],
+      metadataUri: 'https://example.com/plan.json',
+    });
 
     // 2. Subscriber sets up and subscribes
-    const subscriber = await t.createFundedWallet();
+    const subscriber = await t.createFundedKeypair();
     const subscriberAta = await t.createAtaWithBalance(
       t.tokenMint,
       subscriber.address,
       DEFAULT_TEST_BALANCE,
     );
-    await t.client.initMultiDelegate(
-      subscriber,
-      t.tokenMint,
-      subscriberAta,
-      t.tokenProgram,
-    );
+    await t.client.initMultiDelegate({
+      owner: subscriber,
+      tokenMint: t.tokenMint,
+      userAta: subscriberAta,
+      tokenProgram: t.tokenProgram,
+    });
 
-    const { subscriptionPda } = await t.client.subscribe(
+    const { subscriptionPda } = await t.client.subscribe({
       subscriber,
-      t.payer.address,
-      1n,
-      t.tokenMint,
-    );
+      merchant: t.payerKeypair.address,
+      planId: 1n,
+      tokenMint: t.tokenMint,
+    });
 
     // Verify subscription state
     const subAfterSubscribe = (
@@ -56,21 +56,21 @@ describe('Subscription Lifecycle', () => {
     // 3. Merchant pulls funds
     const merchantAta = await t.createAtaWithBalance(
       t.tokenMint,
-      t.payer.address,
+      t.payerKeypair.address,
       0n,
     );
 
     const pullAmount = 200_000n;
-    await t.client.transferSubscription(
-      t.payerKeypair,
-      subscriber.address,
-      t.tokenMint,
+    await t.client.transferSubscription({
+      caller: t.payerKeypair,
+      delegator: subscriber.address,
+      tokenMint: t.tokenMint,
       subscriptionPda,
       planPda,
-      pullAmount,
-      merchantAta,
-      t.tokenProgram,
-    );
+      amount: pullAmount,
+      receiverAta: merchantAta,
+      tokenProgram: t.tokenProgram,
+    });
 
     const merchantBalance = await t.rpc
       .getTokenAccountBalance(merchantAta)
@@ -83,7 +83,11 @@ describe('Subscription Lifecycle', () => {
     expect(subAfterPull.amountPulledInPeriod).toBe(pullAmount);
 
     // 4. Subscriber cancels
-    await t.client.cancelSubscription(subscriber, planPda, subscriptionPda);
+    await t.client.cancelSubscription({
+      subscriber,
+      planPda,
+      subscriptionPda,
+    });
 
     const subAfterCancel = (
       await fetchSubscriptionDelegation(t.rpc, subscriptionPda)
@@ -94,21 +98,21 @@ describe('Subscription Lifecycle', () => {
     const validatorTs = await t.getValidatorTime();
     const endTs = validatorTs + 10n;
 
-    await t.client.updatePlan(
-      t.payer,
+    await t.client.updatePlan({
+      owner: t.payerKeypair,
       planPda,
-      PlanStatus.Sunset,
+      status: PlanStatus.Sunset,
       endTs,
-      'https://example.com/plan.json',
-    );
+      metadataUri: 'https://example.com/plan.json',
+    });
 
     // 6. Time-travel past endTs, then delete the plan
     await t.timeTravel(Number(endTs) + 5);
 
-    const { signature: deleteSig } = await t.client.deletePlan(
-      t.payer,
+    const { signature: deleteSig } = await t.client.deletePlan({
+      owner: t.payerKeypair,
       planPda,
-    );
+    });
     expect(deleteSig).toBeDefined();
 
     const planAfterDelete = await fetchMaybePlan(t.rpc, planPda);
@@ -120,38 +124,38 @@ describe('Subscription Lifecycle', () => {
     const puller = await t.createFundedKeypair();
 
     // 1. Merchant creates plan with a whitelisted puller
-    const { planPda } = await t.client.createPlan(
-      t.payer,
-      1n,
-      t.tokenMint,
-      1_000_000n,
-      1n,
-      0n,
-      [],
-      [puller.address],
-      'https://example.com/plan.json',
-    );
+    const { planPda } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 1n,
+      mint: t.tokenMint,
+      amount: 1_000_000n,
+      periodHours: 1n,
+      endTs: 0n,
+      destinations: [],
+      pullers: [puller.address],
+      metadataUri: 'https://example.com/plan.json',
+    });
 
     // 2. Subscriber subscribes
-    const subscriber = await t.createFundedWallet();
+    const subscriber = await t.createFundedKeypair();
     const subscriberAta = await t.createAtaWithBalance(
       t.tokenMint,
       subscriber.address,
       DEFAULT_TEST_BALANCE,
     );
-    await t.client.initMultiDelegate(
-      subscriber,
-      t.tokenMint,
-      subscriberAta,
-      t.tokenProgram,
-    );
+    await t.client.initMultiDelegate({
+      owner: subscriber,
+      tokenMint: t.tokenMint,
+      userAta: subscriberAta,
+      tokenProgram: t.tokenProgram,
+    });
 
-    const { subscriptionPda } = await t.client.subscribe(
+    const { subscriptionPda } = await t.client.subscribe({
       subscriber,
-      t.payer.address,
-      1n,
-      t.tokenMint,
-    );
+      merchant: t.payerKeypair.address,
+      planId: 1n,
+      tokenMint: t.tokenMint,
+    });
 
     // 3. Puller (not the merchant) pulls funds
     const pullerAta = await t.createAtaWithBalance(
@@ -161,16 +165,16 @@ describe('Subscription Lifecycle', () => {
     );
 
     const pullAmount = 100_000n;
-    const { signature } = await t.client.transferSubscription(
-      puller,
-      subscriber.address,
-      t.tokenMint,
+    const { signature } = await t.client.transferSubscription({
+      caller: puller,
+      delegator: subscriber.address,
+      tokenMint: t.tokenMint,
       subscriptionPda,
       planPda,
-      pullAmount,
-      pullerAta,
-      t.tokenProgram,
-    );
+      amount: pullAmount,
+      receiverAta: pullerAta,
+      tokenProgram: t.tokenProgram,
+    });
 
     expect(signature).toBeDefined();
 

@@ -1,6 +1,6 @@
 import { generateKeyPairSigner } from 'gill';
 import { describe, expect, test } from 'vitest';
-import type { Delegation } from '../src/client.ts';
+import type { Delegation } from '../src/types/delegation.ts';
 import {
   DEFAULT_TEST_BALANCE,
   initTestSuite,
@@ -14,44 +14,44 @@ describe('MultiDelegator Query Tests', () => {
 
     const userAta = await testSuite.createAtaWithBalance(
       testSuite.tokenMint,
-      testSuite.payer.address,
+      testSuite.payerKeypair.address,
       DEFAULT_TEST_BALANCE,
     );
 
-    await testSuite.client.initMultiDelegate(
-      testSuite.payer,
-      testSuite.tokenMint,
+    await testSuite.client.initMultiDelegate({
+      owner: testSuite.payerKeypair,
+      tokenMint: testSuite.tokenMint,
       userAta,
-      testSuite.tokenProgram,
-    );
+      tokenProgram: testSuite.tokenProgram,
+    });
 
     const delegatee1 = await generateKeyPairSigner();
     const delegatee2 = await generateKeyPairSigner();
 
     const currentTs = await testSuite.getValidatorTime();
 
-    await testSuite.client.createFixedDelegation(
-      testSuite.payer,
-      testSuite.tokenMint,
-      delegatee1.address,
-      0n,
-      100_000n,
-      currentTs + BigInt(ONE_HOUR_IN_SECONDS),
-    );
+    await testSuite.client.createFixedDelegation({
+      delegator: testSuite.payerKeypair,
+      tokenMint: testSuite.tokenMint,
+      delegatee: delegatee1.address,
+      nonce: 0n,
+      amount: 100_000n,
+      expiryTs: currentTs + BigInt(ONE_HOUR_IN_SECONDS),
+    });
 
-    await testSuite.client.createRecurringDelegation(
-      testSuite.payer,
-      testSuite.tokenMint,
-      delegatee2.address,
-      1n,
-      50_000n,
-      BigInt(ONE_DAY_IN_SECONDS),
-      currentTs,
-      currentTs + BigInt(ONE_DAY_IN_SECONDS * 30),
-    );
+    await testSuite.client.createRecurringDelegation({
+      delegator: testSuite.payerKeypair,
+      tokenMint: testSuite.tokenMint,
+      delegatee: delegatee2.address,
+      nonce: 1n,
+      amountPerPeriod: 50_000n,
+      periodLengthS: BigInt(ONE_DAY_IN_SECONDS),
+      startTs: currentTs,
+      expiryTs: currentTs + BigInt(ONE_DAY_IN_SECONDS * 30),
+    });
 
     const delegations = await testSuite.client.getDelegationsForWallet(
-      testSuite.payer.address,
+      testSuite.payerKeypair.address,
     );
 
     expect(delegations.length).toBe(2);

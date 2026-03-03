@@ -4,16 +4,16 @@ import { createSolanaRpc, address } from 'gill'
 import type { Address } from 'gill'
 import {
   SUBSCRIPTION_SIZE,
-  DELEGATOR_OFFSET,
   DELEGATEE_OFFSET,
-  decodeSubscriptionDelegation,
+  fetchSubscriptionsForUser,
   fetchAllMaybePlan,
+  decodeSubscriptionDelegation,
+  toEncodedAccount,
+  type RawProgramAccount,
 } from '@multidelegator/client'
 import type { SubscriptionDelegation, Plan } from '@multidelegator/client'
 import { useClusterConfig } from '@/hooks/use-cluster-config'
 import { useProgramAddress } from '@/hooks/use-token-config'
-import type { DelegationAccountRaw } from '@/lib/types'
-import { decodeBase64ToUint8Array } from '@/lib/utils'
 
 export interface PlanSubscriber {
   subscriptionAddress: string
@@ -21,24 +21,6 @@ export interface PlanSubscriber {
   amountPulledInPeriod: bigint
   currentPeriodStartTs: bigint
   expiresAtTs: bigint
-}
-
-function decodeSubscriptionFromRaw(entry: DelegationAccountRaw, progAddr: string): SubscriptionDelegation {
-  const [base64Data] = entry.account.data
-  const data = decodeBase64ToUint8Array(base64Data)
-  const encodedAccount = {
-    address: entry.pubkey,
-    data,
-    executable: entry.account.executable,
-    lamports: entry.account.lamports,
-    owner: entry.account.owner,
-    programAddress: address(progAddr),
-    space: BigInt(data.length),
-  }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const decoded = decodeSubscriptionDelegation(encodedAccount as any)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (decoded as any).data as SubscriptionDelegation
 }
 
 export interface EnrichedSubscription {
@@ -49,38 +31,10 @@ export interface EnrichedSubscription {
 
 async function fetchMySubscriptions(rpcUrl: string, walletAddress: string, progAddr: string): Promise<EnrichedSubscription[]> {
   const rpc = createSolanaRpc(rpcUrl)
+  const subs = await fetchSubscriptionsForUser(rpc, address(walletAddress), address(progAddr))
+  if (subs.length === 0) return []
 
-  const response = await rpc
-    .getProgramAccounts(address(progAddr), {
-      filters: [
-        { dataSize: BigInt(SUBSCRIPTION_SIZE) },
-        {
-          memcmp: {
-            offset: BigInt(DELEGATOR_OFFSET),
-            bytes: walletAddress,
-            encoding: 'base58',
-          },
-        },
-      ],
-      encoding: 'base64',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any)
-    .send()
-
-  const accounts = response as unknown as DelegationAccountRaw[]
-  if (accounts.length === 0) return []
-
-  const subs: { address: string; subscription: SubscriptionDelegation }[] = []
-
-  for (const entry of accounts) {
-    try {
-      subs.push({ address: entry.pubkey, subscription: decodeSubscriptionFromRaw(entry, progAddr) })
-    } catch {
-      console.warn('Failed to decode subscription account:', entry.pubkey)
-    }
-  }
-
-  const planAddresses = [...new Set(subs.map((s) => s.subscription.header.delegatee))]
+  const planAddresses = [...new Set(subs.map((s) => s.data.header.delegatee))]
   const maybePlans = await fetchAllMaybePlan(rpc, planAddresses as Address[])
 
   const planMap = new Map<string, Plan>()
@@ -89,17 +43,18 @@ async function fetchMySubscriptions(rpcUrl: string, walletAddress: string, progA
   }
 
   return subs.map((s) => ({
-    address: s.address,
-    subscription: s.subscription,
-    plan: planMap.get(s.subscription.header.delegatee) ?? null,
+    address: s.address as string,
+    subscription: s.data,
+    plan: planMap.get(s.data.header.delegatee) ?? null,
   }))
 }
 
 export async function fetchPlanSubscriptions(rpcUrl: string, planAddress: string, progAddr: string): Promise<PlanSubscriber[]> {
   const rpc = createSolanaRpc(rpcUrl)
+  const programAddress = address(progAddr)
 
   const response = await rpc
-    .getProgramAccounts(address(progAddr), {
+    .getProgramAccounts(programAddress, {
       filters: [
         { dataSize: BigInt(SUBSCRIPTION_SIZE) },
         {
@@ -115,16 +70,19 @@ export async function fetchPlanSubscriptions(rpcUrl: string, planAddress: string
     } as any)
     .send()
 
-  const accounts = response as unknown as DelegationAccountRaw[]
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const accounts = response as unknown as RawProgramAccount[]
   if (accounts.length === 0) return []
 
   const subscribers: PlanSubscriber[] = []
 
   for (const entry of accounts) {
     try {
-      const sub = decodeSubscriptionFromRaw(entry, progAddr)
+      const encoded = toEncodedAccount(entry, programAddress)
+      const decoded = decodeSubscriptionDelegation(encoded)
+      const sub = decoded.data
       subscribers.push({
-        subscriptionAddress: entry.pubkey,
+        subscriptionAddress: entry.pubkey as string,
         delegator: sub.header.delegator,
         amountPulledInPeriod: sub.amountPulledInPeriod,
         currentPeriodStartTs: sub.currentPeriodStartTs,
@@ -171,7 +129,7 @@ async function fetchSubscriberCount(rpcUrl: string, planAddress: string, progAdd
     } as any)
     .send()
 
-  return (response as unknown as DelegationAccountRaw[]).length
+  return (response as unknown as unknown[]).length
 }
 
 export function useSubscriberCount(planAddress: string | null) {

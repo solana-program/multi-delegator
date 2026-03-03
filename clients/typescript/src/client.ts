@@ -1,93 +1,51 @@
-import { findAssociatedTokenPda } from '@solana-program/token';
-import type {
-  Address,
-  Base58EncodedBytes,
-  GetAccountInfoApi,
-  GetLatestBlockhashApi,
-  GetProgramAccountsApi,
-  Instruction,
-  Rpc,
-  TransactionSigner,
-} from 'gill';
+import type { Address, Instruction, TransactionSigner } from 'gill';
+import { createTransaction, signTransactionMessageWithSigners } from 'gill';
 import {
-  createTransaction,
-  getBase64Encoder,
-  signTransactionMessageWithSigners,
-} from 'gill';
+  fetchDelegationsByDelegatee,
+  fetchDelegationsByDelegator,
+} from './accounts/delegations.js';
+import { fetchPlansForOwner } from './accounts/plans.js';
+import type { PlanStatus } from './generated/index.js';
+import { fetchMaybeMultiDelegate } from './generated/index.js';
 import {
-  DELEGATOR_OFFSET,
-  DISCRIMINATOR_OFFSET,
-  MAX_PLAN_DESTINATIONS,
-  MAX_PLAN_PULLERS,
-  METADATA_URI_LEN,
-  PLAN_OWNER_OFFSET,
-  PLAN_SIZE,
-  ZERO_ADDRESS,
-} from './constants.js';
+  buildCloseMultiDelegate,
+  buildCreateFixedDelegation,
+  buildCreateRecurringDelegation,
+  buildInitMultiDelegate,
+  buildRevokeDelegation,
+} from './instructions/delegation.js';
 import {
-  AccountDiscriminator,
-  decodeFixedDelegation,
-  decodePlan,
-  decodeRecurringDelegation,
-  decodeSubscriptionDelegation,
-  type FixedDelegation,
-  fetchMaybeMultiDelegate,
-  getCancelSubscriptionInstructionAsync,
-  getCloseMultiDelegateInstruction,
-  getCreateFixedDelegationInstruction,
-  getCreatePlanInstruction,
-  getCreateRecurringDelegationInstruction,
-  getDeletePlanInstruction,
-  getInitMultiDelegateInstruction,
-  getRevokeDelegationInstruction,
-  getSubscribeInstructionAsync,
-  getTransferFixedInstructionAsync,
-  getTransferRecurringInstructionAsync,
-  getTransferSubscriptionInstructionAsync,
-  getUpdatePlanInstruction,
-  MULTI_DELEGATOR_PROGRAM_ADDRESS,
-  type Plan,
-  type PlanStatus,
-  type RecurringDelegation,
-  type SubscriptionDelegation,
-} from './generated/index.js';
+  buildCreatePlan,
+  buildDeletePlan,
+  buildUpdatePlan,
+} from './instructions/plan.js';
 import {
-  getDelegationPDA,
-  getMultiDelegatePDA,
-  getPlanPDA,
-  getSubscriptionPDA,
-} from './pdas.js';
-import { addressAsSigner, type Wallet } from './wallet.js';
+  buildCancelSubscription,
+  buildSubscribe,
+} from './instructions/subscription.js';
+import {
+  buildTransferFixed,
+  buildTransferRecurring,
+  buildTransferSubscription,
+} from './instructions/transfer.js';
+import { getMultiDelegatePDA } from './pdas.js';
+import type { SolanaClient, TransactionResult } from './types/common.js';
+import type { Delegation } from './types/delegation.js';
+import type { PlanWithAddress } from './types/plan.js';
 
-type SolanaClient = {
-  rpc: Rpc<GetAccountInfoApi & GetLatestBlockhashApi & GetProgramAccountsApi>;
-  sendAndConfirmTransaction: (
-    tx: Awaited<ReturnType<typeof signTransactionMessageWithSigners>>,
-  ) => Promise<string>;
-};
-
-export type Delegation =
-  | { kind: 'fixed'; address: Address; data: FixedDelegation }
-  | { kind: 'recurring'; address: Address; data: RecurringDelegation }
-  | {
-      kind: 'subscription';
-      address: Address;
-      data: SubscriptionDelegation;
-    };
-
+/**
+ * High-level client that composes instruction builders and transaction sending.
+ * For lower-level control, use the build* instruction builders and fetch* account fetchers directly.
+ */
 export class MultiDelegatorClient {
-  constructor(public readonly client: SolanaClient) {}
-
-  private async sendViaWallet(
-    wallet: Wallet,
-    instructions: Instruction[],
-  ): Promise<string> {
-    return wallet.sendInstructions(instructions);
+  private readonly client: SolanaClient;
+  constructor(client: SolanaClient) {
+    this.client = client;
   }
 
   private async buildAndSendTransaction(
     instructions: Instruction[],
-    signers: TransactionSigner[],
+    feePayer: TransactionSigner,
   ): Promise<string> {
     const { value: latestBlockhash } = await this.client.rpc
       .getLatestBlockhash()
@@ -95,514 +53,249 @@ export class MultiDelegatorClient {
 
     const transactionMessage = createTransaction({
       instructions,
-      feePayer: signers[0],
+      feePayer,
       latestBlockhash,
     });
     const signedTransaction =
       await signTransactionMessageWithSigners(transactionMessage);
-    const signature =
-      await this.client.sendAndConfirmTransaction(signedTransaction);
-    return signature;
+    return this.client.sendAndConfirmTransaction(signedTransaction);
   }
 
-  async initMultiDelegate(
-    owner: Wallet,
-    tokenMint: Address,
-    userAta: Address,
-    tokenProgram: Address,
-  ): Promise<{ signature: string }> {
-    const ownerAddress = owner.address;
-    const [multiDelegate] = await getMultiDelegatePDA(ownerAddress, tokenMint);
-
-    const instruction = getInitMultiDelegateInstruction({
-      owner: addressAsSigner(ownerAddress),
-      multiDelegate,
-      tokenMint,
-      userAta,
-      tokenProgram,
-    });
-
-    const sig = await this.sendViaWallet(owner, [instruction]);
-    return { signature: sig };
-  }
-
-  async closeMultiDelegate(
-    user: Wallet,
-    tokenMint: Address,
-  ): Promise<{ signature: string }> {
-    const [multiDelegate] = await getMultiDelegatePDA(user.address, tokenMint);
-
-    const instruction = getCloseMultiDelegateInstruction({
-      user: addressAsSigner(user.address),
-      multiDelegate,
-    });
-
-    const sig = await this.sendViaWallet(user, [instruction]);
-    return { signature: sig };
-  }
-
-  async createFixedDelegation(
-    delegator: Wallet,
-    tokenMint: Address,
-    delegatee: Address,
-    nonce: number | bigint,
-    amount: number | bigint,
-    expiryTs: number | bigint,
-  ): Promise<{ signature: string }> {
-    const user = delegator.address;
-    const [multiDelegate] = await getMultiDelegatePDA(user, tokenMint);
-    const [delegationAccount] = await getDelegationPDA(
-      multiDelegate,
-      user,
-      delegatee,
-      nonce,
+  /** Initialize a MultiDelegate PDA for the owner's token account. */
+  async initMultiDelegate(params: {
+    owner: TransactionSigner;
+    tokenMint: Address;
+    userAta: Address;
+    tokenProgram: Address;
+  }): Promise<TransactionResult> {
+    const { instructions } = await buildInitMultiDelegate(params);
+    const signature = await this.buildAndSendTransaction(
+      instructions,
+      params.owner,
     );
-
-    const instruction = getCreateFixedDelegationInstruction({
-      delegator: addressAsSigner(user),
-      multiDelegate,
-      delegationAccount,
-      delegatee,
-      fixedDelegation: {
-        nonce,
-        amount,
-        expiryTs,
-      },
-    });
-
-    const sig = await this.sendViaWallet(delegator, [instruction]);
-    return { signature: sig };
+    return { signature };
   }
 
-  async createRecurringDelegation(
-    delegator: Wallet,
-    tokenMint: Address,
-    delegatee: Address,
-    nonce: number | bigint,
-    amountPerPeriod: number | bigint,
-    periodLengthS: number | bigint,
-    startTs: number | bigint,
-    expiryTs: number | bigint,
-  ): Promise<{ signature: string }> {
-    const user = delegator.address;
-    const [multiDelegate] = await getMultiDelegatePDA(user, tokenMint);
-    const [delegationAccount] = await getDelegationPDA(
-      multiDelegate,
-      user,
-      delegatee,
-      nonce,
+  /** Close a MultiDelegate PDA, returning rent to the user. */
+  async closeMultiDelegate(params: {
+    user: TransactionSigner;
+    tokenMint: Address;
+  }): Promise<TransactionResult> {
+    const { instructions } = await buildCloseMultiDelegate(params);
+    const signature = await this.buildAndSendTransaction(
+      instructions,
+      params.user,
     );
-
-    const instruction = getCreateRecurringDelegationInstruction({
-      delegator: addressAsSigner(user),
-      multiDelegate,
-      delegationAccount,
-      delegatee,
-      recurringDelegation: {
-        nonce,
-        amountPerPeriod,
-        periodLengthS,
-        startTs,
-        expiryTs,
-      },
-    });
-
-    const sig = await this.sendViaWallet(delegator, [instruction]);
-    return { signature: sig };
+    return { signature };
   }
 
-  async revokeDelegation(
-    delegator: Wallet,
-    delegationAccount: Address,
-  ): Promise<{ signature: string }> {
-    const instruction = getRevokeDelegationInstruction({
-      authority: addressAsSigner(delegator.address),
-      delegationAccount,
-    });
-
-    const sig = await this.sendViaWallet(delegator, [instruction]);
-    return { signature: sig };
-  }
-
-  private async transfer(
-    kind: 'fixed' | 'recurring',
-    delegatee: TransactionSigner,
-    delegator: Address,
-    delegatorAta: Address,
-    tokenMint: Address,
-    delegationPda: Address,
-    amount: number | bigint,
-    receiverAta: Address,
-    tokenProgram: Address,
-  ): Promise<{ signature: string }> {
-    const [multiDelegate] = await getMultiDelegatePDA(delegator, tokenMint);
-
-    const transferParams = {
-      delegationPda,
-      multiDelegate,
-      delegatorAta,
-      receiverAta,
-      tokenProgram,
-      delegatee,
-      transferData: {
-        amount,
-        delegator,
-        mint: tokenMint,
-      },
-    };
-
-    const instruction =
-      kind === 'fixed'
-        ? await getTransferFixedInstructionAsync(transferParams)
-        : await getTransferRecurringInstructionAsync(transferParams);
-
-    const sig = await this.buildAndSendTransaction([instruction], [delegatee]);
-    return { signature: sig };
-  }
-
-  async transferFixed(
-    delegatee: TransactionSigner,
-    delegator: Address,
-    delegatorAta: Address,
-    tokenMint: Address,
-    delegationPda: Address,
-    amount: number | bigint,
-    receiverAta: Address,
-    tokenProgram: Address,
-  ): Promise<{ signature: string }> {
-    return this.transfer(
-      'fixed',
-      delegatee,
-      delegator,
-      delegatorAta,
-      tokenMint,
-      delegationPda,
-      amount,
-      receiverAta,
-      tokenProgram,
+  /** Create a fixed (one-time) delegation. */
+  async createFixedDelegation(params: {
+    delegator: TransactionSigner;
+    tokenMint: Address;
+    delegatee: Address;
+    nonce: number | bigint;
+    amount: number | bigint;
+    expiryTs: number | bigint;
+  }): Promise<TransactionResult> {
+    const { instructions } = await buildCreateFixedDelegation(params);
+    const signature = await this.buildAndSendTransaction(
+      instructions,
+      params.delegator,
     );
+    return { signature };
   }
 
-  async transferRecurring(
-    delegatee: TransactionSigner,
-    delegator: Address,
-    delegatorAta: Address,
-    tokenMint: Address,
-    delegationPda: Address,
-    amount: number | bigint,
-    receiverAta: Address,
-    tokenProgram: Address,
-  ): Promise<{ signature: string }> {
-    return this.transfer(
-      'recurring',
-      delegatee,
-      delegator,
-      delegatorAta,
-      tokenMint,
-      delegationPda,
-      amount,
-      receiverAta,
-      tokenProgram,
+  /** Create a recurring delegation with periodic allowance. */
+  async createRecurringDelegation(params: {
+    delegator: TransactionSigner;
+    tokenMint: Address;
+    delegatee: Address;
+    nonce: number | bigint;
+    amountPerPeriod: number | bigint;
+    periodLengthS: number | bigint;
+    startTs: number | bigint;
+    expiryTs: number | bigint;
+  }): Promise<TransactionResult> {
+    const { instructions } = await buildCreateRecurringDelegation(params);
+    const signature = await this.buildAndSendTransaction(
+      instructions,
+      params.delegator,
     );
+    return { signature };
   }
 
-  async getDelegationsForWallet(wallet: Address): Promise<Delegation[]> {
-    const response = await this.client.rpc
-      .getProgramAccounts(MULTI_DELEGATOR_PROGRAM_ADDRESS, {
-        encoding: 'base64',
-        filters: [
-          {
-            memcmp: {
-              offset: BigInt(DELEGATOR_OFFSET),
-              bytes: wallet as string as Base58EncodedBytes,
-              encoding: 'base58',
-            },
-          },
-        ],
-      })
-      .send();
-
-    const delegations: Delegation[] = [];
-    const base64Encoder = getBase64Encoder();
-
-    for (const account of response) {
-      const base64Data = account.account.data[0];
-      const data = base64Encoder.encode(base64Data);
-      const kind = data[DISCRIMINATOR_OFFSET];
-
-      const encodedAccount = {
-        address: account.pubkey,
-        data,
-        executable: account.account.executable,
-        lamports: account.account.lamports,
-        programAddress: account.account.owner,
-        space: account.account.space,
-      };
-
-      switch (kind) {
-        case AccountDiscriminator.FixedDelegation: {
-          const decoded = decodeFixedDelegation(encodedAccount);
-          delegations.push({
-            kind: 'fixed',
-            address: account.pubkey,
-            data: decoded.data,
-          });
-          break;
-        }
-        case AccountDiscriminator.RecurringDelegation: {
-          const decoded = decodeRecurringDelegation(encodedAccount);
-          delegations.push({
-            kind: 'recurring',
-            address: account.pubkey,
-            data: decoded.data,
-          });
-          break;
-        }
-        case AccountDiscriminator.SubscriptionDelegation: {
-          const decoded = decodeSubscriptionDelegation(encodedAccount);
-          delegations.push({
-            kind: 'subscription',
-            address: account.pubkey,
-            data: decoded.data,
-          });
-          break;
-        }
-      }
-    }
-
-    return delegations;
+  /** Revoke (close) a delegation account, returning rent to the delegator. */
+  async revokeDelegation(params: {
+    authority: TransactionSigner;
+    delegationAccount: Address;
+  }): Promise<TransactionResult> {
+    const { instructions } = buildRevokeDelegation(params);
+    const signature = await this.buildAndSendTransaction(
+      instructions,
+      params.authority,
+    );
+    return { signature };
   }
 
-  /**
-   * Check if the MultiDelegate PDA is initialized for a user and token mint.
-   * The MultiDelegate account must be initialized before creating delegations.
-   * Initialization also sets up SPL token delegation to the PDA.
-   *
-   * @param user - User's wallet address
-   * @param tokenMint - Token mint address
-   * @returns Object with initialized status and PDA address
-   */
+  /** Transfer tokens from a fixed delegation. */
+  async transferFixed(params: {
+    delegatee: TransactionSigner;
+    delegator: Address;
+    delegatorAta: Address;
+    tokenMint: Address;
+    delegationPda: Address;
+    amount: number | bigint;
+    receiverAta: Address;
+    tokenProgram: Address;
+  }): Promise<TransactionResult> {
+    const { instructions } = await buildTransferFixed(params);
+    const signature = await this.buildAndSendTransaction(
+      instructions,
+      params.delegatee,
+    );
+    return { signature };
+  }
+
+  /** Transfer tokens from a recurring delegation. */
+  async transferRecurring(params: {
+    delegatee: TransactionSigner;
+    delegator: Address;
+    delegatorAta: Address;
+    tokenMint: Address;
+    delegationPda: Address;
+    amount: number | bigint;
+    receiverAta: Address;
+    tokenProgram: Address;
+  }): Promise<TransactionResult> {
+    const { instructions } = await buildTransferRecurring(params);
+    const signature = await this.buildAndSendTransaction(
+      instructions,
+      params.delegatee,
+    );
+    return { signature };
+  }
+
+  /** Transfer tokens from a subscription delegation. */
+  async transferSubscription(params: {
+    caller: TransactionSigner;
+    delegator: Address;
+    tokenMint: Address;
+    subscriptionPda: Address;
+    planPda: Address;
+    amount: number | bigint;
+    receiverAta: Address;
+    tokenProgram: Address;
+  }): Promise<TransactionResult> {
+    const { instructions } = await buildTransferSubscription(params);
+    const signature = await this.buildAndSendTransaction(
+      instructions,
+      params.caller,
+    );
+    return { signature };
+  }
+
+  /** Check if the MultiDelegate PDA is initialized for a user and token mint. */
   async isMultiDelegateInitialized(
     user: Address,
     tokenMint: Address,
   ): Promise<{ initialized: boolean; pda: Address }> {
     const [pda] = await getMultiDelegatePDA(user, tokenMint);
     const account = await fetchMaybeMultiDelegate(this.client.rpc, pda);
-    return { initialized: account !== null, pda };
+    return { initialized: account.exists, pda };
   }
 
-  async createPlan(
-    owner: Wallet,
-    planId: number | bigint,
-    mint: Address,
-    amount: number | bigint,
-    periodHours: number | bigint,
-    endTs: number | bigint,
-    destinations: Address[],
-    pullers: Address[],
-    metadataUri: string,
-  ): Promise<{ signature: string; planPda: Address }> {
-    if (destinations.length > MAX_PLAN_DESTINATIONS)
-      throw new Error(
-        `destinations must have at most ${MAX_PLAN_DESTINATIONS} entries`,
-      );
-    if (pullers.length > MAX_PLAN_PULLERS)
-      throw new Error(`pullers must have at most ${MAX_PLAN_PULLERS} entries`);
-
-    const uriBytes = new TextEncoder().encode(metadataUri);
-    if (uriBytes.length > METADATA_URI_LEN)
-      throw new Error(`metadataUri exceeds ${METADATA_URI_LEN} bytes`);
-
-    const paddedDestinations: Address[] = Array.from(
-      { length: MAX_PLAN_DESTINATIONS },
-      (_, i) => destinations[i] || ZERO_ADDRESS,
+  /** Create a subscription plan. */
+  async createPlan(params: {
+    owner: TransactionSigner;
+    planId: number | bigint;
+    mint: Address;
+    amount: number | bigint;
+    periodHours: number | bigint;
+    endTs: number | bigint;
+    destinations: Address[];
+    pullers: Address[];
+    metadataUri: string;
+  }): Promise<TransactionResult & { planPda: Address }> {
+    const { instructions, planPda } = await buildCreatePlan(params);
+    const signature = await this.buildAndSendTransaction(
+      instructions,
+      params.owner,
     );
-
-    const paddedPullers: Address[] = Array.from(
-      { length: MAX_PLAN_PULLERS },
-      (_, i) => pullers[i] || ZERO_ADDRESS,
-    );
-
-    const [planPda] = await getPlanPDA(owner.address, planId);
-
-    const instruction = getCreatePlanInstruction({
-      merchant: addressAsSigner(owner.address),
-      planPda,
-      tokenMint: mint,
-      planData: {
-        planId,
-        mint,
-        amount,
-        periodHours,
-        endTs,
-        destinations: paddedDestinations,
-        pullers: paddedPullers,
-        metadataUri,
-      },
-    });
-
-    const sig = await this.sendViaWallet(owner, [instruction]);
-    return { signature: sig, planPda };
+    return { signature, planPda };
   }
 
-  async updatePlan(
-    owner: Wallet,
-    planPda: Address,
-    status: PlanStatus,
-    endTs: number | bigint,
-    metadataUri: string,
-    pullers: Address[] = [],
-  ): Promise<{ signature: string }> {
-    const uriBytes = new TextEncoder().encode(metadataUri);
-    if (uriBytes.length > METADATA_URI_LEN)
-      throw new Error(`metadataUri exceeds ${METADATA_URI_LEN} bytes`);
-
-    if (pullers.length > MAX_PLAN_PULLERS)
-      throw new Error(`pullers exceeds max of ${MAX_PLAN_PULLERS}`);
-
-    const paddedPullers = [
-      ...pullers,
-      ...Array(MAX_PLAN_PULLERS - pullers.length).fill(ZERO_ADDRESS),
-    ] as [Address, Address, Address, Address];
-
-    const instruction = getUpdatePlanInstruction({
-      owner: addressAsSigner(owner.address),
-      planPda,
-      updatePlanData: { status, endTs, pullers: paddedPullers, metadataUri },
-    });
-
-    const signature = await this.sendViaWallet(owner, [instruction]);
+  /** Update a subscription plan's status, endTs, metadata, or pullers. */
+  async updatePlan(params: {
+    owner: TransactionSigner;
+    planPda: Address;
+    status: PlanStatus;
+    endTs: number | bigint;
+    metadataUri: string;
+    pullers?: Address[];
+  }): Promise<TransactionResult> {
+    const { instructions } = buildUpdatePlan(params);
+    const signature = await this.buildAndSendTransaction(
+      instructions,
+      params.owner,
+    );
     return { signature };
   }
 
-  async subscribe(
-    subscriber: Wallet,
-    merchant: Address,
-    planId: number | bigint,
-    tokenMint: Address,
-  ): Promise<{ signature: string; subscriptionPda: Address }> {
-    const [planPda, planBump] = await getPlanPDA(merchant, planId);
-    const [multiDelegatePda] = await getMultiDelegatePDA(
-      subscriber.address,
-      tokenMint,
+  /** Subscribe to a plan. */
+  async subscribe(params: {
+    subscriber: TransactionSigner;
+    merchant: Address;
+    planId: number | bigint;
+    tokenMint: Address;
+  }): Promise<TransactionResult & { subscriptionPda: Address }> {
+    const { instructions, subscriptionPda } = await buildSubscribe(params);
+    const signature = await this.buildAndSendTransaction(
+      instructions,
+      params.subscriber,
     );
-    const [subscriptionPda] = await getSubscriptionPDA(
-      planPda,
-      subscriber.address,
-    );
-    const instruction = await getSubscribeInstructionAsync({
-      subscriber: addressAsSigner(subscriber.address),
-      merchant,
-      planPda,
-      subscriptionPda,
-      multiDelegatePda,
-      subscribeData: {
-        planId,
-        planBump,
-      },
-    });
-
-    const signature = await this.sendViaWallet(subscriber, [instruction]);
     return { signature, subscriptionPda };
   }
 
-  async cancelSubscription(
-    subscriber: Wallet,
-    planPda: Address,
-    subscriptionPda: Address,
-  ): Promise<{ signature: string }> {
-    const instruction = await getCancelSubscriptionInstructionAsync({
-      subscriber: addressAsSigner(subscriber.address),
-      planPda,
-      subscriptionPda,
-    });
-
-    const signature = await this.sendViaWallet(subscriber, [instruction]);
-    return { signature };
-  }
-
-  async transferSubscription(
-    caller: TransactionSigner,
-    delegator: Address,
-    tokenMint: Address,
-    subscriptionPda: Address,
-    planPda: Address,
-    amount: number | bigint,
-    receiverAta: Address,
-    tokenProgram: Address,
-  ): Promise<{ signature: string }> {
-    const [multiDelegate] = await getMultiDelegatePDA(delegator, tokenMint);
-    const [delegatorAta] = await findAssociatedTokenPda({
-      mint: tokenMint,
-      owner: delegator,
-      tokenProgram,
-    });
-
-    const instruction = await getTransferSubscriptionInstructionAsync({
-      subscriptionPda,
-      planPda,
-      multiDelegate,
-      delegatorAta,
-      receiverAta,
-      caller,
-      tokenProgram,
-      transferData: {
-        amount,
-        delegator,
-        mint: tokenMint,
-      },
-    });
-
+  /** Cancel a subscription. */
+  async cancelSubscription(params: {
+    subscriber: TransactionSigner;
+    planPda: Address;
+    subscriptionPda: Address;
+  }): Promise<TransactionResult> {
+    const { instructions } = await buildCancelSubscription(params);
     const signature = await this.buildAndSendTransaction(
-      [instruction],
-      [caller],
+      instructions,
+      params.subscriber,
     );
     return { signature };
   }
 
-  async deletePlan(
-    owner: Wallet,
-    planPda: Address,
-  ): Promise<{ signature: string }> {
-    const instruction = getDeletePlanInstruction({
-      owner: addressAsSigner(owner.address),
-      planPda,
-    });
-    const signature = await this.sendViaWallet(owner, [instruction]);
+  /** Delete an expired plan, recovering rent. */
+  async deletePlan(params: {
+    owner: TransactionSigner;
+    planPda: Address;
+  }): Promise<TransactionResult> {
+    const { instructions } = buildDeletePlan(params);
+    const signature = await this.buildAndSendTransaction(
+      instructions,
+      params.owner,
+    );
     return { signature };
   }
 
-  async getPlansForOwner(
-    owner: Address,
-  ): Promise<Array<{ address: Address; data: Plan }>> {
-    const response = await this.client.rpc
-      .getProgramAccounts(MULTI_DELEGATOR_PROGRAM_ADDRESS, {
-        encoding: 'base64',
-        filters: [
-          { dataSize: BigInt(PLAN_SIZE) },
-          {
-            memcmp: {
-              offset: BigInt(PLAN_OWNER_OFFSET),
-              bytes: owner as string as Base58EncodedBytes,
-              encoding: 'base58',
-            },
-          },
-        ],
-      })
-      .send();
+  /** Fetch all delegations (fixed, recurring, subscription) where wallet is the delegator. */
+  async getDelegationsForWallet(wallet: Address): Promise<Delegation[]> {
+    return fetchDelegationsByDelegator(this.client.rpc, wallet);
+  }
 
-    const base64Encoder = getBase64Encoder();
-    return response.map((account) => {
-      const data = base64Encoder.encode(account.account.data[0]);
-      const decoded = decodePlan({
-        address: account.pubkey,
-        data,
-        executable: account.account.executable,
-        lamports: account.account.lamports,
-        programAddress: account.account.owner,
-        space: account.account.space,
-      });
-      return { address: account.pubkey, data: decoded.data };
-    });
+  /** Fetch all delegations (fixed, recurring, subscription) where wallet is the delegatee. */
+  async getDelegationsAsDelegatee(wallet: Address): Promise<Delegation[]> {
+    return fetchDelegationsByDelegatee(this.client.rpc, wallet);
+  }
+
+  /** Fetch all plans owned by the given address. */
+  async getPlansForOwner(owner: Address): Promise<PlanWithAddress[]> {
+    return fetchPlansForOwner(this.client.rpc, owner);
   }
 }

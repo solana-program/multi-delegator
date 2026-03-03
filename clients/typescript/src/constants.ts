@@ -33,7 +33,9 @@ export const PLAN_SEED = 'plan';
 export const SUBSCRIPTION_SEED = 'subscription';
 export const EVENT_AUTHORITY_SEED = 'event_authority';
 
+// Plan: discriminator(1) + owner(32) + bump(1) + status(1) + planData(448)
 export const PLAN_SIZE = 483;
+// Subscription: header(67) + amountPulledInPeriod(8) + currentPeriodStartTs(8) + expiresAtTs(8) + planPda(32)
 export const SUBSCRIPTION_SIZE = 123;
 
 export const PLAN_OWNER_OFFSET = 1;

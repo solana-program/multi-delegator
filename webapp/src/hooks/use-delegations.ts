@@ -2,17 +2,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useWalletUi } from '@wallet-ui/react'
 import { createSolanaRpc, address } from 'gill'
 import {
-  DISCRIMINATOR_OFFSET,
-  DELEGATOR_OFFSET,
-  DELEGATEE_OFFSET,
-  decodeFixedDelegation,
-  decodeRecurringDelegation,
-  AccountDiscriminator,
+  fetchDelegationsByDelegator,
+  fetchDelegationsByDelegatee,
+  type Delegation,
 } from '@multidelegator/client'
 import { useClusterConfig } from '@/hooks/use-cluster-config'
 import { useProgramAddress } from '@/hooks/use-token-config'
-import type { DelegationAccountRaw } from '@/lib/types'
-import { decodeBase64ToUint8Array } from '@/lib/utils'
 
 export interface DelegationData {
   header: {
@@ -42,6 +37,24 @@ export interface GroupedDelegations {
 
 export type DelegationRole = 'delegator' | 'delegatee'
 
+function toDelegationItem(d: Delegation): DelegationItem | null {
+  if (d.kind === 'fixed') {
+    return {
+      address: d.address,
+      type: 'Fixed',
+      data: { ...d.data, currentPeriodStartTs: null } as unknown as DelegationData,
+    }
+  }
+  if (d.kind === 'recurring') {
+    return {
+      address: d.address,
+      type: 'Recurring',
+      data: d.data as unknown as DelegationData,
+    }
+  }
+  return null
+}
+
 async function fetchDelegationsByRole(
   rpcUrl: string,
   walletAddress: string,
@@ -49,68 +62,9 @@ async function fetchDelegationsByRole(
   progAddr: string,
 ): Promise<GroupedDelegations> {
   const rpc = createSolanaRpc(rpcUrl)
-  const offset = role === 'delegator' ? DELEGATOR_OFFSET : DELEGATEE_OFFSET
-
-  const response = await rpc
-    .getProgramAccounts(address(progAddr), {
-      filters: [
-        {
-          memcmp: {
-            offset: BigInt(offset),
-            bytes: walletAddress,
-            encoding: 'base58',
-          },
-        },
-      ],
-      encoding: 'base64',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any)
-    .send()
-
-  const accounts = response as unknown as DelegationAccountRaw[]
-  const all: DelegationItem[] = []
-
-  for (const accountEntry of accounts) {
-    try {
-      const [base64Data] = accountEntry.account.data
-      const data = decodeBase64ToUint8Array(base64Data)
-      const kind = data[DISCRIMINATOR_OFFSET]
-
-      const encodedAccount = {
-        address: accountEntry.pubkey,
-        data: data,
-        executable: accountEntry.account.executable,
-        lamports: accountEntry.account.lamports,
-        owner: accountEntry.account.owner,
-        rentEpoch: accountEntry.account.rentEpoch,
-        programAddress: address(progAddr),
-        space: BigInt(data.length),
-      }
-
-      if (kind === AccountDiscriminator.FixedDelegation) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const decoded = decodeFixedDelegation(encodedAccount as any)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const decodedData = (decoded as any).data
-        all.push({
-          address: accountEntry.pubkey,
-          type: 'Fixed',
-          data: { ...decodedData, currentPeriodStartTs: null } as DelegationData,
-        })
-      } else if (kind === AccountDiscriminator.RecurringDelegation) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const decoded = decodeRecurringDelegation(encodedAccount as any)
-        all.push({
-          address: accountEntry.pubkey,
-          type: 'Recurring',
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          data: (decoded as any).data as DelegationData,
-        })
-      }
-    } catch {
-      console.warn('Failed to decode delegation account:', accountEntry.pubkey)
-    }
-  }
+  const fetchFn = role === 'delegator' ? fetchDelegationsByDelegator : fetchDelegationsByDelegatee
+  const delegations = await fetchFn(rpc, address(walletAddress), address(progAddr))
+  const all = delegations.map(toDelegationItem).filter((d): d is DelegationItem => d !== null)
 
   return {
     fixed: all.filter((d) => d.type === 'Fixed'),
