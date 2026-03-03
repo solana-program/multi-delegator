@@ -2,6 +2,8 @@
 
 Solana program and clients for managed token delegations on SPL Token and Token-2022.
 
+> **SECURITY NOTICE**: This program has not been audited. Use at your own risk. Not recommended for production use with real funds without a thorough security review.
+
 ## Overview
 
 For each `(user, mint)` pair, the program creates a **Multi Delegate Authority (MDA)** PDA and sets it as the single delegate on the user's token account with `u64::MAX` approval. The MDA can only transfer tokens when a Delegation PDA authorizes it, making the system as secure as traditional approval-based delegations while enabling multiple simultaneous delegations from a single token account.
@@ -75,7 +77,7 @@ multi-delegator/
 ## Quick Start
 
 ```bash
-git clone git@github.com:Moonsong-Labs/multi-delegator.git
+git clone git@github.com:solana-program/multi-delegator.git
 cd multi-delegator
 just setup
 just build
