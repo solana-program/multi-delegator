@@ -14,4 +14,7 @@ environments:
       rpc_api_url: https://api.devnet.solana.com
       payer_keypair_json: ~/.config/solana/id.json
       authority_keypair_json: ~/.config/solana/id.json
-
+  mainnet:
+      network_id: mainnet
+      rpc_api_url: https://api.mainnet-beta.solana.com
+      squads_vault_address: "<SQUADS_VAULT_ADDRESS>"
