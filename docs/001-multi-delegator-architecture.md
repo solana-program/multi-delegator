@@ -164,7 +164,7 @@ Delegates discover their delegations via `getProgramAccounts` with `memcmp` filt
 ```typescript
 // Delegatee discovers Bob's delegations:
 getProgramAccounts(PROGRAM_ID, {
-  filters: [{ memcmp: { offset: 35, bytes: bobPubkey } }],
+  filters: [{ memcmp: { offset: DELEGATEE_OFFSET, bytes: bobPubkey } }],
 });
 ```
 
@@ -485,12 +485,3 @@ Executes a transfer for a recurring delegation.
 7. Execute transfer via MultiDelegate
 8. Emit `RecurringTransferEvent` via self-CPI
 
----
-
-## Resolved Questions
-
-1. **Delegator-only vs. Anyone Transfers**: Resolved in ADR-002. Subscription plans support configurable pull authorization via the `pullers[4]` array, allowing the plan owner plus up to 4 whitelisted addresses to execute transfers. Direct delegations (ADR-001) remain delegatee-only.
-
-2. **Whitelist of Authorized Callers**: Resolved in ADR-002. The `pullers[4]` array on Plan accounts provides a whitelist of authorized callers for subscription transfers. The plan owner is always implicitly authorized.
-
-3. **Whitelist of Authorized Receivers**: Resolved in ADR-002. The `destinations[4]` array on Plan accounts whitelists where pulled funds can be sent. If all slots are zero, any destination is valid. Destinations are immutable after plan creation.

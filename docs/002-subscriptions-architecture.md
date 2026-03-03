@@ -170,6 +170,11 @@ The Plan PDA is the **live source of truth** for subscription terms. When a subs
 - `pullers` - authorized caller addresses
 - `mint` - token mint for validation
 
+**The Plan is Just a Reusable container for terms:**
+- Plan = Published, reusable terms that delegators can subscribe to
+- Subscribe = Create a Delegation PDA with a reference to the Plan's terms
+- After subscription, the Delegation works exactly like ADR-001 delegations
+
 **Subscription Uses a Dedicated Transfer Instruction:**
 - Direct delegations use `transfer_fixed` or `transfer_recurring`
 - Subscriptions use `transfer_subscription`, which loads both the Plan PDA and SubscriptionDelegation PDA
