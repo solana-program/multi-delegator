@@ -11,19 +11,27 @@ use crate::{
     AccountCheck, MultiDelegatorError, ProgramAccount, SignerAccount, WritableAccount,
 };
 
+/// Instruction data payload for updating a plan's mutable fields.
 #[repr(C, packed)]
 #[derive(Debug, Clone, CodamaType)]
 pub struct UpdatePlanData {
+    /// New plan status (see [`PlanStatus`]). Setting to
+    /// `Sunset` prevents new subscriptions and requires a non-zero `end_ts`.
     pub status: u8,
+    /// New end timestamp. `0` means no end (only valid for active plans).
     pub end_ts: i64,
-    pub pullers: [Address; 4], // MAX_PULLERS
+    /// Updated puller whitelist.
+    pub pullers: [Address; 4],
+    /// Updated metadata URI.
     #[codama(type = fixed_size(string(utf8), 128))]
     pub metadata_uri: [u8; 128],
 }
 
 impl UpdatePlanData {
+    /// Serialized size in bytes.
     pub const LEN: usize = size_of::<Self>();
 
+    /// Zero-copy deserialize from raw instruction bytes.
     pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
         if data.len() != Self::LEN {
             return Err(MultiDelegatorError::InvalidInstructionData.into());
@@ -31,6 +39,7 @@ impl UpdatePlanData {
         Ok(unsafe { &*transmute::<*const u8, *const Self>(data.as_ptr()) })
     }
 
+    /// Validates update data against the current clock time.
     pub fn validate(&self, current_time: i64) -> Result<(), MultiDelegatorError> {
         PlanStatus::try_from(self.status).map_err(|_| MultiDelegatorError::InvalidPlanStatus)?;
         if self.end_ts != 0 && self.end_ts <= current_time {
@@ -40,6 +49,7 @@ impl UpdatePlanData {
     }
 }
 
+/// Validated accounts for the [`UpdatePlan`](crate::MultiDelegatorInstruction::UpdatePlan) instruction.
 pub struct UpdatePlanAccounts<'a> {
     pub owner: &'a AccountView,
     pub plan_pda: &'a AccountView,
@@ -61,8 +71,12 @@ impl<'a> TryFrom<&'a [AccountView]> for UpdatePlanAccounts<'a> {
     }
 }
 
+/// Instruction discriminator byte for `UpdatePlan`.
 pub const DISCRIMINATOR: &u8 = &8;
 
+/// Updates the mutable fields of an existing [`Plan`].
+///
+/// Only the plan owner may call this. Plans in `Sunset` status are immutable.
 pub fn process(accounts: &[AccountView], data: &UpdatePlanData) -> ProgramResult {
     let accounts = UpdatePlanAccounts::try_from(accounts)?;
     let account_data = &mut accounts.plan_pda.try_borrow_mut()?;

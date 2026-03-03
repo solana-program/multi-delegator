@@ -4,16 +4,22 @@ use pinocchio::Address;
 
 use crate::event_engine::{EventDiscriminator, EventDiscriminators, EventSerialize};
 
+/// Emitted when a subscriber cancels their subscription.
 #[repr(C, packed)]
 pub struct SubscriptionCancelledEvent {
+    /// The plan PDA the subscription belongs to.
     pub plan: Address,
+    /// The subscriber's wallet address.
     pub subscriber: Address,
+    /// Unix timestamp when the subscription will expire (end of current billing period).
     pub expires_at_ts: i64,
 }
 
 impl SubscriptionCancelledEvent {
+    /// Wire-format payload size (excluding tag and discriminator).
     pub const DATA_LEN: usize = size_of::<Self>();
 
+    /// Constructs a new event.
     pub fn new(plan: Address, subscriber: Address, expires_at_ts: i64) -> Self {
         Self {
             plan,

@@ -4,22 +4,34 @@ use pinocchio::Address;
 
 use crate::event_engine::{EventDiscriminator, EventDiscriminators, EventSerialize};
 
+/// Emitted when a transfer is executed against a subscription delegation.
 #[repr(C, packed)]
 pub struct SubscriptionTransferEvent {
+    /// The subscription delegation PDA.
     pub subscription: Address,
+    /// The plan PDA this subscription belongs to.
     pub plan: Address,
+    /// The subscriber (token owner) whose ATA was debited.
     pub delegator: Address,
+    /// The SPL token mint.
     pub mint: Address,
+    /// Token amount transferred.
     pub amount: u64,
+    /// Start of the billing period during which the transfer occurred.
     pub period_start_ts: i64,
+    /// End of the billing period during which the transfer occurred.
     pub period_end_ts: i64,
+    /// Cumulative amount pulled so far in this billing period (including this transfer).
     pub amount_pulled_in_period: u64,
+    /// The receiver wallet that received the tokens.
     pub receiver: Address,
 }
 
 impl SubscriptionTransferEvent {
+    /// Wire-format payload size (excluding tag and discriminator).
     pub const DATA_LEN: usize = size_of::<Self>();
 
+    /// Constructs a new event.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         subscription: Address,

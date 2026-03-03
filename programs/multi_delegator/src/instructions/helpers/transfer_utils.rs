@@ -12,6 +12,7 @@ use crate::{
     MultiDelegate, MultiDelegatorError,
 };
 
+/// Verifies that the token account's owner field matches `expected`.
 pub fn check_token_account_owner(
     data: &[u8],
     expected: &Address,
@@ -25,6 +26,7 @@ pub fn check_token_account_owner(
     Ok(())
 }
 
+/// Verifies that the token account's mint field matches `expected`.
 pub fn check_token_account_mint(
     data: &[u8],
     expected: &Address,
@@ -38,6 +40,7 @@ pub fn check_token_account_mint(
     Ok(())
 }
 
+/// Reads the owner pubkey from raw SPL token account data.
 pub fn get_token_account_owner(data: &[u8]) -> Result<Address, MultiDelegatorError> {
     if data.len() < TOKEN_ACCOUNT_OWNER_END {
         return Err(MultiDelegatorError::InvalidAccountData);
@@ -47,16 +50,23 @@ pub fn get_token_account_owner(data: &[u8]) -> Result<Address, MultiDelegatorErr
     Ok(Address::from(owner))
 }
 
+/// Accounts required to execute a delegated token transfer.
 pub struct TransferAccounts<'a> {
+    /// The delegator's Associated Token Account (source).
     pub delegator_ata: &'a AccountView,
-    /// Account to whom these funds are being transfered too
+    /// The receiver's Associated Token Account (destination).
     pub to_ata: &'a AccountView,
-    /// Pda that is the delegate to the delegators tokens
+    /// The [`MultiDelegate`] PDA that is the SPL delegate on `delegator_ata`.
     pub multidelegate_pda: &'a AccountView,
-    /// The token program (SPL Token or Token-2022)
+    /// The token program (SPL Token or Token-2022).
     pub token_program: &'a AccountView,
 }
 
+/// Executes an SPL Token transfer using the [`MultiDelegate`] PDA as the delegate signer.
+///
+/// Reads the PDA bump from the [`MultiDelegate`] account data, verifies the
+/// delegator and mint match, validates both token accounts, and performs the
+/// `Transfer` CPI signed by the MultiDelegate PDA.
 pub fn transfer_with_delegate(
     amount: u64,
     delegator: &Address,

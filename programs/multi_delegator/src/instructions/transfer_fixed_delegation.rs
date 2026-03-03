@@ -16,8 +16,14 @@ use crate::{
     TokenAccountInterface, TokenProgramInterface, WritableAccount,
 };
 
+/// Instruction discriminator byte for `TransferFixed`.
 pub const DISCRIMINATOR: &u8 = &4;
 
+/// Executes a transfer against a [`FixedDelegation`].
+///
+/// Validates authorization and remaining allowance, decrements the delegation's
+/// `amount`, performs the SPL token transfer via the [`MultiDelegate`](crate::MultiDelegate)
+/// PDA, and emits a [`FixedTransferEvent`].
 pub fn process(accounts: &[AccountView], transfer: &TransferData) -> ProgramResult {
     let accounts_struct = FixedTransferAccounts::try_from(accounts)?;
 
@@ -98,6 +104,7 @@ pub fn process(accounts: &[AccountView], transfer: &TransferData) -> ProgramResu
     Ok(())
 }
 
+/// Validated accounts for the [`TransferFixed`](crate::MultiDelegatorInstruction::TransferFixed) instruction.
 pub struct FixedTransferAccounts<'a> {
     pub delegation_pda: &'a AccountView,
     pub multi_delegate: &'a AccountView,

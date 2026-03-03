@@ -1,13 +1,17 @@
+//! Traits for account validation, initialization, and lifecycle operations.
+
 use pinocchio::{cpi::Seed, error::ProgramError, AccountView, Address, ProgramResult};
 
-/// AccountCheck is a trait that is used to signify some sort of evaluation on an account
-/// For Example for MintAccount, the check makes sure that the token belongs to the tokens program
-/// and has the correct size.
+/// Performs a read-only validation check on an account (e.g., ownership, size, discriminator).
 pub trait AccountCheck {
+    /// Returns `Ok(())` if the account passes the check, or an appropriate
+    /// [`ProgramError`] otherwise.
     fn check(account: &AccountView) -> Result<(), ProgramError>;
 }
 
+/// Initializes an SPL Token mint account.
 pub trait MintInit {
+    /// Creates and initializes a new mint.
     fn init(
         account: &AccountView,
         payer: &AccountView,
@@ -15,6 +19,8 @@ pub trait MintInit {
         mint_authority: &Address,
         freeze_authority: Option<&Address>,
     ) -> ProgramResult;
+
+    /// Initializes the mint only if it does not already exist.
     fn init_if_needed(
         account: &AccountView,
         payer: &AccountView,
@@ -24,13 +30,17 @@ pub trait MintInit {
     ) -> ProgramResult;
 }
 
+/// Initializes an SPL Token account.
 pub trait TokenInit {
+    /// Creates and initializes a new token account.
     fn init(
         account: &AccountView,
         mint: &AccountView,
         payer: &AccountView,
         owner: &Address,
     ) -> ProgramResult;
+
+    /// Initializes the token account only if it does not already exist.
     fn init_if_needed(
         account: &AccountView,
         mint: &AccountView,
@@ -39,7 +49,9 @@ pub trait TokenInit {
     ) -> ProgramResult;
 }
 
+/// Validates that an account is the correct Associated Token Account for the given inputs.
 pub trait AssociatedTokenAccountCheck {
+    /// Checks ATA derivation against authority, mint, and token program.
     fn check(
         account: &AccountView,
         authority: &AccountView,
@@ -48,7 +60,9 @@ pub trait AssociatedTokenAccountCheck {
     ) -> Result<(), ProgramError>;
 }
 
+/// Creates an Associated Token Account via CPI.
 pub trait AssociatedTokenAccountInit {
+    /// Creates a new ATA.
     fn init(
         account: &AccountView,
         mint: &AccountView,
@@ -57,6 +71,8 @@ pub trait AssociatedTokenAccountInit {
         system_program: &AccountView,
         token_program: &AccountView,
     ) -> ProgramResult;
+
+    /// Creates the ATA only if it does not already exist.
     fn init_if_needed(
         account: &AccountView,
         mint: &AccountView,
@@ -67,7 +83,9 @@ pub trait AssociatedTokenAccountInit {
     ) -> ProgramResult;
 }
 
+/// Creates a program-owned PDA account via CPI.
 pub trait ProgramAccountInit {
+    /// Allocates `space` bytes, assigns to this program, and funds rent from `payer`.
     fn init<'a, T: Sized>(
         payer: &AccountView,
         account: &AccountView,
@@ -76,6 +94,8 @@ pub trait ProgramAccountInit {
     ) -> ProgramResult;
 }
 
+/// Closes a program-owned account, returning lamports to `destination`.
 pub trait AccountClose {
+    /// Zeroes account data, sets lamports to zero, and transfers rent to `destination`.
     fn close(account: &AccountView, destination: &AccountView) -> ProgramResult;
 }

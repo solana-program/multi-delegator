@@ -5,6 +5,7 @@ use crate::{
     WritableAccount,
 };
 
+/// Validated accounts for the [`CloseMultiDelegate`](crate::MultiDelegatorInstruction::CloseMultiDelegate) instruction.
 pub struct CloseMultiDelegateAccounts<'a> {
     pub user: &'a AccountView,
     pub multi_delegate: &'a AccountView,
@@ -30,6 +31,7 @@ impl<'a> TryFrom<&'a [AccountView]> for CloseMultiDelegateAccounts<'a> {
     }
 }
 
+/// Instruction discriminator byte for `CloseMultiDelegate`.
 pub const DISCRIMINATOR: &u8 = &6;
 
 /// Closes a MultiDelegate PDA account, returning the lamports to the user.

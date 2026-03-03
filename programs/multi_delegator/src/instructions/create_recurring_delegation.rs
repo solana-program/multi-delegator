@@ -10,21 +10,31 @@ use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 
 use crate::constants::TIME_DRIFT_ALLOWED_SECS;
 
-pub const MAX_DELEGATION_PERIOD_SECS: u64 = 31_536_000; // 365 days
+/// Maximum allowed period length for recurring delegations (365 days in seconds).
+pub const MAX_DELEGATION_PERIOD_SECS: u64 = 31_536_000;
 
+/// Instruction data payload for creating a recurring delegation.
 #[repr(C, packed)]
 #[derive(Debug, Clone, CodamaType)]
 pub struct CreateRecurringDelegationData {
+    /// Client-chosen nonce that disambiguates multiple delegations between the
+    /// same delegator/delegatee pair.
     pub nonce: u64,
+    /// Maximum token amount the delegatee may transfer per period.
     pub amount_per_period: u64,
+    /// Length of each period in seconds (must be > 0 and <= [`MAX_DELEGATION_PERIOD_SECS`]).
     pub period_length_s: u64,
+    /// Unix timestamp when the first period begins.
     pub start_ts: i64,
+    /// Unix timestamp after which the delegation expires.
     pub expiry_ts: i64,
 }
 
 impl CreateRecurringDelegationData {
+    /// Serialized size in bytes.
     pub const LEN: usize = size_of::<CreateRecurringDelegationData>();
 
+    /// Zero-copy deserialize from raw instruction bytes.
     pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
         if data.len() != Self::LEN {
             return Err(MultiDelegatorError::InvalidInstructionData.into());
@@ -32,6 +42,7 @@ impl CreateRecurringDelegationData {
         Ok(unsafe { &*transmute::<*const u8, *const Self>(data.as_ptr()) })
     }
 
+    /// Validates the instruction data against the current clock time.
     pub fn validate(&self, current_time: i64) -> Result<(), MultiDelegatorError> {
         if self.start_ts < current_time.saturating_sub(TIME_DRIFT_ALLOWED_SECS) {
             return Err(MultiDelegatorError::RecurringDelegationStartTimeInPast);
@@ -53,8 +64,13 @@ impl CreateRecurringDelegationData {
     }
 }
 
+/// Instruction discriminator byte for `CreateRecurringDelegation`.
 pub const DISCRIMINATOR: &u8 = &2;
 
+/// Creates a new [`RecurringDelegation`] PDA.
+///
+/// Validates the instruction data, creates the delegation account via CPI,
+/// and initializes its header and period-tracking fields.
 pub fn process(
     accounts: &[AccountView],
     call_data: &CreateRecurringDelegationData,

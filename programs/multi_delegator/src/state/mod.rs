@@ -1,3 +1,9 @@
+//! On-chain account state types for the multi-delegator program.
+//!
+//! Each account type is stored as a packed C struct in a Program Derived Account
+//! (PDA). Accounts share a one-byte discriminator at offset 0 so that the program
+//! can distinguish account types during deserialization.
+
 pub mod common;
 pub mod fixed_delegation;
 pub mod header;

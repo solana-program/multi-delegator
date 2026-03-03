@@ -6,12 +6,19 @@ use crate::{
     SystemAccount, WritableAccount, CURRENT_VERSION, DELEGATE_BASE_SEED,
 };
 
+/// Validated accounts shared by `CreateFixedDelegation` and `CreateRecurringDelegation`.
 pub struct CreateDelegationAccounts<'a> {
+    /// The token owner creating the delegation (must be signer + writable).
     pub delegator: &'a AccountView,
+    /// The existing [`MultiDelegate`] PDA for this user/mint pair.
     pub multi_delegate: &'a AccountView,
+    /// The delegation PDA to be created (must be writable).
     pub delegation_account: &'a AccountView,
+    /// The party that will receive transfer rights.
     pub delegatee: &'a AccountView,
+    /// System program (for CPI account creation).
     pub system_program: &'a AccountView,
+    /// The account funding rent. Defaults to `delegator` if no extra account is provided.
     pub payer: &'a AccountView,
 }
 
@@ -50,6 +57,10 @@ impl<'a> TryFrom<&'a [AccountView]> for CreateDelegationAccounts<'a> {
     }
 }
 
+/// Creates and allocates a delegation PDA.
+///
+/// Verifies the delegator owns the [`MultiDelegate`], derives the expected PDA,
+/// and creates the account via CPI. Returns the PDA bump on success.
 pub fn create_delegation_account(
     accounts: &CreateDelegationAccounts,
     nonce: u64,
@@ -89,6 +100,7 @@ pub fn create_delegation_account(
     Ok(bump)
 }
 
+/// Populates a delegation [`Header`] with the standard fields.
 pub fn init_header(
     header: &mut Header,
     discriminator: AccountDiscriminator,

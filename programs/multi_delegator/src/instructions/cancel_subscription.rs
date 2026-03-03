@@ -11,8 +11,15 @@ use crate::{
     AccountCheck, MultiDelegatorError, ProgramAccount, SignerAccount, WritableAccount,
 };
 
+/// Instruction discriminator byte for `CancelSubscription`.
 pub const DISCRIMINATOR: &u8 = &12;
 
+/// Cancels a subscription by setting its `expires_at_ts` to the end of the
+/// current billing period.
+///
+/// After cancellation the subscription remains valid until `expires_at_ts`,
+/// then it can be closed via [`RevokeDelegation`](crate::instructions::revoke_delegation).
+/// Emits a [`SubscriptionCancelledEvent`].
 pub fn process(accounts: &[AccountView]) -> ProgramResult {
     let accounts_struct = CancelSubscriptionAccounts::try_from(accounts)?;
     let current_ts = Clock::get()?.unix_timestamp;
@@ -81,6 +88,7 @@ pub fn process(accounts: &[AccountView]) -> ProgramResult {
     Ok(())
 }
 
+/// Validated accounts for the [`CancelSubscription`](crate::MultiDelegatorInstruction::CancelSubscription) instruction.
 pub struct CancelSubscriptionAccounts<'a> {
     pub subscriber: &'a AccountView,
     pub plan_pda: &'a AccountView,

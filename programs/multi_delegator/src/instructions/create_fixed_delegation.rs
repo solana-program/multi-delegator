@@ -9,15 +9,22 @@ use pinocchio::sysvars::clock::Clock;
 use pinocchio::sysvars::Sysvar;
 use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 
+/// Instruction data payload for creating a fixed delegation.
 #[repr(C, packed)]
 #[derive(Debug, Clone, CodamaType)]
 pub struct CreateFixedDelegationData {
+    /// Client-chosen nonce that disambiguates multiple delegations between the
+    /// same delegator/delegatee pair.
     pub nonce: u64,
+    /// Total token amount the delegatee is authorized to transfer.
     pub amount: u64,
+    /// Unix timestamp after which the delegation expires. Must be in the future
+    /// (with [`TIME_DRIFT_ALLOWED_SECS`] tolerance).
     pub expiry_ts: i64,
 }
 
 impl CreateFixedDelegationData {
+    /// Validates the instruction data against the current clock time.
     pub fn validate(&self, current_time: i64) -> Result<(), MultiDelegatorError> {
         if self.expiry_ts < current_time.saturating_sub(TIME_DRIFT_ALLOWED_SECS) {
             return Err(MultiDelegatorError::FixedDelegationExpiryInPast);
@@ -32,8 +39,10 @@ impl CreateFixedDelegationData {
 }
 
 impl CreateFixedDelegationData {
+    /// Serialized size in bytes.
     pub const LEN: usize = size_of::<CreateFixedDelegationData>();
 
+    /// Zero-copy deserialize from raw instruction bytes.
     pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
         if data.len() != Self::LEN {
             return Err(MultiDelegatorError::InvalidInstructionData.into());
@@ -42,8 +51,13 @@ impl CreateFixedDelegationData {
     }
 }
 
+/// Instruction discriminator byte for `CreateFixedDelegation`.
 pub const DISCRIMINATOR: &u8 = &1;
 
+/// Creates a new [`FixedDelegation`] PDA.
+///
+/// Validates the instruction data, creates the delegation account via CPI,
+/// and initializes its header and delegation-specific fields.
 pub fn process(accounts: &[AccountView], call_data: &CreateFixedDelegationData) -> ProgramResult {
     call_data.validate(Clock::get()?.unix_timestamp)?;
 

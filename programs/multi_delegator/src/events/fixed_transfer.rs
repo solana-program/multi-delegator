@@ -4,20 +4,30 @@ use pinocchio::Address;
 
 use crate::event_engine::{EventDiscriminator, EventDiscriminators, EventSerialize};
 
+/// Emitted when a transfer is executed against a fixed delegation.
 #[repr(C, packed)]
 pub struct FixedTransferEvent {
+    /// The fixed delegation PDA.
     pub delegation: Address,
+    /// The token owner whose ATA was debited.
     pub delegator: Address,
+    /// The party that initiated the transfer.
     pub delegatee: Address,
+    /// The SPL token mint.
     pub mint: Address,
+    /// Token amount transferred.
     pub amount: u64,
+    /// Remaining allowance after this transfer.
     pub remaining_amount: u64,
+    /// The receiver wallet that received the tokens.
     pub receiver: Address,
 }
 
 impl FixedTransferEvent {
+    /// Wire-format payload size (excluding tag and discriminator).
     pub const DATA_LEN: usize = size_of::<Self>();
 
+    /// Constructs a new event.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         delegation: Address,

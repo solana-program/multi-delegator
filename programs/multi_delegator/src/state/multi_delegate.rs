@@ -1,20 +1,37 @@
+//! The root delegation account that enables multi-delegation for a specific token mint.
+
 use codama::CodamaAccount;
 use core::mem::{size_of, transmute};
 use pinocchio::{error::ProgramError, Address};
 
 use crate::{state::common::AccountDiscriminator, MultiDelegatorError};
 
+/// Root PDA that acts as the SPL Token delegate for a user's associated token account.
+///
+/// One `MultiDelegate` account exists per (user, token_mint) pair. The program
+/// approves itself (this PDA) as the delegate on the user's ATA with `u64::MAX`
+/// allowance, then individual delegation PDAs control how much each delegatee can
+/// actually transfer.
+///
+/// **PDA seeds:** `["MultiDelegate", user, token_mint]`
 #[repr(C)]
 #[derive(CodamaAccount)]
 pub struct MultiDelegate {
+    /// Account type discriminator ([`AccountDiscriminator::MultiDelegate`]).
     pub discriminator: u8,
+    /// The wallet that owns this multi-delegate instance.
     pub user: Address,
+    /// The SPL token mint this delegation covers.
     pub token_mint: Address,
+    /// PDA bump seed.
     pub bump: u8,
 }
 
 impl MultiDelegate {
+    /// Total serialized size in bytes.
     pub const LEN: usize = size_of::<MultiDelegate>();
+
+    /// PDA seed prefix.
     pub const SEED: &'static [u8] = b"MultiDelegate";
 
     /// Initializes a freshly created account by setting all fields including
@@ -38,6 +55,9 @@ impl MultiDelegate {
         Ok(account)
     }
 
+    /// Deserializes a mutable reference from raw account data.
+    ///
+    /// Returns an error if the data length or discriminator does not match.
     #[inline(always)]
     pub fn load_mut(bytes: &mut [u8]) -> Result<&mut Self, ProgramError> {
         if bytes.len() != Self::LEN {
@@ -49,6 +69,9 @@ impl MultiDelegate {
         Ok(unsafe { &mut *transmute::<*mut u8, *mut Self>(bytes.as_mut_ptr()) })
     }
 
+    /// Deserializes an immutable reference from raw account data.
+    ///
+    /// Returns an error if the data length or discriminator does not match.
     #[inline(always)]
     pub fn load(bytes: &[u8]) -> Result<&Self, ProgramError> {
         if bytes.len() != Self::LEN {
@@ -60,6 +83,7 @@ impl MultiDelegate {
         Ok(unsafe { &*transmute::<*const u8, *const Self>(bytes.as_ptr()) })
     }
 
+    /// Asserts that `expected_user` matches the stored [`user`](Self::user) field.
     pub fn check_owner(&self, expected_user: &Address) -> Result<(), ProgramError> {
         if self.user != *expected_user {
             return Err(MultiDelegatorError::Unauthorized.into());
@@ -68,8 +92,10 @@ impl MultiDelegate {
     }
 
     /// Verifies that the given seeds and bump produce a valid PDA.
-    /// This is cheaper than find_pda as it doesn't iterate through bumps.
-    /// Returns the computed PDA if valid, or an error if the bump is invalid.
+    ///
+    /// This is cheaper than [`find_pda`](Self::find_pda) as it doesn't iterate
+    /// through bumps. Returns the computed PDA if valid, or an error if the bump
+    /// is invalid.
     pub fn verify_pda(
         user: &Address,
         token_mint: &Address,
@@ -83,7 +109,6 @@ impl MultiDelegate {
     }
 
     /// Finds the canonical PDA and bump for the multi-delegate account.
-    /// Used when creating the multi-delegate to ensure the canonical bump is used.
     pub fn find_pda(user: &Address, token_mint: &Address) -> (Address, u8) {
         Address::find_program_address(
             &[Self::SEED, user.as_ref(), token_mint.as_ref()],

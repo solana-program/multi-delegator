@@ -6,6 +6,7 @@ use crate::{
     WritableAccount,
 };
 
+/// Validated accounts for the [`CreatePlan`](crate::MultiDelegatorInstruction::CreatePlan) instruction.
 pub struct CreatePlanAccounts<'a> {
     pub merchant: &'a AccountView,
     pub plan_pda: &'a AccountView,
@@ -39,6 +40,10 @@ impl<'a> TryFrom<&'a [AccountView]> for CreatePlanAccounts<'a> {
     }
 }
 
+/// Creates and allocates a [`Plan`] PDA.
+///
+/// Derives the expected PDA from the merchant address and `plan_id`, then
+/// creates the account via CPI. Returns the PDA bump on success.
 pub fn create_plan_account(
     accounts: &CreatePlanAccounts,
     plan_id: u64,

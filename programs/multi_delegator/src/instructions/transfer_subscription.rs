@@ -17,8 +17,15 @@ use crate::{
 
 use crate::get_token_account_owner;
 
+/// Instruction discriminator byte for `TransferSubscription`.
 pub const DISCRIMINATOR: &u8 = &10;
 
+/// Executes a transfer against a [`SubscriptionDelegation`].
+///
+/// Validates the caller is an authorized puller, checks the receiver against
+/// the plan's destination whitelist, enforces per-period limits, performs the
+/// SPL token transfer, and emits a
+/// [`SubscriptionTransferEvent`].
 pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> ProgramResult {
     let accounts_struct = TransferSubscriptionAccounts::try_from(accounts)?;
 
@@ -142,6 +149,7 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
     Ok(())
 }
 
+/// Validated accounts for the [`TransferSubscription`](crate::MultiDelegatorInstruction::TransferSubscription) instruction.
 pub struct TransferSubscriptionAccounts<'a> {
     pub subscription_pda: &'a AccountView,
     pub plan_pda: &'a AccountView,

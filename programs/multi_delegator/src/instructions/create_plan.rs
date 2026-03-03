@@ -15,28 +15,43 @@ use crate::{
     CreatePlanAccounts, MultiDelegatorError,
 };
 
-pub const MAX_PLAN_PERIOD_HOURS: u64 = 8760; // 365 days
+/// Maximum allowed period length for plans (365 days in hours).
+pub const MAX_PLAN_PERIOD_HOURS: u64 = 8760;
+
+/// Maximum number of destination wallets a plan can whitelist.
 pub const MAX_DESTINATIONS: usize = 4;
+
+/// Maximum number of puller addresses a plan can authorize.
 pub const MAX_PULLERS: usize = 4;
 
+/// Configuration data embedded in a [`Plan`] account and supplied when creating one.
 #[repr(C, packed)]
 #[derive(Debug, Clone, CodamaType)]
 pub struct PlanData {
+    /// Merchant-chosen identifier for the plan (unique per owner).
     pub plan_id: u64,
+    /// SPL token mint that subscriptions under this plan operate on.
     pub mint: Address,
+    /// Maximum token amount that can be pulled per billing period.
     pub amount: u64,
+    /// Billing period length in hours (must be > 0 and <= [`MAX_PLAN_PERIOD_HOURS`]).
     pub period_hours: u64,
+    /// Optional unix timestamp after which the plan expires. `0` means no end.
     pub end_ts: i64,
-    // Sizes must match MAX_DESTINATIONS/MAX_PULLERS. Literals required because Codama can't resolve consts.
+    /// Whitelisted destination wallets for transfers. All-zero entries are ignored.
     pub destinations: [Address; 4],
+    /// Addresses authorized to pull subscription transfers (in addition to the owner).
     pub pullers: [Address; 4],
+    /// UTF-8 metadata URI (e.g., pointing to off-chain plan details). Padded with zeros.
     #[codama(type = fixed_size(string(utf8), 128))]
     pub metadata_uri: [u8; 128],
 }
 
 impl PlanData {
+    /// Serialized size in bytes.
     pub const LEN: usize = size_of::<PlanData>();
 
+    /// Zero-copy deserialize from raw instruction bytes.
     pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
         if data.len() != Self::LEN {
             return Err(MultiDelegatorError::InvalidInstructionData.into());
@@ -44,6 +59,7 @@ impl PlanData {
         Ok(unsafe { &*transmute::<*const u8, *const Self>(data.as_ptr()) })
     }
 
+    /// Validates plan data against the current clock time.
     pub fn validate(&self, current_time: i64) -> Result<(), MultiDelegatorError> {
         if self.amount == 0 {
             return Err(MultiDelegatorError::InvalidAmount);
@@ -65,8 +81,13 @@ impl PlanData {
     }
 }
 
+/// Instruction discriminator byte for `CreatePlan`.
 pub const DISCRIMINATOR: &u8 = &7;
 
+/// Creates a new subscription [`Plan`] PDA.
+///
+/// Validates the plan data, creates the plan account via CPI, and initializes
+/// its fields including owner, status, and the embedded [`PlanData`].
 pub fn process(accounts: &[AccountView], data: &PlanData) -> ProgramResult {
     data.validate(Clock::get()?.unix_timestamp)?;
 

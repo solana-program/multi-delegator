@@ -9,6 +9,7 @@ use crate::{
     SignerAccount, WritableAccount,
 };
 
+/// Validated accounts for the [`DeletePlan`](crate::MultiDelegatorInstruction::DeletePlan) instruction.
 pub struct DeletePlanAccounts<'a> {
     pub owner: &'a AccountView,
     pub plan_pda: &'a AccountView,
@@ -31,8 +32,13 @@ impl<'a> TryFrom<&'a [AccountView]> for DeletePlanAccounts<'a> {
     }
 }
 
+/// Instruction discriminator byte for `DeletePlan`.
 pub const DISCRIMINATOR: &u8 = &9;
 
+/// Deletes an expired [`Plan`] PDA, returning rent to the owner.
+///
+/// The plan must have a non-zero `end_ts` that is in the past. Only the plan
+/// owner may delete it.
 pub fn process(accounts: &[AccountView]) -> ProgramResult {
     let accounts = DeletePlanAccounts::try_from(accounts)?;
 

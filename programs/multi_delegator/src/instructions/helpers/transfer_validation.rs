@@ -2,6 +2,12 @@ use pinocchio::ProgramResult;
 
 use crate::MultiDelegatorError;
 
+/// Validates a fixed transfer against the delegation's remaining allowance and expiry.
+///
+/// Returns an error if:
+/// - `transfer_amount` is zero
+/// - the delegation has expired (`expiry_ts != 0 && current_ts > expiry_ts`)
+/// - `transfer_amount` exceeds the remaining allowance
 pub fn validate_fixed_transfer(
     transfer_amount: u64,
     remaining: u64,
@@ -20,6 +26,16 @@ pub fn validate_fixed_transfer(
     Ok(())
 }
 
+/// Validates a recurring transfer against per-period limits.
+///
+/// Automatically advances the period when the current period has elapsed:
+/// `current_period_start_ts` is moved forward by whole multiples of
+/// `period_length_s` and `amount_pulled_in_period` is reset to zero.
+///
+/// Returns an error if:
+/// - `transfer_amount` is zero
+/// - the delegation has expired
+/// - `transfer_amount` exceeds the remaining per-period budget
 pub fn validate_recurring_transfer(
     transfer_amount: u64,
     amount_per_period: u64,

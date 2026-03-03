@@ -10,9 +10,14 @@ use crate::{
     WritableAccount, DELEGATEE_OFFSET, DELEGATOR_OFFSET, DISCRIMINATOR_OFFSET, PAYER_OFFSET,
 };
 
+/// Validated accounts for the [`RevokeDelegation`](crate::MultiDelegatorInstruction::RevokeDelegation) instruction.
 pub struct RevokeDelegationAccounts<'a> {
+    /// The delegator revoking the delegation (must be signer + writable; receives rent if self-funded).
     pub authority: &'a AccountView,
+    /// The delegation PDA to close.
     pub delegation_account: &'a AccountView,
+    /// Optional third-party account to receive rent (required when the original
+    /// payer differs from the delegator).
     pub receiver: Option<&'a AccountView>,
 }
 
@@ -37,6 +42,7 @@ impl<'a> TryFrom<&'a [AccountView]> for RevokeDelegationAccounts<'a> {
     }
 }
 
+/// Instruction discriminator byte for `RevokeDelegation`.
 pub const DISCRIMINATOR: &u8 = &3;
 
 /// Revokes a delegation by closing the delegation PDA.

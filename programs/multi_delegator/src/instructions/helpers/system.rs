@@ -4,6 +4,7 @@ use crate::{
 };
 use pinocchio::{error::ProgramError, AccountView};
 
+/// Validates that an account is a transaction signer.
 pub struct SignerAccount;
 
 impl AccountCheck for SignerAccount {
@@ -15,6 +16,7 @@ impl AccountCheck for SignerAccount {
     }
 }
 
+/// Validates that an account is marked writable in the transaction.
 pub struct WritableAccount;
 
 impl AccountCheck for WritableAccount {
@@ -26,6 +28,7 @@ impl AccountCheck for WritableAccount {
     }
 }
 
+/// Validates that the account is the System Program.
 pub struct SystemAccount;
 
 impl AccountCheck for SystemAccount {
@@ -38,6 +41,8 @@ impl AccountCheck for SystemAccount {
     }
 }
 
+/// Validates that the account is a program-owned [`MultiDelegate`] PDA with the correct
+/// discriminator and size.
 pub struct MultiDelegateAccount;
 
 impl AccountCheck for MultiDelegateAccount {
