@@ -1,7 +1,6 @@
 use crate::{
-    constants::TIME_DRIFT_ALLOWED_SECS, create_delegation_account, init_header,
-    state::FixedDelegation, AccountDiscriminator, CreateDelegationAccounts, MultiDelegatorError,
-    DISCRIMINATOR_OFFSET,
+    constants::TIME_DRIFT_ALLOWED_SECS, create_delegation_account, state::FixedDelegation,
+    AccountDiscriminator, CreateDelegationAccounts, MultiDelegatorError, DISCRIMINATOR_OFFSET,
 };
 use codama::CodamaType;
 use core::mem::{size_of, transmute};
@@ -70,8 +69,7 @@ pub fn process(accounts: &[AccountView], call_data: &CreateFixedDelegationData) 
     binding[DISCRIMINATOR_OFFSET] = AccountDiscriminator::FixedDelegation as u8;
     let delegation = FixedDelegation::load_mut(binding)?;
 
-    init_header(
-        &mut delegation.header,
+    delegation.header.init(
         AccountDiscriminator::FixedDelegation,
         bump,
         accounts.delegator.address(),

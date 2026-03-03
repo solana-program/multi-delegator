@@ -5,6 +5,7 @@ use pinocchio::{
 };
 
 use crate::{
+    check_and_update_version,
     event_engine::{self, EventSerialize},
     events::SubscriptionTransferEvent,
     helpers::{
@@ -65,6 +66,7 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
     let amount_pulled_in_period: u64;
     {
         let mut binding = accounts_struct.subscription_pda.try_borrow_mut()?;
+        check_and_update_version(&mut binding)?;
         let subscription = SubscriptionDelegation::load_mut(&mut binding)?;
 
         let delegator = subscription.header.delegator;
@@ -997,5 +999,35 @@ mod tests {
                 build_and_send_transaction(&mut litesvm, &[&fee_payer], &fee_payer.pubkey(), &ix);
             res.assert_err(MultiDelegatorError::NotSigner);
         }
+    }
+
+    #[test]
+    fn test_subscription_transfer_version_mismatch() {
+        use crate::state::header::VERSION_OFFSET;
+
+        let amount_per_period = 50_000_000u64;
+        let period_hours = 1u64;
+        let end_ts = current_ts() + days(30) as i64;
+
+        let (mut litesvm, alice, merchant, mint, plan_pda, _, subscription_pda, _, merchant_ata) =
+            setup_plan_and_subscription(amount_per_period, period_hours, end_ts, vec![], vec![]);
+
+        let mut account = litesvm.get_account(&subscription_pda).unwrap();
+        account.data[VERSION_OFFSET] = 0;
+        litesvm.set_account(subscription_pda, account).unwrap();
+
+        let result = TransferSubscription::new(
+            &mut litesvm,
+            &merchant,
+            alice.pubkey(),
+            mint,
+            subscription_pda,
+            plan_pda,
+        )
+        .amount(10_000_000)
+        .execute();
+
+        result.assert_err(MultiDelegatorError::MigrationRequired);
+        assert_eq!(get_ata_balance(&litesvm, &merchant_ata), 0);
     }
 }

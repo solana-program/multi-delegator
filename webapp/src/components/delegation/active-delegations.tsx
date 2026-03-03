@@ -287,6 +287,7 @@ function FixedDelegationTable({ delegations, mode, showExpired, tokenMint, block
                 <TableRow key={d.address} className={`border-none hover:bg-white/[0.03] transition-colors ${rowExpired ? 'opacity-60' : ''}`}>
                   <TableCell className="font-mono text-[15px] text-gray-300 py-5 text-center">
                     {formatAddress(isOutgoing ? d.data.header.delegatee : d.data.header.delegator)}
+                    <span className="ml-1.5 text-xs font-bold text-blue-400/60 font-sans">v{d.data.header.version}</span>
                   </TableCell>
                   <TableCell className="text-emerald-400 py-5 font-medium text-[15px] text-center">
                     {formatAmount(d.data.amount)} USDC
@@ -352,6 +353,7 @@ function RecurringDelegationTable({ delegations, mode, showExpired, tokenMint, b
                 <TableRow key={d.address} className={`border-none hover:bg-white/[0.03] transition-colors ${rowExpired ? 'opacity-60' : ''}`}>
                   <TableCell className="font-mono text-[15px] text-gray-300 py-5 text-center">
                     {formatAddress(isOutgoing ? d.data.header.delegatee : d.data.header.delegator)}
+                    <span className="ml-1.5 text-xs font-bold text-blue-400/60 font-sans">v{d.data.header.version}</span>
                   </TableCell>
                   <TableCell className="text-emerald-400 py-5 font-medium text-[15px] text-center">
                     {formatAmount(available)} USDC

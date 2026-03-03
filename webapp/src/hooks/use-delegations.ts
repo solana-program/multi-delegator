@@ -18,6 +18,7 @@ export interface DelegationData {
   header: {
     delegator: string
     delegatee: string
+    version: number
   }
   amount: bigint
   amountPerPeriod: bigint

@@ -5,6 +5,7 @@ use pinocchio::{
 };
 
 use crate::{
+    check_and_update_version,
     constants::{TOKEN_ACCOUNT_OWNER_END, TOKEN_ACCOUNT_OWNER_OFFSET},
     event_engine::{self, EventSerialize},
     events::FixedTransferEvent,
@@ -31,6 +32,7 @@ pub fn process(accounts: &[AccountView], transfer: &TransferData) -> ProgramResu
     let delegatee_address: Address;
     {
         let mut binding = accounts_struct.delegation_pda.try_borrow_mut()?;
+        check_and_update_version(&mut binding)?;
         let delegation = FixedDelegation::load_mut(&mut binding)?;
 
         // Fail fast: Check authorization first
@@ -588,6 +590,30 @@ mod tests {
         // Verify Alice's funds are untouched
         assert_eq!(get_ata_balance(&litesvm, &alice_ata), 100_000_000);
         // Verify Bob received no funds
+        assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
+    }
+
+    #[test]
+    fn test_fixed_transfer_version_mismatch() {
+        use crate::state::header::VERSION_OFFSET;
+
+        let amount: u64 = 50_000_000;
+        let expiry_ts: i64 = current_ts() + days(1) as i64;
+        let nonce = 0;
+
+        let (mut litesvm, alice, bob, delegation_pda, mint, _, bob_ata) =
+            setup_fixed_delegation(amount, expiry_ts, nonce);
+
+        let mut account = litesvm.get_account(&delegation_pda).unwrap();
+        account.data[VERSION_OFFSET] = 0;
+        litesvm.set_account(delegation_pda, account).unwrap();
+
+        let result =
+            TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+                .amount(10_000_000)
+                .fixed();
+
+        result.assert_err(MultiDelegatorError::MigrationRequired);
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
     }
 }

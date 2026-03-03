@@ -11,7 +11,6 @@ use pinocchio::{
 use crate::{
     event_engine::{self, EventSerialize},
     events::SubscriptionCreatedEvent,
-    helpers::init_header,
     state::{
         common::{find_subscription_pda, AccountDiscriminator, PlanStatus},
         multi_delegate::MultiDelegate,
@@ -140,8 +139,7 @@ pub fn process(accounts: &[AccountView], data: &SubscribeData) -> ProgramResult 
         binding[0] = AccountDiscriminator::SubscriptionDelegation as u8;
         let subscription = SubscriptionDelegation::load_mut(&mut binding)?;
 
-        init_header(
-            &mut subscription.header,
+        subscription.header.init(
             AccountDiscriminator::SubscriptionDelegation,
             bump,
             accounts_struct.subscriber.address(),

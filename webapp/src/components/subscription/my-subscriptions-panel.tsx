@@ -199,6 +199,8 @@ function SubscriptionCard({ item }: { item: EnrichedSubscription }) {
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-400">
             <span className="font-mono">{ellipsify(item.address, 4)}</span>
             <span className="text-teal-800">|</span>
+            <span className="text-xs font-bold text-blue-400/60">v{item.subscription.header.version}</span>
+            <span className="text-teal-800">|</span>
             <span>Pulled: ${pulled.toFixed(2)}</span>
             {isCancelled && !planDeleted && (
               <>

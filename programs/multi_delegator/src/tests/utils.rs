@@ -912,7 +912,7 @@ impl<'a> CreateSubscription<'a> {
 
     pub fn execute(self) -> Pubkey {
         use crate::{
-            state::{common::AccountDiscriminator, header::CURRENT_VERSION},
+            state::{common::AccountDiscriminator, versioning::CURRENT_VERSION},
             tests::pda::get_subscription_pda,
             Header, SubscriptionDelegation,
         };

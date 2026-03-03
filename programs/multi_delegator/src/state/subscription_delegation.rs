@@ -5,8 +5,8 @@ use core::mem::{size_of, transmute};
 use pinocchio::error::ProgramError;
 
 use crate::{
-    state::common::AccountDiscriminator, state::header::DISCRIMINATOR_OFFSET, Header,
-    MultiDelegatorError,
+    check_min_account_size, state::common::AccountDiscriminator,
+    state::header::DISCRIMINATOR_OFFSET, Header, MultiDelegatorError,
 };
 
 /// A subscriber's delegation linked to a specific [`Plan`](super::plan::Plan).
@@ -64,6 +64,22 @@ impl SubscriptionDelegation {
         if bytes.len() != Self::LEN {
             return Err(MultiDelegatorError::InvalidAccountData.into());
         }
+        if bytes[DISCRIMINATOR_OFFSET] != AccountDiscriminator::SubscriptionDelegation as u8 {
+            return Err(MultiDelegatorError::InvalidAccountDiscriminator.into());
+        }
+        Ok(unsafe { &mut *transmute::<*mut u8, *mut Self>(bytes.as_mut_ptr()) })
+    }
+
+    pub fn load_with_min_size(bytes: &[u8]) -> Result<&Self, ProgramError> {
+        check_min_account_size(bytes.len(), Self::LEN)?;
+        if bytes[DISCRIMINATOR_OFFSET] != AccountDiscriminator::SubscriptionDelegation as u8 {
+            return Err(MultiDelegatorError::InvalidAccountDiscriminator.into());
+        }
+        Ok(unsafe { &*transmute::<*const u8, *const Self>(bytes.as_ptr()) })
+    }
+
+    pub fn load_mut_with_min_size(bytes: &mut [u8]) -> Result<&mut Self, ProgramError> {
+        check_min_account_size(bytes.len(), Self::LEN)?;
         if bytes[DISCRIMINATOR_OFFSET] != AccountDiscriminator::SubscriptionDelegation as u8 {
             return Err(MultiDelegatorError::InvalidAccountDiscriminator.into());
         }

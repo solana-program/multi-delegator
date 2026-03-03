@@ -4,6 +4,9 @@ import { MULTI_DELEGATOR_PROGRAM_ADDRESS } from './generated/index.js';
 // See: programs/multi_delegator/src/lib.rs
 export const PROGRAM_ID = MULTI_DELEGATOR_PROGRAM_ADDRESS;
 
+// See: programs/multi_delegator/src/state/header.rs
+export const CURRENT_PROGRAM_VERSION = 1;
+
 // Default zero address used for padding arrays
 export const ZERO_ADDRESS =
   '11111111111111111111111111111111' as import('gill').Address<'11111111111111111111111111111111'>;

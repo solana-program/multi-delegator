@@ -5,6 +5,7 @@ use pinocchio::{
 };
 
 use crate::{
+    check_and_update_version,
     state::{common::AccountDiscriminator, subscription_delegation::SubscriptionDelegation},
     AccountCheck, AccountClose, Header, MultiDelegatorError, ProgramAccount, SignerAccount,
     WritableAccount, DELEGATEE_OFFSET, DELEGATOR_OFFSET, DISCRIMINATOR_OFFSET, PAYER_OFFSET,
@@ -53,7 +54,7 @@ pub const DISCRIMINATOR: &u8 = &3;
 pub fn process(accounts: &[AccountView]) -> ProgramResult {
     let accounts = RevokeDelegationAccounts::try_from(accounts)?;
 
-    let data = accounts.delegation_account.try_borrow()?;
+    let mut data = accounts.delegation_account.try_borrow_mut()?;
 
     if data.len() < Header::LEN {
         return Err(MultiDelegatorError::InvalidHeaderData.into());
@@ -63,7 +64,8 @@ pub fn process(accounts: &[AccountView]) -> ProgramResult {
 
     // For subscriptions, validate cancellation before closing
     if kind == AccountDiscriminator::SubscriptionDelegation as u8 {
-        let subscription = SubscriptionDelegation::load(&data)?;
+        check_and_update_version(&mut data)?;
+        let subscription = SubscriptionDelegation::load_with_min_size(&data)?;
 
         if subscription.header.delegator != *accounts.authority.address() {
             return Err(MultiDelegatorError::Unauthorized.into());
@@ -558,6 +560,112 @@ mod tests {
         // Account should still exist
         let account = litesvm.get_account(&subscription_pda);
         assert!(account.is_some());
+    }
+
+    #[test]
+    fn test_revoke_fixed_version_agnostic() {
+        use crate::state::header::VERSION_OFFSET;
+
+        let (litesvm, user) = &mut setup();
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(user.pubkey()),
+            &[],
+        );
+        let _user_ata = init_ata(litesvm, mint, user.pubkey(), 1_000_000);
+
+        initialize_multidelegate_action(litesvm, user, mint)
+            .0
+            .assert_ok();
+
+        let delegatee = Pubkey::new_unique();
+        let nonce: u64 = 0;
+
+        let (res, delegation_pda) = CreateDelegation::new(litesvm, user, mint, delegatee)
+            .nonce(nonce)
+            .fixed(100, current_ts() + 1000);
+        res.assert_ok();
+
+        let mut account = litesvm.get_account(&delegation_pda).unwrap();
+        account.data[VERSION_OFFSET] = 0;
+        litesvm.set_account(delegation_pda, account).unwrap();
+
+        RevokeDelegation::new(litesvm, user, mint, delegatee, nonce)
+            .execute()
+            .assert_ok();
+
+        let account_after = litesvm.get_account(&delegation_pda);
+        assert!(
+            account_after.is_none() || account_after.as_ref().map(|a| a.lamports).unwrap_or(0) == 0
+        );
+    }
+
+    #[test]
+    fn test_revoke_recurring_version_agnostic() {
+        use crate::state::header::VERSION_OFFSET;
+
+        let (litesvm, user) = &mut setup();
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(user.pubkey()),
+            &[],
+        );
+        let _user_ata = init_ata(litesvm, mint, user.pubkey(), 1_000_000);
+
+        initialize_multidelegate_action(litesvm, user, mint)
+            .0
+            .assert_ok();
+
+        let delegatee = Pubkey::new_unique();
+        let nonce: u64 = 0;
+
+        let (res, delegation_pda) = CreateDelegation::new(litesvm, user, mint, delegatee)
+            .nonce(nonce)
+            .recurring(100, days(1), current_ts(), current_ts() + days(2) as i64);
+        res.assert_ok();
+
+        let mut account = litesvm.get_account(&delegation_pda).unwrap();
+        account.data[VERSION_OFFSET] = 0;
+        litesvm.set_account(delegation_pda, account).unwrap();
+
+        RevokeDelegation::new(litesvm, user, mint, delegatee, nonce)
+            .execute()
+            .assert_ok();
+
+        let account_after = litesvm.get_account(&delegation_pda);
+        assert!(
+            account_after.is_none() || account_after.as_ref().map(|a| a.lamports).unwrap_or(0) == 0
+        );
+    }
+
+    #[test]
+    fn test_revoke_subscription_version_mismatch() {
+        use crate::state::header::VERSION_OFFSET;
+
+        let (mut litesvm, alice, _merchant, _mint, plan_pda, _, subscription_pda) =
+            setup_with_subscription();
+
+        CancelSubscription::new(&mut litesvm, &alice, plan_pda, subscription_pda)
+            .execute()
+            .assert_ok();
+
+        move_clock_forward(&mut litesvm, hours(1));
+
+        let mut account = litesvm.get_account(&subscription_pda).unwrap();
+        account.data[VERSION_OFFSET] = 0;
+        litesvm.set_account(subscription_pda, account).unwrap();
+
+        RevokeSubscription::new(&mut litesvm, &alice, subscription_pda)
+            .execute()
+            .assert_err(MultiDelegatorError::MigrationRequired);
     }
 
     #[allow(clippy::result_large_err)]

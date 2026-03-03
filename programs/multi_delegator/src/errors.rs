@@ -48,6 +48,8 @@ impl TryFrom<u32> for MultiDelegatorError {
             130 => Ok(Self::Unauthorized),
             131 => Ok(Self::AccountNotWritable),
             132 => Ok(Self::AtaOwnerMismatch),
+            133 => Ok(Self::DelegationVersionMismatch),
+            134 => Ok(Self::MigrationRequired),
             // Fixed delegation errors (300-399)
             300 => Ok(Self::AmountExceedsLimit),
             301 => Ok(Self::FixedDelegationExpiryInPast),
@@ -166,6 +168,10 @@ pub enum MultiDelegatorError {
     AccountNotWritable,
     #[error("Token account owner does not match expected")]
     AtaOwnerMismatch,
+    #[error("Delegation header version is not compatible")]
+    DelegationVersionMismatch,
+    #[error("Account requires explicit migration")]
+    MigrationRequired,
 
     // --- Fixed delegation errors (300--399) ---
     #[error("Transfer amount exceeds delegation limit")]

@@ -1,6 +1,6 @@
 use crate::{
-    create_delegation_account, init_header, AccountDiscriminator, CreateDelegationAccounts,
-    MultiDelegatorError, RecurringDelegation, DISCRIMINATOR_OFFSET,
+    create_delegation_account, AccountDiscriminator, CreateDelegationAccounts, MultiDelegatorError,
+    RecurringDelegation, DISCRIMINATOR_OFFSET,
 };
 use codama::CodamaType;
 use core::mem::{size_of, transmute};
@@ -86,8 +86,7 @@ pub fn process(
     binding[DISCRIMINATOR_OFFSET] = AccountDiscriminator::RecurringDelegation as u8;
     let delegation = RecurringDelegation::load_mut(binding)?;
 
-    init_header(
-        &mut delegation.header,
+    delegation.header.init(
         AccountDiscriminator::RecurringDelegation,
         bump,
         accounts.delegator.address(),

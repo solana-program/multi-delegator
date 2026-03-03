@@ -5,6 +5,7 @@ use pinocchio::{
 };
 
 use crate::{
+    check_and_update_version,
     event_engine::{self, EventSerialize},
     events::SubscriptionCancelledEvent,
     state::{plan::Plan, subscription_delegation::SubscriptionDelegation},
@@ -28,7 +29,8 @@ pub fn process(accounts: &[AccountView]) -> ProgramResult {
     let plan_pda;
     {
         let mut binding = accounts_struct.subscription_pda.try_borrow_mut()?;
-        let subscription = SubscriptionDelegation::load_mut(&mut binding)?;
+        check_and_update_version(&mut binding)?;
+        let subscription = SubscriptionDelegation::load_mut_with_min_size(&mut binding)?;
 
         // Verify caller is the subscriber (delegator)
         if subscription.header.delegator != *accounts_struct.subscriber.address() {
@@ -170,5 +172,21 @@ mod tests {
         let res =
             CancelSubscription::new(&mut litesvm, &alice, plan_pda, subscription_pda).execute();
         res.assert_err(MultiDelegatorError::SubscriptionAlreadyCancelled);
+    }
+
+    #[test]
+    fn test_cancel_subscription_version_mismatch() {
+        use crate::state::header::VERSION_OFFSET;
+
+        let (mut litesvm, alice, _merchant, _mint, plan_pda, _plan_bump, subscription_pda) =
+            setup_with_subscription();
+
+        let mut account = litesvm.get_account(&subscription_pda).unwrap();
+        account.data[VERSION_OFFSET] = 0;
+        litesvm.set_account(subscription_pda, account).unwrap();
+
+        CancelSubscription::new(&mut litesvm, &alice, plan_pda, subscription_pda)
+            .execute()
+            .assert_err(MultiDelegatorError::MigrationRequired);
     }
 }

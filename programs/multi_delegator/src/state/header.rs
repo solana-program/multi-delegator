@@ -8,6 +8,9 @@
 use codama::CodamaType;
 use pinocchio::Address;
 
+use super::common::AccountDiscriminator;
+use super::versioning::CURRENT_VERSION;
+
 /// Byte offset of the discriminator within the header (and the account data).
 pub const DISCRIMINATOR_OFFSET: usize = 0;
 
@@ -25,9 +28,6 @@ pub const DELEGATEE_OFFSET: usize = 35;
 
 /// Byte offset of the payer pubkey (who funded the account creation).
 pub const PAYER_OFFSET: usize = 67;
-
-/// Current header version used when creating new delegation accounts.
-pub const CURRENT_VERSION: u8 = 1;
 
 /// Common header shared by all delegation account types.
 ///
@@ -53,4 +53,20 @@ pub struct Header {
 impl Header {
     /// Total serialized size in bytes.
     pub const LEN: usize = core::mem::size_of::<Header>();
+
+    pub fn init(
+        &mut self,
+        discriminator: AccountDiscriminator,
+        bump: u8,
+        delegator: &Address,
+        delegatee: &Address,
+        payer: &Address,
+    ) {
+        self.version = CURRENT_VERSION;
+        self.discriminator = discriminator.into();
+        self.bump = bump;
+        self.delegator = *delegator;
+        self.delegatee = *delegatee;
+        self.payer = *payer;
+    }
 }

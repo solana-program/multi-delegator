@@ -1,4 +1,5 @@
 use crate::{
+    check_and_update_version,
     constants::{TOKEN_ACCOUNT_OWNER_END, TOKEN_ACCOUNT_OWNER_OFFSET},
     event_engine::{self, EventSerialize},
     events::RecurringTransferEvent,
@@ -34,6 +35,7 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
     let delegatee_address: Address;
     {
         let mut binding = accounts_struct.delegation_pda.try_borrow_mut()?;
+        check_and_update_version(&mut binding)?;
         let delegation_mut = RecurringDelegation::load_mut(&mut binding)?;
 
         // Fail fast: Check authorization first
@@ -878,5 +880,37 @@ mod tests {
 
         // Verify Charlie received funds
         assert_eq!(get_ata_balance(&litesvm, &charlie_ata), 10_000_000);
+    }
+
+    #[test]
+    fn test_recurring_transfer_version_mismatch() {
+        use crate::state::header::VERSION_OFFSET;
+
+        let amount_per_period: u64 = 50_000_000;
+        let period_length_s: u64 = hours(1);
+        let start_ts: i64 = current_ts();
+        let expiry_ts: i64 = current_ts() + days(1) as i64;
+        let nonce = 0;
+
+        let (mut litesvm, alice, bob, delegation_pda, mint, _, bob_ata, _) =
+            setup_recurring_delegation(
+                amount_per_period,
+                period_length_s,
+                start_ts,
+                expiry_ts,
+                nonce,
+            );
+
+        let mut account = litesvm.get_account(&delegation_pda).unwrap();
+        account.data[VERSION_OFFSET] = 0;
+        litesvm.set_account(delegation_pda, account).unwrap();
+
+        let result =
+            TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+                .amount(10_000_000)
+                .recurring();
+
+        result.assert_err(MultiDelegatorError::MigrationRequired);
+        assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
     }
 }
