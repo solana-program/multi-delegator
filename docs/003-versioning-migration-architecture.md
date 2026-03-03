@@ -80,6 +80,22 @@ flowchart TD
     I -- no --> L[Err MigrationRequired]
 ```
 
+## Account Header Layout
+
+All delegation accounts (FixedDelegation, RecurringDelegation, SubscriptionDelegation) share a
+common `Header` where:
+
+- Byte 0: `discriminator` (identifies the account type via `AccountDiscriminator`)
+- Byte 1: `version` (the schema version checked by `check_and_update_version`)
+- Byte 2: `bump` (PDA bump seed)
+- Bytes 3--34: `delegator`
+- Bytes 35--66: `delegatee`
+- Bytes 67--98: `payer`
+
+The version check reads `data[VERSION_OFFSET]` (byte 1), not byte 0.
+`MultiDelegate` and `Plan` accounts have their own layouts but also store a discriminator at
+byte 0; versioning currently applies only to delegation accounts that use the shared `Header`.
+
 ## Instruction Integration
 
 Version check runs **before** struct loading, on raw bytes:

@@ -17,7 +17,7 @@ We implement a **single-track delegation model** that provides:
 1. **MultiDelegate Authority (MDA)**: A programmatic delegate with unlimited token approval authority (`u64::MAX`) over user token accounts
 2. **Delegation PDAs**: Individual constraints governing MDA spending behavior
 3. **Delegation Types**: Fixed (one-time with expiry) and Recurring (periodic pulls with limits)
-4. **Tech Stack**: Pinocchio framework, Shank for IDL generation, Codama for TypeScript client generation
+4. **Tech Stack**: Pinocchio framework, Codama for IDL generation and TypeScript/Rust client generation
 
 **Key Design**: MDA receives unlimited approval, but can only transfer when Delegation PDA constraints allow. The program validates constraints before executing transfers, making the system as secure as traditional approval-based delegations while enabling multi-delegation capabilities.
 
@@ -159,7 +159,7 @@ Each user creates one MDA per token mint with seeds `["MultiDelegate", user, min
 
 ### Delegate Discovery
 
-Delegates discover their delegations via `getProgramAccounts` with `memcmp` filter on the `delegatee` field:
+Delegates discover their delegations via `getProgramAccounts` with `memcmp` filter on the `delegatee` field at byte offset 35 (`DELEGATEE_OFFSET`):
 
 ```typescript
 // Delegatee discovers Bob's delegations:
@@ -175,6 +175,7 @@ getProgramAccounts(PROGRAM_ID, {
 | Instruction                | Actor     | Purpose                                              |
 | -------------------------- | --------- | ---------------------------------------------------- |
 | `initialize_multidelegate` | Delegator | Create MDA and approve `u64::MAX` delegate authority |
+| `close_multidelegate`      | Delegator | Close MDA account and return rent                    |
 
 ### Delegation Management
 
@@ -197,9 +198,12 @@ getProgramAccounts(PROGRAM_ID, {
 
 ```rust
 #[repr(u8)]
-pub enum DelegationKind {
-    Fixed = 0,
-    Recurring = 1,
+pub enum AccountDiscriminator {
+    MultiDelegate = 0,
+    Plan = 1,
+    FixedDelegation = 2,
+    RecurringDelegation = 3,
+    SubscriptionDelegation = 4,
 }
 ```
 
@@ -208,18 +212,20 @@ pub enum DelegationKind {
 The MultiDelegate PDA stores the delegator and mint information:
 
 ```rust
+#[repr(C)]
 pub struct MultiDelegate {
-    pub user: Pubkey,      // 32 bytes - delegator key
-    pub token_mint: Pubkey, // 32 bytes - mint this MDA controls
-    pub bump: u8,          // 1 byte
+    pub discriminator: u8,    // 1 byte - AccountDiscriminator::MultiDelegate
+    pub user: Address,        // 32 bytes - delegator key
+    pub token_mint: Address,  // 32 bytes - mint this MDA controls
+    pub bump: u8,             // 1 byte
 }
 
 impl MultiDelegate {
     pub const SEED: &[u8] = b"MultiDelegate";
-    pub const LEN: usize = 65;
+    pub const LEN: usize = 66;
 
-    pub fn find_pda(user: &Pubkey, token_mint: &Pubkey) -> (Pubkey, u8) {
-        find_program_address(
+    pub fn find_pda(user: &Address, token_mint: &Address) -> (Address, u8) {
+        Address::find_program_address(
             &[Self::SEED, user.as_ref(), token_mint.as_ref()],
             &crate::ID,
         )
@@ -231,25 +237,31 @@ impl MultiDelegate {
 
 ### Header
 
-Shared header for all delegation types:
+Shared header for all delegation types (FixedDelegation, RecurringDelegation, SubscriptionDelegation):
 
 ```rust
 #[repr(C, packed)]
 pub struct Header {
-    pub version: u8,      // 1 byte - account format version
-    pub kind: u8,          // 1 byte - DelegationKind discriminator
-    pub bump: u8,          // 1 byte
-    pub delegator: Pubkey, // 32 bytes - user granting delegation
-    pub delegatee: Pubkey, // 32 bytes - beneficiary
-    pub payer: Pubkey,     // 32 bytes - who paid for the delegation account
+    pub discriminator: u8,  // 1 byte - AccountDiscriminator variant
+    pub version: u8,        // 1 byte - account format version (see ADR-003)
+    pub bump: u8,           // 1 byte - PDA bump seed
+    pub delegator: Address, // 32 bytes - user granting delegation
+    pub delegatee: Address, // 32 bytes - beneficiary
+    pub payer: Address,     // 32 bytes - who paid for the delegation account
 }
 
 impl Header {
-    pub const LEN: usize = 67;
-    pub const CURRENT_VERSION: u8 = 1;
-    pub const KIND_OFFSET: usize = 1;
+    pub const LEN: usize = 99;
 }
 ```
+
+Field offsets are defined as standalone constants in `state/header.rs`:
+- `DISCRIMINATOR_OFFSET = 0`
+- `VERSION_OFFSET = 1`
+- `BUMP_OFFSET = 2`
+- `DELEGATOR_OFFSET = 3`
+- `DELEGATEE_OFFSET = 35`
+- `PAYER_OFFSET = 67`
 
 ### FixedDelegation
 
@@ -258,13 +270,13 @@ One-time delegation with explicit amount and expiry:
 ```rust
 #[repr(C, packed)]
 pub struct FixedDelegation {
-    pub header: Header,     // 67 bytes
-    pub amount: u64,        // 8 bytes - max pullable amount
-    pub expiry_ts: i64,      // 8 bytes - Unix timestamp
+    pub header: Header,     // 99 bytes
+    pub amount: u64,        // 8 bytes - remaining pullable amount
+    pub expiry_ts: i64,     // 8 bytes - Unix timestamp (0 = no expiry)
 }
 
 impl FixedDelegation {
-    pub const LEN: usize = 83;
+    pub const LEN: usize = 115;
 }
 ```
 
@@ -279,16 +291,16 @@ Recurring delegation with period tracking:
 ```rust
 #[repr(C, packed)]
 pub struct RecurringDelegation {
-    pub header: Header,              // 67 bytes
+    pub header: Header,              // 99 bytes
     pub current_period_start_ts: i64, // 8 bytes - start of current period
     pub period_length_s: u64,         // 8 bytes - seconds per period
-    pub expiry_ts: i64,                // 8 bytes - delegation expiry
+    pub expiry_ts: i64,               // 8 bytes - delegation expiry (0 = no expiry)
     pub amount_per_period: u64,       // 8 bytes - max per period
     pub amount_pulled_in_period: u64, // 8 bytes - tracking
 }
 
 impl RecurringDelegation {
-    pub const LEN: usize = 107;
+    pub const LEN: usize = 139;
 }
 ```
 
@@ -326,7 +338,7 @@ Creates a one-time delegation with nonce-based PDA.
 | Account | Type             | Description                            |
 | ------- | ---------------- | -------------------------------------- |
 | 0       | signer, writable | The delegator creating this delegation |
-| 1       | writable         | MultiDelegate PDA for this token type  |
+| 1       |                  | MultiDelegate PDA for this token type  |
 | 2       | writable         | FixedDelegation PDA being created      |
 | 3       |                  | The delegatee (beneficiary)            |
 | 4       | system_program   | System program                         |
@@ -351,7 +363,7 @@ Creates a recurring delegation with period tracking.
 | Account | Type             | Description                            |
 | ------- | ---------------- | -------------------------------------- |
 | 0       | signer, writable | The delegator creating this delegation |
-| 1       | writable         | MultiDelegate PDA for this token type  |
+| 1       |                  | MultiDelegate PDA for this token type  |
 | 2       | writable         | RecurringDelegation PDA being created  |
 | 3       |                  | The delegatee (beneficiary)            |
 | 4       | system_program   | System program                         |
@@ -390,6 +402,21 @@ Revokes a delegation by closing the delegation PDA and returning rent to the ori
 3. Close the delegation account
 4. Transfer rent lamports back to the original payer (delegator or sponsor)
 
+### `close_multidelegate` (Discriminator: 6)
+
+Closes a MultiDelegate PDA and returns rent to the owner.
+
+| Account | Type             | Description                                |
+| ------- | ---------------- | ------------------------------------------ |
+| 0       | signer, writable | The user who owns the MultiDelegate PDA    |
+| 1       | writable         | MultiDelegate PDA to close                 |
+
+**Process:**
+
+1. Verify signer matches the MDA's `user` field
+2. Verify PDA derivation from `["MultiDelegate", user, token_mint]`
+3. Close account and transfer lamports to user
+
 ---
 
 ## Spend/Transfer Design
@@ -403,25 +430,28 @@ Executes a transfer for a fixed delegation.
 | Account | Type             | Description                                |
 | ------- | ---------------- | ------------------------------------------ |
 | 0       | writable         | FixedDelegation PDA                        |
-| 1       | writable         | MultiDelegate PDA                          |
+| 1       |                  | MultiDelegate PDA                          |
 | 2       | writable         | Delegator's ATA                            |
 | 3       | writable         | Receiver's ATA                             |
 | 4       |                  | Token Program                              |
 | 5       | signer           | Delegatee (beneficiary)                    |
+| 6       |                  | Event authority PDA                        |
+| 7       |                  | This program (for self-CPI event emission) |
 
 **Parameters (in instruction data):**
 
 - `amount: u64` - Amount to transfer
-- `delegator: Pubkey` - The delegator's public key (for verification)
-- `mint: Pubkey` - The token mint (for verification)
+- `delegator: Address` - The delegator's public key (for verification)
+- `mint: Address` - The token mint (for verification)
 
 **Process:**
 
-1. Validate delegation is `Fixed` kind
+1. Validate delegation discriminator is `FixedDelegation`
 2. Verify signer is authorized delegatee
 3. Check expiry and amount limits
 4. Deduct amount from delegation
 5. Execute transfer via MultiDelegate
+6. Emit `FixedTransferEvent` via self-CPI
 
 ### `transfer_recurring` (Discriminator: 5)
 
@@ -430,34 +460,28 @@ Executes a transfer for a recurring delegation.
 | Account | Type             | Description                                |
 | ------- | ---------------- | ------------------------------------------ |
 | 0       | writable         | RecurringDelegation PDA                    |
-| 1       | writable         | MultiDelegate PDA                          |
+| 1       |                  | MultiDelegate PDA                          |
 | 2       | writable         | Delegator's ATA                            |
 | 3       | writable         | Receiver's ATA                             |
 | 4       |                  | Token Program                              |
 | 5       | signer           | Delegatee (beneficiary)                    |
+| 6       |                  | Event authority PDA                        |
+| 7       |                  | This program (for self-CPI event emission) |
 
 **Parameters (in instruction data):**
 
 - `amount: u64` - Amount to transfer
-- `delegator: Pubkey` - The delegator's public key
-- `mint: Pubkey` - The token mint
+- `delegator: Address` - The delegator's public key
+- `mint: Address` - The token mint
 
 **Process:**
 
-1. Validate delegation is `Recurring` kind
+1. Validate delegation discriminator is `RecurringDelegation`
 2. Verify signer is authorized delegatee
 3. Check expiry
 4. Update period logic (reset if new period)
 5. Check period limits
 6. Update tracking
 7. Execute transfer via MultiDelegate
+8. Emit `RecurringTransferEvent` via self-CPI
 
----
-
-## Open Questions
-
-1. **Delegator-only vs. Anyone Transfers**: Currently the recurring delegation is designed so that only the delegator can pull the funds. We could open up the type so that it can allow for anyone to run the transfer, but it can only go to a single delegator.
-
-2. **Whitelist of Authorized Callers**: Could it make sense to also have a whitelist of users who can call the transfer function, this can allow for flexibility as to the function of the recurring_delegation.
-
-3. **Whitelist of Authorized Receivers**: Could it make sense to also have a whitelist of users who can receive funds through delegation. For example, to allow for the transfer to only two or three whitelisted addresses? Would we only want to allow for this recurring types, or create a new type of delegation?
