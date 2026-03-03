@@ -57,6 +57,7 @@ import {
   getPlanPDA,
   getSubscriptionPDA,
 } from './pdas.js';
+import { addressAsSigner, type Wallet } from './wallet.js';
 
 type SolanaClient = {
   rpc: Rpc<GetAccountInfoApi & GetLatestBlockhashApi & GetProgramAccountsApi>;
@@ -76,6 +77,13 @@ export type Delegation =
 
 export class MultiDelegatorClient {
   constructor(public readonly client: SolanaClient) {}
+
+  private async sendViaWallet(
+    wallet: Wallet,
+    instructions: Instruction[],
+  ): Promise<string> {
+    return wallet.sendInstructions(instructions);
+  }
 
   private async buildAndSendTransaction(
     instructions: Instruction[],
@@ -98,43 +106,43 @@ export class MultiDelegatorClient {
   }
 
   async initMultiDelegate(
-    owner: TransactionSigner,
+    owner: Wallet,
     tokenMint: Address,
     userAta: Address,
     tokenProgram: Address,
   ): Promise<{ signature: string }> {
-    const user = owner.address;
-    const [multiDelegate] = await getMultiDelegatePDA(user, tokenMint);
+    const ownerAddress = owner.address;
+    const [multiDelegate] = await getMultiDelegatePDA(ownerAddress, tokenMint);
 
     const instruction = getInitMultiDelegateInstruction({
-      owner,
+      owner: addressAsSigner(ownerAddress),
       multiDelegate,
       tokenMint,
       userAta,
       tokenProgram,
     });
 
-    const sig = await this.buildAndSendTransaction([instruction], [owner]);
+    const sig = await this.sendViaWallet(owner, [instruction]);
     return { signature: sig };
   }
 
   async closeMultiDelegate(
-    user: TransactionSigner,
+    user: Wallet,
     tokenMint: Address,
   ): Promise<{ signature: string }> {
     const [multiDelegate] = await getMultiDelegatePDA(user.address, tokenMint);
 
     const instruction = getCloseMultiDelegateInstruction({
-      user,
+      user: addressAsSigner(user.address),
       multiDelegate,
     });
 
-    const sig = await this.buildAndSendTransaction([instruction], [user]);
+    const sig = await this.sendViaWallet(user, [instruction]);
     return { signature: sig };
   }
 
   async createFixedDelegation(
-    delegator: TransactionSigner,
+    delegator: Wallet,
     tokenMint: Address,
     delegatee: Address,
     nonce: number | bigint,
@@ -151,7 +159,7 @@ export class MultiDelegatorClient {
     );
 
     const instruction = getCreateFixedDelegationInstruction({
-      delegator,
+      delegator: addressAsSigner(user),
       multiDelegate,
       delegationAccount,
       delegatee,
@@ -162,12 +170,12 @@ export class MultiDelegatorClient {
       },
     });
 
-    const sig = await this.buildAndSendTransaction([instruction], [delegator]);
+    const sig = await this.sendViaWallet(delegator, [instruction]);
     return { signature: sig };
   }
 
   async createRecurringDelegation(
-    delegator: TransactionSigner,
+    delegator: Wallet,
     tokenMint: Address,
     delegatee: Address,
     nonce: number | bigint,
@@ -186,7 +194,7 @@ export class MultiDelegatorClient {
     );
 
     const instruction = getCreateRecurringDelegationInstruction({
-      delegator,
+      delegator: addressAsSigner(user),
       multiDelegate,
       delegationAccount,
       delegatee,
@@ -199,20 +207,20 @@ export class MultiDelegatorClient {
       },
     });
 
-    const sig = await this.buildAndSendTransaction([instruction], [delegator]);
+    const sig = await this.sendViaWallet(delegator, [instruction]);
     return { signature: sig };
   }
 
   async revokeDelegation(
-    delegator: TransactionSigner,
+    delegator: Wallet,
     delegationAccount: Address,
   ): Promise<{ signature: string }> {
     const instruction = getRevokeDelegationInstruction({
-      authority: delegator,
+      authority: addressAsSigner(delegator.address),
       delegationAccount,
     });
 
-    const sig = await this.buildAndSendTransaction([instruction], [delegator]);
+    const sig = await this.sendViaWallet(delegator, [instruction]);
     return { signature: sig };
   }
 
@@ -384,7 +392,7 @@ export class MultiDelegatorClient {
   }
 
   async createPlan(
-    owner: TransactionSigner,
+    owner: Wallet,
     planId: number | bigint,
     mint: Address,
     amount: number | bigint,
@@ -418,7 +426,7 @@ export class MultiDelegatorClient {
     const [planPda] = await getPlanPDA(owner.address, planId);
 
     const instruction = getCreatePlanInstruction({
-      merchant: owner,
+      merchant: addressAsSigner(owner.address),
       planPda,
       tokenMint: mint,
       planData: {
@@ -433,12 +441,12 @@ export class MultiDelegatorClient {
       },
     });
 
-    const sig = await this.buildAndSendTransaction([instruction], [owner]);
+    const sig = await this.sendViaWallet(owner, [instruction]);
     return { signature: sig, planPda };
   }
 
   async updatePlan(
-    owner: TransactionSigner,
+    owner: Wallet,
     planPda: Address,
     status: PlanStatus,
     endTs: number | bigint,
@@ -452,32 +460,23 @@ export class MultiDelegatorClient {
     if (pullers.length > MAX_PLAN_PULLERS)
       throw new Error(`pullers exceeds max of ${MAX_PLAN_PULLERS}`);
 
-    if (endTs !== 0 && endTs !== BigInt(0)) {
-      const endTsNum = typeof endTs === 'bigint' ? Number(endTs) : endTs;
-      if (endTsNum <= Math.floor(Date.now() / 1000))
-        throw new Error('endTs must be in the future');
-    }
-
     const paddedPullers = [
       ...pullers,
       ...Array(MAX_PLAN_PULLERS - pullers.length).fill(ZERO_ADDRESS),
     ] as [Address, Address, Address, Address];
 
     const instruction = getUpdatePlanInstruction({
-      owner,
+      owner: addressAsSigner(owner.address),
       planPda,
       updatePlanData: { status, endTs, pullers: paddedPullers, metadataUri },
     });
 
-    const signature = await this.buildAndSendTransaction(
-      [instruction],
-      [owner],
-    );
+    const signature = await this.sendViaWallet(owner, [instruction]);
     return { signature };
   }
 
   async subscribe(
-    subscriber: TransactionSigner,
+    subscriber: Wallet,
     merchant: Address,
     planId: number | bigint,
     tokenMint: Address,
@@ -492,7 +491,7 @@ export class MultiDelegatorClient {
       subscriber.address,
     );
     const instruction = await getSubscribeInstructionAsync({
-      subscriber,
+      subscriber: addressAsSigner(subscriber.address),
       merchant,
       planPda,
       subscriptionPda,
@@ -503,28 +502,22 @@ export class MultiDelegatorClient {
       },
     });
 
-    const signature = await this.buildAndSendTransaction(
-      [instruction],
-      [subscriber],
-    );
+    const signature = await this.sendViaWallet(subscriber, [instruction]);
     return { signature, subscriptionPda };
   }
 
   async cancelSubscription(
-    subscriber: TransactionSigner,
+    subscriber: Wallet,
     planPda: Address,
     subscriptionPda: Address,
   ): Promise<{ signature: string }> {
     const instruction = await getCancelSubscriptionInstructionAsync({
-      subscriber,
+      subscriber: addressAsSigner(subscriber.address),
       planPda,
       subscriptionPda,
     });
 
-    const signature = await this.buildAndSendTransaction(
-      [instruction],
-      [subscriber],
-    );
+    const signature = await this.sendViaWallet(subscriber, [instruction]);
     return { signature };
   }
 
@@ -568,14 +561,14 @@ export class MultiDelegatorClient {
   }
 
   async deletePlan(
-    owner: TransactionSigner,
+    owner: Wallet,
     planPda: Address,
   ): Promise<{ signature: string }> {
-    const instruction = getDeletePlanInstruction({ owner, planPda });
-    const signature = await this.buildAndSendTransaction(
-      [instruction],
-      [owner],
-    );
+    const instruction = getDeletePlanInstruction({
+      owner: addressAsSigner(owner.address),
+      planPda,
+    });
+    const signature = await this.sendViaWallet(owner, [instruction]);
     return { signature };
   }
 

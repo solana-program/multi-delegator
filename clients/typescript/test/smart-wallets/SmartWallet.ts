@@ -1,7 +1,5 @@
-import type { Address, Instruction } from 'gill';
+import type { Wallet } from '../../src/wallet.ts';
 
-export interface SmartWallet {
+export interface SmartWallet extends Wallet {
   readonly name: string;
-  readonly address: Address;
-  sendInstructions(instructions: Instruction[]): Promise<string>;
 }

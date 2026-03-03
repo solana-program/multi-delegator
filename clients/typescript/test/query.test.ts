@@ -28,7 +28,7 @@ describe('MultiDelegator Query Tests', () => {
     const delegatee1 = await generateKeyPairSigner();
     const delegatee2 = await generateKeyPairSigner();
 
-    const currentTs = Math.floor(Date.now() / 1000);
+    const currentTs = await testSuite.getValidatorTime();
 
     await testSuite.client.createFixedDelegation(
       testSuite.payer,
@@ -36,7 +36,7 @@ describe('MultiDelegator Query Tests', () => {
       delegatee1.address,
       0n,
       100_000n,
-      BigInt(currentTs + ONE_HOUR_IN_SECONDS),
+      currentTs + BigInt(ONE_HOUR_IN_SECONDS),
     );
 
     await testSuite.client.createRecurringDelegation(
@@ -46,8 +46,8 @@ describe('MultiDelegator Query Tests', () => {
       1n,
       50_000n,
       BigInt(ONE_DAY_IN_SECONDS),
-      BigInt(currentTs),
-      BigInt(currentTs + ONE_DAY_IN_SECONDS * 30),
+      currentTs,
+      currentTs + BigInt(ONE_DAY_IN_SECONDS * 30),
     );
 
     const delegations = await testSuite.client.getDelegationsForWallet(

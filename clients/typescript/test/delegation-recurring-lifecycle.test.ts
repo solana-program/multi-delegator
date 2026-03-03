@@ -1,0 +1,126 @@
+import { describe, expect, test } from 'vitest';
+import {
+  fetchMaybeMultiDelegate,
+  fetchMultiDelegate,
+  fetchRecurringDelegation,
+} from '../src/generated/index.ts';
+import { getDelegationPDA, getMultiDelegatePDA } from '../src/pdas.ts';
+import {
+  DEFAULT_TEST_BALANCE,
+  getWalletProviders,
+  initTestSuite,
+  ONE_DAY_IN_SECONDS,
+} from './setup.ts';
+
+describe.each(getWalletProviders())('Recurring Delegation Lifecycle ($name)', ({
+  createWallet,
+}) => {
+  test('init → create → transfer → revoke → close', async () => {
+    const t = await initTestSuite();
+    const wallet = await createWallet(t);
+
+    const userAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      wallet.address,
+      DEFAULT_TEST_BALANCE,
+    );
+
+    // 1. Init multi-delegate
+    await t.client.initMultiDelegate(
+      wallet,
+      t.tokenMint,
+      userAta,
+      t.tokenProgram,
+    );
+
+    const [multiDelegatePda] = await getMultiDelegatePDA(
+      wallet.address,
+      t.tokenMint,
+    );
+
+    const multiDelegateAccount = await fetchMultiDelegate(
+      t.rpc,
+      multiDelegatePda,
+    );
+    expect(multiDelegateAccount.data.user).toBe(wallet.address);
+
+    // 2. Create recurring delegation
+    const delegatee = await t.createFundedKeypair();
+    const nonce = 0n;
+    const amountPerPeriod = 100_000n;
+    const periodLengthS = BigInt(ONE_DAY_IN_SECONDS);
+    const currentTs = await t.getValidatorTime();
+    const startTs = currentTs;
+    const expiryS = currentTs + BigInt(ONE_DAY_IN_SECONDS * 30);
+
+    await t.client.createRecurringDelegation(
+      wallet,
+      t.tokenMint,
+      delegatee.address,
+      nonce,
+      amountPerPeriod,
+      periodLengthS,
+      startTs,
+      expiryS,
+    );
+
+    const [delegationPda] = await getDelegationPDA(
+      multiDelegatePda,
+      wallet.address,
+      delegatee.address,
+      nonce,
+    );
+
+    const delegationAccount = await fetchRecurringDelegation(
+      t.rpc,
+      delegationPda,
+    );
+    expect(delegationAccount.data.expiryTs).toBe(expiryS);
+    expect(delegationAccount.data.periodLengthS).toBe(periodLengthS);
+    expect(delegationAccount.data.currentPeriodStartTs).toBe(startTs);
+    expect(delegationAccount.data.amountPerPeriod).toBe(amountPerPeriod);
+    expect(delegationAccount.data.amountPulledInPeriod).toBe(0n);
+
+    // 3. Transfer 50k
+    const delegateeAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      delegatee.address,
+      0n,
+    );
+
+    const transferAmount = 50_000n;
+    await t.client.transferRecurring(
+      delegatee,
+      wallet.address,
+      userAta,
+      t.tokenMint,
+      delegationPda,
+      transferAmount,
+      delegateeAta,
+      t.tokenProgram,
+    );
+
+    const balance = await t.rpc.getTokenAccountBalance(delegateeAta).send();
+    expect(balance.value.amount).toBe(transferAmount.toString());
+
+    const delegationAfterTransfer = await fetchRecurringDelegation(
+      t.rpc,
+      delegationPda,
+    );
+    expect(delegationAfterTransfer.data.amountPulledInPeriod).toBe(
+      transferAmount,
+    );
+
+    // 4. Revoke delegation
+    await t.client.revokeDelegation(wallet, delegationPda);
+    await expect(
+      fetchRecurringDelegation(t.rpc, delegationPda),
+    ).rejects.toThrow();
+
+    // 5. Close multi-delegate
+    await t.client.closeMultiDelegate(wallet, t.tokenMint);
+
+    const accountAfter = await fetchMaybeMultiDelegate(t.rpc, multiDelegatePda);
+    expect(accountAfter.exists).toBe(false);
+  });
+});

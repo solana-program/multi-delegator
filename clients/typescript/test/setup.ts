@@ -21,6 +21,7 @@ import {
   signTransactionMessageWithSigners,
 } from 'gill';
 import { MultiDelegatorClient } from '../src/client.js';
+import { KeyPairWallet, type Wallet } from '../src/wallet.js';
 import {
   createSmartWallets as createAdapterSmartWallets,
   type SmartWallet,
@@ -41,17 +42,21 @@ function normalizeSmartWalletChoice(rawChoice: string): SmartWalletChoice {
   if (
     normalized === 'swig' ||
     normalized === 'squads' ||
-    normalized === 'all'
+    normalized === 'all' ||
+    normalized === 'none'
   ) {
     return normalized;
   }
   throw new Error(
-    `Invalid SMART_WALLET value: ${rawChoice}. Use swig, squads, or all.`,
+    `Invalid SMART_WALLET value: ${rawChoice}. Use swig, squads, none, or all.`,
   );
 }
 
 export function getSmartWalletList(): SmartWalletName[] {
   const choice = normalizeSmartWalletChoice(process.env.SMART_WALLET ?? 'all');
+  if (choice === 'none') {
+    return [];
+  }
   if (choice === 'all') {
     return ['squads', 'swig'];
   }
@@ -60,6 +65,30 @@ export function getSmartWalletList(): SmartWalletName[] {
 
 // Backward-compatible alias for requested naming.
 export const getSmartWalletlist = getSmartWalletList;
+
+export type WalletProvider = {
+  name: string;
+  createWallet(testSuite: IntegrationTest): Promise<Wallet>;
+};
+
+export function getWalletProviders(): WalletProvider[] {
+  const providers: WalletProvider[] = [
+    {
+      name: 'keypair',
+      createWallet: async (t: IntegrationTest) =>
+        new KeyPairWallet(t.payerKeypair, t.client.client),
+    },
+  ];
+
+  for (const walletName of getSmartWalletList()) {
+    providers.push({
+      name: walletName,
+      createWallet: async (t: IntegrationTest) => t.getSmartWallet(walletName),
+    });
+  }
+
+  return providers;
+}
 
 export async function getSmartWallet(
   testSuite: IntegrationTest,
@@ -79,8 +108,11 @@ export class IntegrationTest {
   /** Direct RPC access for queries and assertions */
   public readonly rpc: SolanaClient['rpc'];
 
-  /** Pre-funded keypair signer (10 SOL), also the mint authority for tokenMint */
-  public readonly payer: KeyPairSigner;
+  /** Pre-funded payer wrapped as a Wallet — the primary owner/delegator identity */
+  public readonly payer: Wallet;
+
+  /** Raw keypair signer for the payer — use for TransactionSigner params and funding ops */
+  public readonly payerKeypair: KeyPairSigner;
 
   /** Pre-created SPL token mint (6 decimals, payer is mint authority) */
   public readonly tokenMint: Address;
@@ -101,7 +133,8 @@ export class IntegrationTest {
     this.solanaClient = solanaClient;
     this.client = client;
     this.rpc = solanaClient.rpc;
-    this.payer = payer;
+    this.payerKeypair = payer;
+    this.payer = new KeyPairWallet(payer, solanaClient);
     this.tokenMint = tokenMint;
     this.tokenProgram = tokenProgram;
   }
@@ -136,7 +169,7 @@ export class IntegrationTest {
    * @returns The address of the newly created mint
    */
   async createTokenMint(decimals: number = 6): Promise<Address> {
-    return createMint(this.solanaClient, this.payer, decimals);
+    return createMint(this.solanaClient, this.payerKeypair, decimals);
   }
 
   /**
@@ -153,7 +186,7 @@ export class IntegrationTest {
   ): Promise<Address> {
     return createAtaWithTokens(
       this.solanaClient,
-      this.payer,
+      this.payerKeypair,
       mint,
       owner,
       amount,
@@ -166,6 +199,13 @@ export class IntegrationTest {
     return createFundedKeypair(this.solanaClient, lamportsAmount);
   }
 
+  async createFundedWallet(
+    lamportsAmount: bigint = 1_000_000_000n,
+  ): Promise<Wallet> {
+    const signer = await createFundedKeypair(this.solanaClient, lamportsAmount);
+    return new KeyPairWallet(signer, this.solanaClient);
+  }
+
   async airdropToAddress(
     address: Address,
     lamportsAmount: bigint = 1_000_000_000n,
@@ -173,14 +213,47 @@ export class IntegrationTest {
     await airdropToAddress(this.solanaClient, address, lamportsAmount);
   }
 
+  async getValidatorTime(): Promise<bigint> {
+    const slot = await this.rpc.getSlot().send();
+    const blockTime = await this.rpc.getBlockTime(slot).send();
+    if (blockTime == null) throw new Error('blockTime is null');
+    return BigInt(blockTime);
+  }
+
+  async timeTravel(targetTimestampSec: number): Promise<void> {
+    const res = await fetch(SURFPOOL_RPC_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'surfnet_timeTravel',
+        params: [{ absoluteTimestamp: targetTimestampSec * 1000 }],
+      }),
+    });
+    if (!res.ok) throw new Error(`surfnet_timeTravel failed: ${res.status}`);
+    const data = (await res.json()) as { error?: { message: string } };
+    if (data.error) throw new Error(data.error.message);
+  }
+
+  private smartWalletsInitialized = false;
+
   private async ensureSmartWalletsInitialized(): Promise<void> {
-    if (this.smartWalletsByName.size > 0) {
+    if (this.smartWalletsInitialized) {
+      return;
+    }
+    this.smartWalletsInitialized = true;
+
+    const choice = normalizeSmartWalletChoice(
+      process.env.SMART_WALLET ?? 'all',
+    );
+    if (choice === 'none') {
       return;
     }
 
     const wallets = await createAdapterSmartWallets({
       rpcUrl: SURFPOOL_RPC_URL,
-      choice: normalizeSmartWalletChoice(process.env.SMART_WALLET ?? 'all'),
+      choice,
       airdrop: (address, lamportsAmount) =>
         this.airdropToAddress(address, lamportsAmount),
     });

@@ -4,7 +4,7 @@ import type { SmartWallet } from './SmartWallet.ts';
 import { createSquadsWallet } from './squadsWallet.ts';
 import { createSwigWallet } from './swigWallet.ts';
 
-export type SmartWalletChoice = 'swig' | 'squads' | 'all';
+export type SmartWalletChoice = 'swig' | 'squads' | 'all' | 'none';
 
 type CreateSmartWalletsConfig = {
   rpcUrl: string;
@@ -67,10 +67,6 @@ export async function createSmartWallets(
     });
     await config.airdrop(squadsWallet.address, 5_000_000_000n);
     wallets.push(squadsWallet);
-  }
-
-  if (wallets.length === 0) {
-    throw new Error('No smart wallets were created.');
   }
 
   return wallets;
