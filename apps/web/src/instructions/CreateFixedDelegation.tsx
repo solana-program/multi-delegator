@@ -11,17 +11,18 @@ import { FormField, SendButton, TxResultDisplay } from './shared';
 
 export function CreateFixedDelegation() {
     const { createSigner } = useWallet();
-    const { send, sending, error, signature } = useSendTx();
-    const { defaultMint, defaultDelegatee } = useSavedValues();
+    const { send, sending, error, signature, reset } = useSendTx();
+    const { defaultMint, defaultDelegatee, rememberMint, rememberDelegatee, rememberDelegation } = useSavedValues();
 
-    const [mint, setMint] = useState(defaultMint);
-    const [delegatee, setDelegatee] = useState(defaultDelegatee);
+    const [mint, setMint] = useState('');
+    const [delegatee, setDelegatee] = useState('');
     const [nonce, setNonce] = useState('0');
     const [amount, setAmount] = useState('');
     const [expiryTs, setExpiryTs] = useState('0');
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
+        reset();
         const signer = createSigner();
         if (!signer) return;
 
@@ -35,19 +36,31 @@ export function CreateFixedDelegation() {
             programAddress: getProgramAddress(),
         });
 
-        await send(instructions, {
+        const sig = await send(instructions, {
             action: 'CreateFixedDelegation',
             values: { mint: mint.trim(), delegatee: delegatee.trim(), delegationPda },
         });
+        if (sig) {
+            rememberMint(mint.trim());
+            rememberDelegatee(delegatee.trim());
+            rememberDelegation(delegationPda);
+        }
     }
 
     return (
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <FormField label="Token Mint" value={mint} onChange={setMint} placeholder="Mint address" required />
-            <FormField label="Delegatee" value={delegatee} onChange={setDelegatee} placeholder="Delegatee address" required />
-            <FormField label="Nonce" value={nonce} onChange={setNonce} type="number" hint="Unique nonce for this delegation to the same delegatee" required />
-            <FormField label="Amount" value={amount} onChange={setAmount} type="number" hint="Total token amount (base units)" required />
-            <FormField label="Expiry Timestamp" value={expiryTs} onChange={setExpiryTs} type="number" hint="Unix timestamp (0 = no expiry)" required />
+        <form onSubmit={e => { void handleSubmit(e); }} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <FormField label="Token Mint" value={mint} onChange={setMint}
+                autoFillValue={defaultMint} onAutoFill={setMint}
+                placeholder="Mint address" required />
+            <FormField label="Delegatee" value={delegatee} onChange={setDelegatee}
+                autoFillValue={defaultDelegatee} onAutoFill={setDelegatee}
+                placeholder="Delegatee address" required />
+            <FormField label="Nonce" value={nonce} onChange={setNonce} type="number"
+                hint="Unique nonce to distinguish multiple delegations to the same delegatee" required />
+            <FormField label="Amount" value={amount} onChange={setAmount} type="number"
+                hint="Total token amount (base units)" required />
+            <FormField label="Expiry Timestamp" value={expiryTs} onChange={setExpiryTs} type="number"
+                hint="Unix timestamp (0 = no expiry)" required />
             <SendButton sending={sending} />
             <TxResultDisplay signature={signature} error={error} />
         </form>

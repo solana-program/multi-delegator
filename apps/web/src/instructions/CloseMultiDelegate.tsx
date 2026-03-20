@@ -11,13 +11,14 @@ import { FormField, SendButton, TxResultDisplay } from './shared';
 
 export function CloseMultiDelegate() {
     const { createSigner } = useWallet();
-    const { send, sending, error, signature } = useSendTx();
+    const { send, sending, error, signature, reset } = useSendTx();
     const { defaultMint } = useSavedValues();
 
-    const [mint, setMint] = useState(defaultMint);
+    const [mint, setMint] = useState('');
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
+        reset();
         const signer = createSigner();
         if (!signer) return;
 
@@ -29,8 +30,10 @@ export function CloseMultiDelegate() {
     }
 
     return (
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <FormField label="Token Mint" value={mint} onChange={setMint} placeholder="Mint address" required />
+        <form onSubmit={e => { void handleSubmit(e); }} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <FormField label="Token Mint" value={mint} onChange={setMint}
+                autoFillValue={defaultMint} onAutoFill={setMint}
+                placeholder="Mint address" required />
             <SendButton sending={sending} />
             <TxResultDisplay signature={signature} error={error} />
         </form>

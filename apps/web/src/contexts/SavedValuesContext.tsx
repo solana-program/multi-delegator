@@ -11,11 +11,13 @@ interface SavedValuesState {
     defaultDelegation: string;
     defaultMint: string;
     defaultPlan: string;
+    defaultSubscription: string;
     delegatees: string[];
     multiDelegates: string[];
     delegations: string[];
     mints: string[];
     plans: string[];
+    subscriptions: string[];
 }
 
 const INITIAL_STATE: SavedValuesState = {
@@ -24,11 +26,13 @@ const INITIAL_STATE: SavedValuesState = {
     defaultDelegation: '',
     defaultMint: '',
     defaultPlan: '',
+    defaultSubscription: '',
     delegatees: [],
     multiDelegates: [],
     delegations: [],
     mints: [],
     plans: [],
+    subscriptions: [],
 };
 
 interface SavedValuesContextType extends SavedValuesState {
@@ -37,11 +41,13 @@ interface SavedValuesContextType extends SavedValuesState {
     setDefaultDelegation: (v: string) => void;
     setDefaultMint: (v: string) => void;
     setDefaultPlan: (v: string) => void;
+    setDefaultSubscription: (v: string) => void;
     rememberDelegatee: (v: string) => void;
     rememberMultiDelegate: (v: string) => void;
     rememberDelegation: (v: string) => void;
     rememberMint: (v: string) => void;
     rememberPlan: (v: string) => void;
+    rememberSubscription: (v: string) => void;
     clearSavedValues: () => void;
 }
 
@@ -70,11 +76,13 @@ function readFromStorage(): SavedValuesState {
             defaultDelegation: ss(p.defaultDelegation),
             defaultMint: ss(p.defaultMint),
             defaultPlan: ss(p.defaultPlan),
+            defaultSubscription: ss(p.defaultSubscription),
             delegatees: sa(p.delegatees),
             multiDelegates: sa(p.multiDelegates),
             delegations: sa(p.delegations),
             mints: sa(p.mints),
             plans: sa(p.plans),
+            subscriptions: sa(p.subscriptions),
         };
     } catch {
         return INITIAL_STATE;
@@ -93,6 +101,7 @@ export function SavedValuesProvider({ children }: { children: React.ReactNode })
     const setDefaultDelegation = useCallback((v: string) => setState(s => ({ ...s, defaultDelegation: normalize(v) })), []);
     const setDefaultMint = useCallback((v: string) => setState(s => ({ ...s, defaultMint: normalize(v) })), []);
     const setDefaultPlan = useCallback((v: string) => setState(s => ({ ...s, defaultPlan: normalize(v) })), []);
+    const setDefaultSubscription = useCallback((v: string) => setState(s => ({ ...s, defaultSubscription: normalize(v) })), []);
 
     const rememberDelegatee = useCallback((v: string) => setState(s => {
         const n = normalize(v); if (!n) return s;
@@ -114,16 +123,26 @@ export function SavedValuesProvider({ children }: { children: React.ReactNode })
         const n = normalize(v); if (!n) return s;
         return { ...s, defaultPlan: n, plans: addUnique(s.plans, n) };
     }), []);
+    const rememberSubscription = useCallback((v: string) => setState(s => {
+        const n = normalize(v); if (!n) return s;
+        return { ...s, defaultSubscription: n, subscriptions: addUnique(s.subscriptions, n) };
+    }), []);
 
     const clearSavedValues = useCallback(() => setState(INITIAL_STATE), []);
 
     const ctx = useMemo<SavedValuesContextType>(() => ({
         ...state,
-        setDefaultDelegatee, setDefaultMultiDelegate, setDefaultDelegation, setDefaultMint, setDefaultPlan,
-        rememberDelegatee, rememberMultiDelegate, rememberDelegation, rememberMint, rememberPlan,
+        setDefaultDelegatee, setDefaultMultiDelegate, setDefaultDelegation,
+        setDefaultMint, setDefaultPlan, setDefaultSubscription,
+        rememberDelegatee, rememberMultiDelegate, rememberDelegation,
+        rememberMint, rememberPlan, rememberSubscription,
         clearSavedValues,
-    }), [state, setDefaultDelegatee, setDefaultMultiDelegate, setDefaultDelegation, setDefaultMint, setDefaultPlan,
-        rememberDelegatee, rememberMultiDelegate, rememberDelegation, rememberMint, rememberPlan, clearSavedValues]);
+    }), [state,
+        setDefaultDelegatee, setDefaultMultiDelegate, setDefaultDelegation,
+        setDefaultMint, setDefaultPlan, setDefaultSubscription,
+        rememberDelegatee, rememberMultiDelegate, rememberDelegation,
+        rememberMint, rememberPlan, rememberSubscription,
+        clearSavedValues]);
 
     return <SavedValuesContext.Provider value={ctx}>{children}</SavedValuesContext.Provider>;
 }
