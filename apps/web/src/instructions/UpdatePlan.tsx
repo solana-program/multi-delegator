@@ -11,10 +11,10 @@ import { FormField, SelectField, SendButton, TxResultDisplay } from './shared';
 
 export function UpdatePlan() {
     const { createSigner } = useWallet();
-    const { send, sending, error, signature } = useSendTx();
+    const { send, sending, error, signature, reset } = useSendTx();
     const { defaultPlan } = useSavedValues();
 
-    const [planPda, setPlanPda] = useState(defaultPlan);
+    const [planPda, setPlanPda] = useState('');
     const [statusKey, setStatusKey] = useState<'Active' | 'Sunset'>('Active');
     const [endTs, setEndTs] = useState('0');
     const [metadataUri, setMetadataUri] = useState('');
@@ -26,6 +26,7 @@ export function UpdatePlan() {
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
+        reset();
         const signer = createSigner();
         if (!signer) return;
 
@@ -40,13 +41,17 @@ export function UpdatePlan() {
     }
 
     return (
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <FormField label="Plan PDA" value={planPda} onChange={setPlanPda} placeholder="Plan account address" required />
+        <form onSubmit={e => { void handleSubmit(e); }} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <FormField label="Plan PDA" value={planPda} onChange={setPlanPda}
+                autoFillValue={defaultPlan} onAutoFill={setPlanPda}
+                placeholder="Plan account address" required />
             <SelectField label="Status" value={statusKey}
                 onChange={v => setStatusKey(v as 'Active' | 'Sunset')}
                 options={[{ label: 'Active', value: 'Active' }, { label: 'Sunset', value: 'Sunset' }]} />
-            <FormField label="End Timestamp" value={endTs} onChange={setEndTs} type="number" hint="Unix timestamp (0 = no end)" required />
-            <FormField label="Metadata URI" value={metadataUri} onChange={setMetadataUri} placeholder="https://..." hint="Max 128 bytes" />
+            <FormField label="End Timestamp" value={endTs} onChange={setEndTs} type="number"
+                hint="Unix timestamp (0 = no end; Sunset requires non-zero future value)" required />
+            <FormField label="Metadata URI" value={metadataUri} onChange={setMetadataUri}
+                placeholder="https://..." hint="Max 128 bytes" />
             <FormField label="Pullers (up to 4)" value={pullers} onChange={setPullers}
                 placeholder="Comma-separated addresses" hint="Updated authorized pullers" />
             <SendButton sending={sending} />

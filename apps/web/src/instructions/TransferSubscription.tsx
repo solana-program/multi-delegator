@@ -12,18 +12,19 @@ import { FormField, SendButton, TxResultDisplay } from './shared';
 
 export function TransferSubscription() {
     const { createSigner } = useWallet();
-    const { send, sending, error, signature } = useSendTx();
-    const { defaultPlan, defaultMint } = useSavedValues();
+    const { send, sending, error, signature, reset } = useSendTx();
+    const { defaultPlan, defaultMint, defaultSubscription } = useSavedValues();
 
     const [subscriptionPda, setSubscriptionPda] = useState('');
-    const [planPda, setPlanPda] = useState(defaultPlan);
+    const [planPda, setPlanPda] = useState('');
     const [delegator, setDelegator] = useState('');
-    const [tokenMint, setTokenMint] = useState(defaultMint);
+    const [tokenMint, setTokenMint] = useState('');
     const [amount, setAmount] = useState('');
     const [receiverAta, setReceiverAta] = useState('');
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
+        reset();
         const signer = createSigner();
         if (!signer) return;
 
@@ -52,12 +53,20 @@ export function TransferSubscription() {
     }
 
     return (
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <FormField label="Subscription PDA" value={subscriptionPda} onChange={setSubscriptionPda} placeholder="Subscription account address" required />
-            <FormField label="Plan PDA" value={planPda} onChange={setPlanPda} placeholder="Plan account address" required />
-            <FormField label="Delegator" value={delegator} onChange={setDelegator} placeholder="Subscriber wallet address" required />
-            <FormField label="Token Mint" value={tokenMint} onChange={setTokenMint} placeholder="Mint address" required />
-            <FormField label="Amount" value={amount} onChange={setAmount} type="number" hint="Amount to transfer (base units)" required />
+        <form onSubmit={e => { void handleSubmit(e); }} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <FormField label="Subscription PDA" value={subscriptionPda} onChange={setSubscriptionPda}
+                autoFillValue={defaultSubscription} onAutoFill={setSubscriptionPda}
+                placeholder="Subscription account address" required />
+            <FormField label="Plan PDA" value={planPda} onChange={setPlanPda}
+                autoFillValue={defaultPlan} onAutoFill={setPlanPda}
+                placeholder="Plan account address" required />
+            <FormField label="Delegator" value={delegator} onChange={setDelegator}
+                placeholder="Subscriber wallet address" required />
+            <FormField label="Token Mint" value={tokenMint} onChange={setTokenMint}
+                autoFillValue={defaultMint} onAutoFill={setTokenMint}
+                placeholder="Mint address" required />
+            <FormField label="Amount" value={amount} onChange={setAmount} type="number"
+                hint="Amount to transfer (base units)" required />
             <FormField label="Receiver ATA (optional)" value={receiverAta} onChange={setReceiverAta}
                 placeholder="Auto-derived from connected wallet + mint if empty" />
             <SendButton sending={sending} />

@@ -11,11 +11,11 @@ import { FormField, SendButton, TxResultDisplay } from './shared';
 
 export function CreateRecurringDelegation() {
     const { createSigner } = useWallet();
-    const { send, sending, error, signature } = useSendTx();
-    const { defaultMint, defaultDelegatee } = useSavedValues();
+    const { send, sending, error, signature, reset } = useSendTx();
+    const { defaultMint, defaultDelegatee, rememberMint, rememberDelegatee, rememberDelegation } = useSavedValues();
 
-    const [mint, setMint] = useState(defaultMint);
-    const [delegatee, setDelegatee] = useState(defaultDelegatee);
+    const [mint, setMint] = useState('');
+    const [delegatee, setDelegatee] = useState('');
     const [nonce, setNonce] = useState('0');
     const [amountPerPeriod, setAmountPerPeriod] = useState('');
     const [periodLengthS, setPeriodLengthS] = useState('');
@@ -24,6 +24,7 @@ export function CreateRecurringDelegation() {
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
+        reset();
         const signer = createSigner();
         if (!signer) return;
 
@@ -39,21 +40,35 @@ export function CreateRecurringDelegation() {
             programAddress: getProgramAddress(),
         });
 
-        await send(instructions, {
+        const sig = await send(instructions, {
             action: 'CreateRecurringDelegation',
             values: { mint: mint.trim(), delegatee: delegatee.trim(), delegationPda },
         });
+        if (sig) {
+            rememberMint(mint.trim());
+            rememberDelegatee(delegatee.trim());
+            rememberDelegation(delegationPda);
+        }
     }
 
     return (
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <FormField label="Token Mint" value={mint} onChange={setMint} placeholder="Mint address" required />
-            <FormField label="Delegatee" value={delegatee} onChange={setDelegatee} placeholder="Delegatee address" required />
-            <FormField label="Nonce" value={nonce} onChange={setNonce} type="number" hint="Unique nonce" required />
-            <FormField label="Amount Per Period" value={amountPerPeriod} onChange={setAmountPerPeriod} type="number" hint="Token amount per period (base units)" required />
-            <FormField label="Period Length (seconds)" value={periodLengthS} onChange={setPeriodLengthS} type="number" hint="e.g. 86400 for 1 day" required />
-            <FormField label="Expiry Timestamp" value={expiryTs} onChange={setExpiryTs} type="number" hint="Unix timestamp (0 = no expiry)" required />
-            <FormField label="Start Timestamp" value={startTs} onChange={setStartTs} type="number" hint="Unix timestamp (0 = immediate)" required />
+        <form onSubmit={e => { void handleSubmit(e); }} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <FormField label="Token Mint" value={mint} onChange={setMint}
+                autoFillValue={defaultMint} onAutoFill={setMint}
+                placeholder="Mint address" required />
+            <FormField label="Delegatee" value={delegatee} onChange={setDelegatee}
+                autoFillValue={defaultDelegatee} onAutoFill={setDelegatee}
+                placeholder="Delegatee address" required />
+            <FormField label="Nonce" value={nonce} onChange={setNonce} type="number"
+                hint="Unique nonce" required />
+            <FormField label="Amount Per Period" value={amountPerPeriod} onChange={setAmountPerPeriod} type="number"
+                hint="Token amount per period (base units)" required />
+            <FormField label="Period Length (seconds)" value={periodLengthS} onChange={setPeriodLengthS} type="number"
+                hint="e.g. 86400 for 1 day" required />
+            <FormField label="Expiry Timestamp" value={expiryTs} onChange={setExpiryTs} type="number"
+                hint="Unix timestamp — must be after start" required />
+            <FormField label="Start Timestamp" value={startTs} onChange={setStartTs} type="number"
+                hint="Unix timestamp — must not be in the past" required />
             <SendButton sending={sending} />
             <TxResultDisplay signature={signature} error={error} />
         </form>

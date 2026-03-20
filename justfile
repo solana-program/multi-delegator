@@ -131,6 +131,10 @@ build-client: generate-client
 # Run all tests
 test: test-program test-client
 
+# Run E2E tests against the dev UI (requires PLAYRIGHT_WALLET and PLAYWRIGHT_TOKEN_MINT in .env)
+e2e-test:
+    pnpm --filter @multidelegator/web test:e2e
+
 # Run Rust program tests
 test-program:
     cd {{program_dir}} && cargo test-sbf

@@ -11,14 +11,15 @@ import { FormField, SendButton, TxResultDisplay } from './shared';
 
 export function CancelSubscription() {
     const { createSigner } = useWallet();
-    const { send, sending, error, signature } = useSendTx();
-    const { defaultPlan } = useSavedValues();
+    const { send, sending, error, signature, reset } = useSendTx();
+    const { defaultPlan, defaultSubscription } = useSavedValues();
 
-    const [planPda, setPlanPda] = useState(defaultPlan);
+    const [planPda, setPlanPda] = useState('');
     const [subscriptionPda, setSubscriptionPda] = useState('');
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
+        reset();
         const signer = createSigner();
         if (!signer) return;
 
@@ -35,9 +36,13 @@ export function CancelSubscription() {
     }
 
     return (
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <FormField label="Plan PDA" value={planPda} onChange={setPlanPda} placeholder="Plan account address" required />
-            <FormField label="Subscription PDA" value={subscriptionPda} onChange={setSubscriptionPda} placeholder="Subscription account address" required />
+        <form onSubmit={e => { void handleSubmit(e); }} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <FormField label="Plan PDA" value={planPda} onChange={setPlanPda}
+                autoFillValue={defaultPlan} onAutoFill={setPlanPda}
+                placeholder="Plan account address" required />
+            <FormField label="Subscription PDA" value={subscriptionPda} onChange={setSubscriptionPda}
+                autoFillValue={defaultSubscription} onAutoFill={setSubscriptionPda}
+                placeholder="Subscription account address" required />
             <SendButton sending={sending} />
             <TxResultDisplay signature={signature} error={error} />
         </form>
