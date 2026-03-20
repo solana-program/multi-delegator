@@ -35,3 +35,6 @@ apps/web/test-results/
 # TypeScript incremental build cache
 apps/web/tsconfig.tsbuildinfo
 
+# Vercel project config
+.vercel
+
