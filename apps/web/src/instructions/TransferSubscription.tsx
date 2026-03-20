@@ -1,0 +1,67 @@
+'use client';
+
+import { useState } from 'react';
+import type { Address } from '@solana/kit';
+import { buildTransferSubscription } from '@multidelegator/client';
+import { findAssociatedTokenPda } from '@solana-program/token';
+import { useWallet } from '@/contexts/WalletContext';
+import { useSavedValues } from '@/contexts/SavedValuesContext';
+import { getProgramAddress, TOKEN_2022_PROGRAM_ID } from '@/lib/program';
+import { useSendTx } from '@/hooks/useSendTx';
+import { FormField, SendButton, TxResultDisplay } from './shared';
+
+export function TransferSubscription() {
+    const { createSigner } = useWallet();
+    const { send, sending, error, signature } = useSendTx();
+    const { defaultPlan, defaultMint } = useSavedValues();
+
+    const [subscriptionPda, setSubscriptionPda] = useState('');
+    const [planPda, setPlanPda] = useState(defaultPlan);
+    const [delegator, setDelegator] = useState('');
+    const [tokenMint, setTokenMint] = useState(defaultMint);
+    const [amount, setAmount] = useState('');
+    const [receiverAta, setReceiverAta] = useState('');
+
+    async function handleSubmit(e: React.FormEvent) {
+        e.preventDefault();
+        const signer = createSigner();
+        if (!signer) return;
+
+        const mintAddress = tokenMint.trim() as Address;
+        const tokenProgram = TOKEN_2022_PROGRAM_ID;
+
+        let receiver: Address;
+        if (receiverAta.trim()) {
+            receiver = receiverAta.trim() as Address;
+        } else {
+            const [derived] = await findAssociatedTokenPda({ mint: mintAddress, owner: signer.address, tokenProgram });
+            receiver = derived;
+        }
+
+        const { instructions } = await buildTransferSubscription({
+            caller: signer, delegator: delegator.trim() as Address, tokenMint: mintAddress,
+            subscriptionPda: subscriptionPda.trim() as Address, planPda: planPda.trim() as Address,
+            amount: BigInt(amount), receiverAta: receiver, tokenProgram,
+            programAddress: getProgramAddress(),
+        });
+
+        await send(instructions, {
+            action: 'TransferSubscription',
+            values: { subscriptionPda: subscriptionPda.trim(), planPda: planPda.trim(), mint: mintAddress, amount },
+        });
+    }
+
+    return (
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <FormField label="Subscription PDA" value={subscriptionPda} onChange={setSubscriptionPda} placeholder="Subscription account address" required />
+            <FormField label="Plan PDA" value={planPda} onChange={setPlanPda} placeholder="Plan account address" required />
+            <FormField label="Delegator" value={delegator} onChange={setDelegator} placeholder="Subscriber wallet address" required />
+            <FormField label="Token Mint" value={tokenMint} onChange={setTokenMint} placeholder="Mint address" required />
+            <FormField label="Amount" value={amount} onChange={setAmount} type="number" hint="Amount to transfer (base units)" required />
+            <FormField label="Receiver ATA (optional)" value={receiverAta} onChange={setReceiverAta}
+                placeholder="Auto-derived from connected wallet + mint if empty" />
+            <SendButton sending={sending} />
+            <TxResultDisplay signature={signature} error={error} />
+        </form>
+    );
+}
