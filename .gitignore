@@ -25,3 +25,13 @@ test-ledger/
 # Local config (contains generated mint addresses)
 config.json
 
+# Environment secrets
+.env
+
+# Playwright output
+apps/web/playwright-report/
+apps/web/test-results/
+
+# TypeScript incremental build cache
+apps/web/tsconfig.tsbuildinfo
+
