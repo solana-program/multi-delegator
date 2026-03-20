@@ -60,7 +60,7 @@ export function CreateFixedDelegation() {
             <FormField label="Amount" value={amount} onChange={setAmount} type="number"
                 hint="Total token amount (base units)" required />
             <FormField label="Expiry Timestamp" value={expiryTs} onChange={setExpiryTs} type="number"
-                hint="Unix timestamp (0 = no expiry)" required />
+                hint="Unix timestamp — must be in the future" required />
             <SendButton sending={sending} />
             <TxResultDisplay signature={signature} error={error} />
         </form>

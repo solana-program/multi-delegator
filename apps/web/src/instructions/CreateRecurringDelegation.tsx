@@ -66,9 +66,9 @@ export function CreateRecurringDelegation() {
             <FormField label="Period Length (seconds)" value={periodLengthS} onChange={setPeriodLengthS} type="number"
                 hint="e.g. 86400 for 1 day" required />
             <FormField label="Expiry Timestamp" value={expiryTs} onChange={setExpiryTs} type="number"
-                hint="Unix timestamp (0 = no expiry)" required />
+                hint="Unix timestamp — must be after start" required />
             <FormField label="Start Timestamp" value={startTs} onChange={setStartTs} type="number"
-                hint="Unix timestamp (0 = immediate)" required />
+                hint="Unix timestamp — must not be in the past" required />
             <SendButton sending={sending} />
             <TxResultDisplay signature={signature} error={error} />
         </form>

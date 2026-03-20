@@ -60,7 +60,7 @@ export function CreatePlan() {
             <FormField label="Period Hours" value={periodHours} onChange={setPeriodHours} type="number"
                 hint="Billing period in hours" required />
             <FormField label="End Timestamp" value={endTs} onChange={setEndTs} type="number"
-                hint="Unix timestamp when plan stops accepting new subscriptions (0 = no end)" required />
+                hint="Unix timestamp when plan stops accepting new subscriptions (0 = no end, otherwise must be future)" required />
             <FormField label="Destinations (up to 4)" value={destinations} onChange={setDestinations}
                 placeholder="Comma-separated addresses" hint="Recipient addresses for transferred funds" />
             <FormField label="Pullers (up to 4)" value={pullers} onChange={setPullers}

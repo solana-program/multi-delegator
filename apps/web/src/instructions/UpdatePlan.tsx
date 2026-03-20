@@ -49,7 +49,7 @@ export function UpdatePlan() {
                 onChange={v => setStatusKey(v as 'Active' | 'Sunset')}
                 options={[{ label: 'Active', value: 'Active' }, { label: 'Sunset', value: 'Sunset' }]} />
             <FormField label="End Timestamp" value={endTs} onChange={setEndTs} type="number"
-                hint="Unix timestamp (0 = no end)" required />
+                hint="Unix timestamp (0 = no end; Sunset requires non-zero future value)" required />
             <FormField label="Metadata URI" value={metadataUri} onChange={setMetadataUri}
                 placeholder="https://..." hint="Max 128 bytes" />
             <FormField label="Pullers (up to 4)" value={pullers} onChange={setPullers}

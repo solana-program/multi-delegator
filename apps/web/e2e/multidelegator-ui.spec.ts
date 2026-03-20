@@ -23,6 +23,13 @@ const TOKEN_MINT = process.env.PLAYWRIGHT_TOKEN_MINT ?? '';
 
 // ─── Shared state (populated by earlier tests) ───────────────────────────────
 
+// One year from test start — used wherever the program requires a future expiry timestamp.
+const ONE_YEAR_FROM_NOW = String(Math.floor(Date.now() / 1000) + 365 * 24 * 3600);
+const NOW_TS = String(Math.floor(Date.now() / 1000));
+// Unique plan ID per test run so re-runs don't collide with existing on-chain accounts.
+// Uses seconds since epoch mod 1_000_000 to stay within u64 range while being human-readable.
+const PLAN_ID = String(Math.floor(Date.now() / 1000) % 1_000_000);
+
 let walletAddress = '';
 let delegationPda = '';
 let planPda = '';
@@ -117,7 +124,7 @@ test.describe('Multi-Delegator UI', () => {
         await page.getByRole('textbox', { name: 'Delegatee' }).fill(walletAddress);
         await page.getByRole('spinbutton', { name: 'Nonce' }).fill('0');
         await page.getByRole('spinbutton', { name: 'Amount' }).fill('1000000');
-        await page.getByRole('spinbutton', { name: 'Expiry Timestamp' }).fill('0');
+        await page.getByRole('spinbutton', { name: 'Expiry Timestamp' }).fill(ONE_YEAR_FROM_NOW);
 
         expect(await sendAndWait(page)).toBe('success');
 
@@ -148,8 +155,8 @@ test.describe('Multi-Delegator UI', () => {
         await page.getByRole('spinbutton', { name: 'Nonce' }).fill('0');
         await page.getByRole('spinbutton', { name: 'Amount Per Period' }).fill('500000');
         await page.getByRole('spinbutton', { name: 'Period Length (seconds)' }).fill('86400');
-        await page.getByRole('spinbutton', { name: 'Expiry Timestamp' }).fill('0');
-        await page.getByRole('spinbutton', { name: 'Start Timestamp' }).fill('0');
+        await page.getByRole('spinbutton', { name: 'Expiry Timestamp' }).fill(ONE_YEAR_FROM_NOW);
+        await page.getByRole('spinbutton', { name: 'Start Timestamp' }).fill(NOW_TS);
 
         expect(await sendAndWait(page)).toBe('success');
 
@@ -188,7 +195,7 @@ test.describe('Multi-Delegator UI', () => {
 
     test('Create Plan — succeeds and saves Plan PDA to QuickDefaults', async () => {
         await openPanel(page, 'Create Plan');
-        await page.getByRole('spinbutton', { name: 'Plan ID' }).fill('0');
+        await page.getByRole('spinbutton', { name: 'Plan ID' }).fill(PLAN_ID);
         await autofill(page); // Mint
         await page.getByRole('spinbutton', { name: 'Amount' }).fill('1000000');
         await page.getByRole('spinbutton', { name: 'Period Hours' }).fill('24');
@@ -219,7 +226,7 @@ test.describe('Multi-Delegator UI', () => {
         await openPanel(page, 'Subscribe');
         // Merchant = connected wallet (subscribed to own plan for test purposes)
         await page.getByRole('textbox', { name: 'Merchant' }).fill(walletAddress);
-        await page.getByRole('spinbutton', { name: 'Plan ID' }).fill('0');
+        await page.getByRole('spinbutton', { name: 'Plan ID' }).fill(PLAN_ID);
         await autofill(page); // Token Mint
 
         expect(await sendAndWait(page)).toBe('success');
@@ -247,7 +254,8 @@ test.describe('Multi-Delegator UI', () => {
         await openPanel(page, 'Update Plan');
         await autofill(page); // Plan PDA
         await page.getByRole('combobox', { name: 'Status' }).selectOption('Sunset');
-        await page.getByRole('spinbutton', { name: 'End Timestamp' }).fill('1');
+        // Sunset requires a non-zero future end timestamp.
+        await page.getByRole('spinbutton', { name: 'End Timestamp' }).fill(ONE_YEAR_FROM_NOW);
 
         expect(await sendAndWait(page)).toBe('success');
     });
