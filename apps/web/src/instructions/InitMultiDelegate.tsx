@@ -11,15 +11,16 @@ import { useSendTx } from '@/hooks/useSendTx';
 import { FormField, SendButton, TxResultDisplay } from './shared';
 
 export function InitMultiDelegate() {
-    const { createSigner } = useWallet();
-    const { send, sending, error, signature } = useSendTx();
-    const { defaultMint } = useSavedValues();
+    const { createSigner, account } = useWallet();
+    const { send, sending, error, signature, reset } = useSendTx();
+    const { defaultMint, rememberMint, rememberMultiDelegate } = useSavedValues();
 
-    const [mint, setMint] = useState(defaultMint);
+    const [mint, setMint] = useState('');
     const [userAta, setUserAta] = useState('');
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
+        reset();
         const signer = createSigner();
         if (!signer) return;
 
@@ -39,17 +40,23 @@ export function InitMultiDelegate() {
             tokenProgram, programAddress: getProgramAddress(),
         });
 
-        await send(instructions, {
+        const sig = await send(instructions, {
             action: 'InitMultiDelegate',
             values: { mint: mintAddress, multiDelegate: multiDelegatePda },
         });
+        if (sig) {
+            rememberMint(mintAddress);
+            rememberMultiDelegate(multiDelegatePda);
+        }
     }
 
     return (
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <FormField label="Token Mint" value={mint} onChange={setMint} placeholder="Mint address (Token-2022)" required />
+        <form onSubmit={e => { void handleSubmit(e); }} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <FormField label="Token Mint" value={mint} onChange={setMint}
+                autoFillValue={defaultMint} onAutoFill={setMint}
+                placeholder="Mint address (Token-2022)" required />
             <FormField label="User ATA (optional)" value={userAta} onChange={setUserAta}
-                placeholder="Auto-derived from wallet + mint if empty"
+                placeholder={account?.address ? `Auto-derived for ${account.address.slice(0, 8)}...` : 'Auto-derived from wallet + mint if empty'}
                 hint="Leave blank to auto-derive the associated token account" />
             <SendButton sending={sending} />
             <TxResultDisplay signature={signature} error={error} />

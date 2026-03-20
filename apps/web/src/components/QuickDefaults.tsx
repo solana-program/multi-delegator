@@ -36,10 +36,13 @@ function SavedField({ label, value, onChange, onSave, savedValues, datalistId, p
 
 export function QuickDefaults() {
     const {
-        defaultDelegatee, defaultMultiDelegate, defaultDelegation, defaultMint, defaultPlan,
-        delegatees, multiDelegates, delegations, mints, plans,
-        setDefaultDelegatee, setDefaultMultiDelegate, setDefaultDelegation, setDefaultMint, setDefaultPlan,
-        rememberDelegatee, rememberMultiDelegate, rememberDelegation, rememberMint, rememberPlan,
+        defaultDelegatee, defaultMultiDelegate, defaultDelegation,
+        defaultMint, defaultPlan, defaultSubscription,
+        delegatees, multiDelegates, delegations, mints, plans, subscriptions,
+        setDefaultDelegatee, setDefaultMultiDelegate, setDefaultDelegation,
+        setDefaultMint, setDefaultPlan, setDefaultSubscription,
+        rememberDelegatee, rememberMultiDelegate, rememberDelegation,
+        rememberMint, rememberPlan, rememberSubscription,
         clearSavedValues,
     } = useSavedValues();
 
@@ -50,16 +53,18 @@ export function QuickDefaults() {
                 <Button type="button" size="sm" variant="secondary" onClick={clearSavedValues}>Clear Saved</Button>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-                <SavedField label="Delegatee" value={defaultDelegatee} onChange={setDefaultDelegatee}
+                <SavedField label="Default Delegatee" value={defaultDelegatee} onChange={setDefaultDelegatee}
                     onSave={rememberDelegatee} savedValues={delegatees} datalistId="saved-delegatees" placeholder="Delegatee address" />
-                <SavedField label="MultiDelegate PDA" value={defaultMultiDelegate} onChange={setDefaultMultiDelegate}
+                <SavedField label="Default MultiDelegate" value={defaultMultiDelegate} onChange={setDefaultMultiDelegate}
                     onSave={rememberMultiDelegate} savedValues={multiDelegates} datalistId="saved-multidelegates" placeholder="MultiDelegate PDA" />
-                <SavedField label="Delegation PDA" value={defaultDelegation} onChange={setDefaultDelegation}
+                <SavedField label="Default Delegation" value={defaultDelegation} onChange={setDefaultDelegation}
                     onSave={rememberDelegation} savedValues={delegations} datalistId="saved-delegations" placeholder="Delegation PDA" />
-                <SavedField label="Mint" value={defaultMint} onChange={setDefaultMint}
+                <SavedField label="Default Mint" value={defaultMint} onChange={setDefaultMint}
                     onSave={rememberMint} savedValues={mints} datalistId="saved-mints" placeholder="Token mint address" />
-                <SavedField label="Plan PDA" value={defaultPlan} onChange={setDefaultPlan}
+                <SavedField label="Default Plan" value={defaultPlan} onChange={setDefaultPlan}
                     onSave={rememberPlan} savedValues={plans} datalistId="saved-plans" placeholder="Plan PDA" />
+                <SavedField label="Default Subscription" value={defaultSubscription} onChange={setDefaultSubscription}
+                    onSave={rememberSubscription} savedValues={subscriptions} datalistId="saved-subscriptions" placeholder="Subscription PDA" />
             </div>
         </section>
     );

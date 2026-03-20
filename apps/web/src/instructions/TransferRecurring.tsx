@@ -12,17 +12,18 @@ import { FormField, SendButton, TxResultDisplay } from './shared';
 
 export function TransferRecurring() {
     const { createSigner } = useWallet();
-    const { send, sending, error, signature } = useSendTx();
+    const { send, sending, error, signature, reset } = useSendTx();
     const { defaultDelegation, defaultMint } = useSavedValues();
 
-    const [delegationPda, setDelegationPda] = useState(defaultDelegation);
+    const [delegationPda, setDelegationPda] = useState('');
     const [delegator, setDelegator] = useState('');
-    const [tokenMint, setTokenMint] = useState(defaultMint);
+    const [tokenMint, setTokenMint] = useState('');
     const [amount, setAmount] = useState('');
     const [receiverAta, setReceiverAta] = useState('');
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
+        reset();
         const signer = createSigner();
         if (!signer) return;
 
@@ -54,11 +55,17 @@ export function TransferRecurring() {
     }
 
     return (
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <FormField label="Delegation PDA" value={delegationPda} onChange={setDelegationPda} placeholder="Delegation account address" required />
-            <FormField label="Delegator" value={delegator} onChange={setDelegator} placeholder="Delegator wallet address" required />
-            <FormField label="Token Mint" value={tokenMint} onChange={setTokenMint} placeholder="Mint address" required />
-            <FormField label="Amount" value={amount} onChange={setAmount} type="number" hint="Amount to transfer (base units)" required />
+        <form onSubmit={e => { void handleSubmit(e); }} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <FormField label="Delegation PDA" value={delegationPda} onChange={setDelegationPda}
+                autoFillValue={defaultDelegation} onAutoFill={setDelegationPda}
+                placeholder="Delegation account address" required />
+            <FormField label="Delegator" value={delegator} onChange={setDelegator}
+                placeholder="Delegator wallet address" required />
+            <FormField label="Token Mint" value={tokenMint} onChange={setTokenMint}
+                autoFillValue={defaultMint} onAutoFill={setTokenMint}
+                placeholder="Mint address" required />
+            <FormField label="Amount" value={amount} onChange={setAmount} type="number"
+                hint="Amount to transfer (base units)" required />
             <FormField label="Receiver ATA (optional)" value={receiverAta} onChange={setReceiverAta}
                 placeholder="Auto-derived from connected wallet + mint if empty" />
             <SendButton sending={sending} />
