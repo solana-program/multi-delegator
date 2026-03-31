@@ -136,7 +136,10 @@ mod tests {
         state::subscription_delegation::SubscriptionDelegation,
         tests::{
             asserts::TransactionResultExt,
-            utils::{init_wallet, setup_with_subscription, CancelSubscription},
+            utils::{
+                current_ts, days, init_wallet, move_clock_forward, setup_with_subscription,
+                CancelSubscription, CreatePlan, DeletePlan, UpdatePlan,
+            },
         },
         MultiDelegatorError,
     };
@@ -196,5 +199,60 @@ mod tests {
         CancelSubscription::new(&mut litesvm, &alice, plan_pda, subscription_pda)
             .execute()
             .assert_err(MultiDelegatorError::MigrationRequired);
+    }
+
+    #[test]
+    fn cancel_subscription_ghost_plan_expires_immediately() {
+        use crate::state::common::PlanStatus;
+
+        let (mut litesvm, alice, merchant, mint, plan_pda, _plan_bump, subscription_pda) =
+            setup_with_subscription();
+
+        // Get current time before any clock manipulation
+        let ts_before = litesvm
+            .get_sysvar::<spl_associated_token_account::solana_program::clock::Clock>()
+            .unix_timestamp;
+
+        // Sunset, expire, and delete the plan
+        let end_ts = current_ts() + days(2) as i64;
+        UpdatePlan::new(&mut litesvm, &merchant, plan_pda)
+            .status(PlanStatus::Sunset)
+            .end_ts(end_ts)
+            .execute()
+            .assert_ok();
+
+        move_clock_forward(&mut litesvm, days(3));
+
+        DeletePlan::new(&mut litesvm, &merchant, plan_pda)
+            .execute()
+            .assert_ok();
+
+        // Recreate plan with same plan_id but different terms
+        let new_end_ts = current_ts() + days(60) as i64;
+        let (res, new_plan_pda) = CreatePlan::new(&mut litesvm, &merchant, mint)
+            .plan_id(1)
+            .amount(999_000_000)
+            .period_hours(720)
+            .end_ts(new_end_ts)
+            .execute();
+        res.assert_ok();
+        assert_eq!(plan_pda, new_plan_pda);
+
+        // Cancel should succeed but expire immediately (no grace period)
+        CancelSubscription::new(&mut litesvm, &alice, plan_pda, subscription_pda)
+            .execute()
+            .assert_ok();
+
+        let sub_account = litesvm.get_account(&subscription_pda).unwrap();
+        let sub = SubscriptionDelegation::load(&sub_account.data).unwrap();
+        let expires = sub.expires_at_ts;
+        // Should be immediate (current_ts), not end-of-period
+        assert!(expires > ts_before);
+        // Verify it's NOT a grace period (which would be period_start + period_length)
+        // Ghost plan expires at current_ts, which is much less than period_start + 720h
+        let svm_ts = litesvm
+            .get_sysvar::<spl_associated_token_account::solana_program::clock::Clock>()
+            .unix_timestamp;
+        assert_eq!(expires, svm_ts);
     }
 }
