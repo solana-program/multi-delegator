@@ -24,6 +24,18 @@ pub const MAX_DESTINATIONS: usize = 4;
 /// Maximum number of puller addresses a plan can authorize.
 pub const MAX_PULLERS: usize = 4;
 
+/// Immutable billing terms snapshotted into each [`SubscriptionDelegation`] at subscribe time.
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy, CodamaType)]
+pub struct PlanTerms {
+    /// Maximum token amount that can be pulled per billing period.
+    pub amount: u64,
+    /// Billing period length in hours (must be > 0 and <= [`MAX_PLAN_PERIOD_HOURS`]).
+    pub period_hours: u64,
+    /// Unix timestamp when the plan was created on-chain. Set by the program at plan creation time.
+    pub created_at: i64,
+}
+
 /// Configuration data embedded in a [`Plan`] account and supplied when creating one.
 #[repr(C, packed)]
 #[derive(Debug, Clone, CodamaType)]
@@ -32,10 +44,8 @@ pub struct PlanData {
     pub plan_id: u64,
     /// SPL token mint that subscriptions under this plan operate on.
     pub mint: Address,
-    /// Maximum token amount that can be pulled per billing period.
-    pub amount: u64,
-    /// Billing period length in hours (must be > 0 and <= [`MAX_PLAN_PERIOD_HOURS`]).
-    pub period_hours: u64,
+    /// Immutable plan terms
+    pub terms: PlanTerms,
     /// Optional unix timestamp after which the plan expires. `0` means no end.
     pub end_ts: i64,
     /// Whitelisted destination wallets for transfers. All-zero entries are ignored.
@@ -61,17 +71,17 @@ impl PlanData {
 
     /// Validates plan data against the current clock time.
     pub fn validate(&self, current_time: i64) -> Result<(), MultiDelegatorError> {
-        if self.amount == 0 {
+        if self.terms.amount == 0 {
             return Err(MultiDelegatorError::InvalidAmount);
         }
-        if self.period_hours == 0 || self.period_hours > MAX_PLAN_PERIOD_HOURS {
+        if self.terms.period_hours == 0 || self.terms.period_hours > MAX_PLAN_PERIOD_HOURS {
             return Err(MultiDelegatorError::InvalidPeriodLength);
         }
 
         // Destinations are not validated here; empty destinations means any destination is valid at transfer time.
         // Pullers are not validated here; empty pullers defaults to owner-only authorization in transfer.
         if self.end_ts != 0 {
-            let period_secs = (self.period_hours as i64) * 3600;
+            let period_secs = (self.terms.period_hours as i64) * 3600;
             if current_time + period_secs > self.end_ts {
                 return Err(MultiDelegatorError::InvalidEndTs);
             }
@@ -89,7 +99,8 @@ pub const DISCRIMINATOR: &u8 = &7;
 /// Validates the plan data, creates the plan account via CPI, and initializes
 /// its fields including owner, status, and the embedded [`PlanData`].
 pub fn process(accounts: &[AccountView], data: &PlanData) -> ProgramResult {
-    data.validate(Clock::get()?.unix_timestamp)?;
+    let current_ts = Clock::get()?.unix_timestamp;
+    data.validate(current_ts)?;
 
     let accounts = CreatePlanAccounts::try_from(accounts)?;
 
@@ -113,6 +124,7 @@ pub fn process(accounts: &[AccountView], data: &PlanData) -> ProgramResult {
             PlanData::LEN,
         );
     }
+    plan.data.terms.created_at = current_ts;
 
     Ok(())
 }
@@ -168,8 +180,8 @@ mod tests {
         let status = plan.status;
         let id = plan.data.plan_id;
         let plan_mint = plan.data.mint;
-        let amt = plan.data.amount;
-        let ph = plan.data.period_hours;
+        let amt = plan.data.terms.amount;
+        let ph = plan.data.terms.period_hours;
         let ets = plan.data.end_ts;
         let dests = plan.data.destinations;
         let pulls = plan.data.pullers;
@@ -384,7 +396,7 @@ mod tests {
         use solana_instruction::{AccountMeta, Instruction};
 
         use crate::{
-            instructions::create_plan::{PlanData, MAX_DESTINATIONS, MAX_PULLERS},
+            instructions::create_plan::{PlanData, PlanTerms, MAX_DESTINATIONS, MAX_PULLERS},
             tests::{
                 constants::{PROGRAM_ID, SYSTEM_PROGRAM_ID},
                 pda::get_plan_pda,
@@ -415,8 +427,11 @@ mod tests {
         let plan_data = PlanData {
             plan_id,
             mint: malicious_mint.to_bytes().into(),
-            amount: 1_000,
-            period_hours: 24,
+            terms: PlanTerms {
+                amount: 1_000,
+                period_hours: 24,
+                created_at: 0,
+            },
             end_ts: 0,
             destinations,
             pullers: [zero_addr; MAX_PULLERS],

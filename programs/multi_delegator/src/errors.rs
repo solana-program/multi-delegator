@@ -81,6 +81,7 @@ impl TryFrom<u32> for MultiDelegatorError {
             515 => Ok(Self::PlanNotExpired),
             516 => Ok(Self::PlanClosed),
             517 => Ok(Self::AlreadySubscribed),
+            518 => Ok(Self::PlanTermsMismatch),
             // Event errors (600-699)
             600 => Ok(Self::InvalidEventAuthority),
             601 => Ok(Self::InvalidEventData),
@@ -234,6 +235,8 @@ pub enum MultiDelegatorError {
     PlanClosed,
     #[error("Already subscribed to this plan")]
     AlreadySubscribed,
+    #[error("Subscription plan terms do not match the current plan")]
+    PlanTermsMismatch,
 
     // --- Event errors (600--699) ---
     #[error("Invalid event authority PDA")]

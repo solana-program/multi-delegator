@@ -51,20 +51,28 @@ pub fn process(accounts: &[AccountView]) -> ProgramResult {
 
         // Compute expires_at_ts based on plan state
         if accounts_struct.plan_pda.owned_by(&crate::ID) {
-            // Plan is valid — load it and compute end of current period
+            // Plan is valid — load it and verify terms match
             let plan_data = accounts_struct.plan_pda.try_borrow()?;
             let plan = Plan::load(&plan_data)?;
-            let period_length_s = (plan.data.period_hours as i64)
-                .checked_mul(3600)
-                .ok_or::<ProgramError>(MultiDelegatorError::ArithmeticOverflow.into())?;
-            let period_start = subscription.current_period_start_ts;
-            let elapsed = current_ts.saturating_sub(period_start);
-            let periods_elapsed = elapsed / period_length_s;
-            expires_at_ts = periods_elapsed
-                .checked_add(1)
-                .and_then(|p| p.checked_mul(period_length_s))
-                .and_then(|offset| period_start.checked_add(offset))
-                .ok_or::<ProgramError>(MultiDelegatorError::ArithmeticOverflow.into())?;
+
+            if subscription.check_plan_terms(&plan.data.terms).is_err() {
+                // Plan terms mismatch (ghost plan) — expire immediately
+                expires_at_ts = current_ts;
+            } else {
+                // Terms match — compute end of current period
+                let period_length_s =
+                    (subscription.terms.period_hours as i64)
+                        .checked_mul(3600)
+                        .ok_or::<ProgramError>(MultiDelegatorError::ArithmeticOverflow.into())?;
+                let period_start = subscription.current_period_start_ts;
+                let elapsed = current_ts.saturating_sub(period_start);
+                let periods_elapsed = elapsed / period_length_s;
+                expires_at_ts = periods_elapsed
+                    .checked_add(1)
+                    .and_then(|p| p.checked_mul(period_length_s))
+                    .and_then(|offset| period_start.checked_add(offset))
+                    .ok_or::<ProgramError>(MultiDelegatorError::ArithmeticOverflow.into())?;
+            }
         } else {
             // Plan is closed (not owned by our program) — expire immediately
             expires_at_ts = current_ts;

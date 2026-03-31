@@ -79,7 +79,7 @@ graph TB
 1. **Add-On, Not Replacement**: ADR-002 extends ADR-001 without modifying core flows
 2. **Mutual Agreement**: Plans enable both parties to verify and agree on terms before commitment
 3. **Immutable Terms**: Once published, Plan terms cannot change (prevents mid-stream price hikes)
-4. **Separate Controls vs Terms**: `update_plan` can modify status, end_ts, pullers, metadata_uri - but NOT core terms (mint, amount, period_hours, destinations)
+4. **Separate Controls vs Terms**: `update_plan` can modify status, end_ts, pullers, metadata_uri - but NOT core terms (mint, terms.amount, terms.period_hours, terms.created_at, destinations)
 5. **Unified Execution**: Subscriptions and direct delegations share the same MDA and transfer flows
 6. **Coexistence**: Direct delegations (ADR-001) and subscriptions (ADR-002) operate simultaneously
 
@@ -117,7 +117,7 @@ ADR-001 provides the core delegation infrastructure. Plans add a subscription mo
       - Set end_ts (graceful discontinuation, or 0 to remove expiry; cannot be 0 when sunsetting)
       - Update pullers array (change authorized callers)
       - Update metadata_uri (change plan description/branding)
-   - Without modifying core terms (mint, amount, period_hours, destinations)
+   - Without modifying core terms (mint, terms, destinations)
    - `delete_plan` allows the owner to reclaim rent after a plan has expired (end_ts has passed)
 
 6. **Zero Breaking Changes to ADR-001**
@@ -138,7 +138,7 @@ ADR-001 provides the core delegation infrastructure. Plans add a subscription mo
 | **Creation** | Delegator initiates | Delegatee publishes, delegators subscribe |
 | **Terms Storage** | Embedded per delegation | Single Plan for all |
 | **Cost Structure** | Full cost per delegation | Plan cost (1x) + Delegation cost (Nx) |
-| **Term Mutability** | Per delegation | Core billing terms immutable; pullers, status, end_ts, metadata_uri mutable |
+| **Term Mutability** | Per delegation | Core billing terms (amount, period_hours, created_at) immutable and snapshotted per subscription; pullers, status, end_ts, metadata_uri mutable |
 | **Discoverability** | Manual PDA sharing | Plans can be discovered/marketplace |
 | **Use Cases** | P2P, custom, one-off | Subscription services, SaaS, platforms |
 | **Pull Authorization** | Delegatee-only (`transfer_fixed`/`transfer_recurring`) | Owner + configurable pullers array (`transfer_subscription`) |
@@ -148,31 +148,32 @@ ADR-001 provides the core delegation infrastructure. Plans add a subscription mo
 
 ADR-002 is built **on top of** ADR-001's core infrastructure with **zero changes to existing flows**:
 
-**Key Insight: Terms are Referenced, Not Copied**
+**Key Insight: Terms are Snapshotted at Subscribe Time**
 
-The Plan PDA is the **live source of truth** for subscription terms. When a subscriber subscribes, a lightweight `SubscriptionDelegation` PDA is created that **references** the Plan PDA (via `header.delegatee = plan_pda`). At transfer time, `transfer_subscription` loads the Plan PDA to read the current terms. This means:
+When a subscriber subscribes, the plan's `PlanTerms` (amount, period_hours, created_at) are copied into the `SubscriptionDelegation` PDA. At transfer time, `transfer_subscription` reads billing terms from the subscription's snapshot and validates them against the live plan via `check_plan_terms()`. This prevents ghost-account attacks where a merchant deletes and recreates a plan at the same PDA address with different terms.
 
 | Flow | Terms Storage | Transfer Reads From |
 |------|--------------|---------------------|
 | **Direct Delegation (ADR-001)** | Terms embedded in Delegation PDA | Delegation PDA only |
-| **Subscription (ADR-002)** | Terms stored in Plan PDA, Delegation tracks billing state | Plan PDA (terms) + Delegation PDA (state) |
+| **Subscription (ADR-002)** | Terms snapshotted in SubscriptionDelegation + stored in Plan PDA | Subscription PDA (billing terms) + Plan PDA (authorization, destinations, expiry) |
 
 **What SubscriptionDelegation Stores:**
 - `header` (delegator = subscriber, delegatee = plan_pda, payer = subscriber)
+- `terms` - snapshot of plan's PlanTerms (amount, period_hours, created_at)
 - `amount_pulled_in_period` - tracking for the current billing period
 - `current_period_start_ts` - start of the current billing period
 - `expires_at_ts` - cancellation timestamp (0 = active)
 
 **What Plans Provide at Transfer Time:**
-- `amount` - the per-period limit
-- `period_hours` - billing period length
+- `terms` - validated against subscription's snapshot via `check_plan_terms()`
 - `destinations` - whitelisted receiver addresses
 - `pullers` - authorized caller addresses
 - `mint` - token mint for validation
+- `end_ts` - plan expiration
 
 **The Plan is Just a Reusable container for terms:**
 - Plan = Published, reusable terms that delegators can subscribe to
-- Subscribe = Create a Delegation PDA with a reference to the Plan's terms
+- Subscribe = Create a Delegation PDA with a snapshot of the Plan's terms
 - After subscription, the Delegation works exactly like ADR-001 delegations
 
 **Subscription Uses a Dedicated Transfer Instruction:**
@@ -218,13 +219,20 @@ Top-level account structure:
 - `status`: 1 byte - `PlanStatus` enum (Sunset=0, Active=1)
 - `data`: PlanData (see below)
 
-### PlanData (448 bytes)
+### PlanTerms (24 bytes)
+
+Immutable billing terms snapshotted into each SubscriptionDelegation at subscribe time. The `created_at` field acts as a unique fingerprint for the plan's lifecycle, preventing ghost-account attacks.
+
+- `amount`: 8 bytes (`u64`) - Amount per period
+- `period_hours`: 8 bytes (`u64`) - Hours in each billing period
+- `created_at`: 8 bytes (`i64`) - Unix timestamp set by the program at plan creation time
+
+### PlanData (456 bytes)
 
 Embedded payload within the Plan PDA:
 - `plan_id`: 8 bytes (`u64`) - Unique identifier
 - `mint`: 32 bytes (`Address`) - Token mint
-- `amount`: 8 bytes (`u64`) - Amount per period
-- `period_hours`: 8 bytes (`u64`) - Hours in each billing period
+- `terms`: 24 bytes (`PlanTerms`) - Immutable billing terms (amount, period_hours, created_at)
 - `end_ts`: 8 bytes (`i64`) - Plan expiration timestamp (0 = no expiry)
 - `destinations`: 128 bytes (`[Address; 4]`) - Up to 4 fund recipients (all zeros = any destination valid at transfer time)
 - `pullers`: 128 bytes (`[Address; 4]`) - Up to 4 authorized pullers
@@ -249,11 +257,12 @@ The `destinations` array controls where pulled funds can be sent. If the array i
 Per-subscriber billing state linked to a Plan:
 
 - `header`: 99 bytes - shared `Header` (delegator = subscriber, delegatee = plan_pda, payer = subscriber)
+- `terms`: 24 bytes (`PlanTerms`) - snapshot of the plan's billing terms at subscribe time
 - `amount_pulled_in_period`: 8 bytes (`u64`) - tokens transferred in the current billing period
 - `current_period_start_ts`: 8 bytes (`i64`) - start of the current billing period
 - `expires_at_ts`: 8 bytes (`i64`) - cancellation timestamp (0 = active, non-zero = cancelled)
 
-**Total size**: 123 bytes
+**Total size**: 147 bytes
 
 **PDA seeds**: `["subscription", plan_pda, subscriber]`
 
@@ -278,17 +287,16 @@ Merchant publishes a Plan with subscription terms.
 **Parameters (PlanData):**
 - `plan_id: u64` - Unique identifier
 - `mint: Address` - Token mint
-- `amount: u64` - Amount per period
-- `period_hours: u64` - Hours per billing period
+- `terms: PlanTerms` - Billing terms (amount, period_hours, created_at). `created_at` is overwritten on-chain.
 - `end_ts: i64` - Plan expiration (0 = no expiry)
 - `destinations: [Address; 4]` - Fund recipients, optional (all zeros = any destination valid at transfer time)
 - `pullers: [Address; 4]` - Authorized pullers (optional, plan owner always authorized by default)
 - `metadata_uri: [u8; 128]` - Optional metadata URI
 
 **Validation:**
-1. `amount > 0` (else `InvalidAmount`)
-2. `0 < period_hours <= 8760` (else `InvalidPeriodLength`)
-3. `end_ts == 0` or `end_ts > current_time` (else `InvalidEndTs`)
+1. `terms.amount > 0` (else `InvalidAmount`)
+2. `0 < terms.period_hours <= 8760` (else `InvalidPeriodLength`)
+3. `end_ts == 0` or `end_ts >= current_time + (terms.period_hours * 3600)` (else `InvalidEndTs`)
 
 **Process:**
 1. Validate PlanData fields (see above)
@@ -296,10 +304,11 @@ Merchant publishes a Plan with subscription terms.
 3. Create Plan account via CPI to System Program (handles pre-funded accounts)
 4. Set `discriminator = Plan (1)`, `owner = merchant`, `bump`, `status = Active (1)`
 5. Copy PlanData into the account
+6. Set `terms.created_at = Clock::get()?.unix_timestamp` (overwrites client value)
 
 ### `update_plan` (Discriminator: 8)
 
-Plan owner updates mutable admin fields (status, end_ts, pullers, metadata_uri). Core terms (mint, amount, period_hours, destinations, plan_id) are immutable.
+Plan owner updates mutable admin fields (status, end_ts, pullers, metadata_uri). Core terms (mint, terms, destinations, plan_id) are immutable.
 
 | Account | Type     | Description        |
 | ------- | -------- | ------------------ |
@@ -322,7 +331,7 @@ Plan owner updates mutable admin fields (status, end_ts, pullers, metadata_uri).
 7. Write status, end_ts, pullers, and metadata_uri from input data
 
 **Immutable fields (never modified by update_plan):**
-`plan_id`, `owner`, `bump`, `mint`, `amount`, `period_hours`, `destinations`
+`plan_id`, `owner`, `bump`, `mint`, `terms` (amount, period_hours, created_at), `destinations`
 
 ### `delete_plan` (Discriminator: 9)
 
@@ -372,6 +381,7 @@ Subscriber subscribes to a Plan, creating a lightweight `SubscriptionDelegation`
 5. Check subscription doesn't already exist (else `AlreadySubscribed`)
 6. Create SubscriptionDelegation account with:
    - `header.delegator = subscriber`, `header.delegatee = plan_pda`, `header.payer = subscriber`
+   - `terms = plan.data.terms` (snapshot of plan's billing terms)
    - `amount_pulled_in_period = 0`, `current_period_start_ts = current_ts`, `expires_at_ts = 0`
 7. Emit `SubscriptionCreatedEvent` via self-CPI
 
@@ -404,13 +414,14 @@ Authorized caller (plan owner or whitelisted puller) pulls tokens from a subscri
 3. Check plan not expired: `end_ts == 0` or `current_ts <= end_ts` (else `PlanExpired`)
 4. Authorize caller: must be plan owner or listed in `pullers` array (else `Unauthorized`)
 5. Validate destination: if plan has non-zero destinations, receiver ATA owner must match one (else `UnauthorizedDestination`); if all destinations are zero, any receiver is valid
-6. Load SubscriptionDelegation and verify `delegatee == plan_pda` (else `SubscriptionPlanMismatch`)
-7. Verify `delegator` matches `transfer_data.delegator` (else `Unauthorized`)
-8. Check subscription not cancelled: if `expires_at_ts != 0 && current_ts >= expires_at_ts`, block the transfer (else `SubscriptionCancelled`)
-9. Validate recurring transfer: amount within period limit, handle period rollover
-10. Update subscription state (`current_period_start_ts`, `amount_pulled_in_period`)
-11. Execute transfer via MultiDelegate PDA (CPI to Token Program)
-12. Emit `SubscriptionTransferEvent` via self-CPI
+6. Load SubscriptionDelegation and verify plan terms match via `check_plan_terms()` (else `PlanTermsMismatch`)
+7. Verify `delegatee == plan_pda` (else `SubscriptionPlanMismatch`)
+8. Verify `delegator` matches `transfer_data.delegator` (else `Unauthorized`)
+9. Check subscription not cancelled: if `expires_at_ts != 0 && current_ts >= expires_at_ts`, block the transfer (else `SubscriptionCancelled`)
+10. Validate recurring transfer using subscription's snapshotted terms: amount within period limit, handle period rollover
+11. Update subscription state (`current_period_start_ts`, `amount_pulled_in_period`)
+12. Execute transfer via MultiDelegate PDA (CPI to Token Program)
+13. Emit `SubscriptionTransferEvent` via self-CPI
 
 **Authorization Logic:**
 - Direct delegations (ADR-001): Only delegatee can call transfer
@@ -420,7 +431,12 @@ Authorized caller (plan owner or whitelisted puller) pulls tokens from a subscri
 
 ### `cancel_subscription` (Discriminator: 12)
 
-Subscriber cancels their subscription. Computes `expires_at_ts` as the end of the current billing period, allowing the merchant to pull for the remainder of that period (grace period). If the plan account is closed, `expires_at_ts` is set to the current timestamp (immediate expiration). After `expires_at_ts` passes, pulls are blocked. The subscriber can then call `revoke_delegation` to close the account and reclaim rent.
+Subscriber cancels their subscription. Three paths based on plan state:
+- **Plan exists, terms match:** grace period (expires at end of current billing period)
+- **Plan exists, terms mismatch (ghost plan):** immediate expiration (`expires_at_ts = current_ts`)
+- **Plan closed:** immediate expiration (`expires_at_ts = current_ts`)
+
+After `expires_at_ts` passes, pulls are blocked. The subscriber can then call `revoke_delegation` to close the account and reclaim rent.
 
 | Account | Type             | Description                      |
 | ------- | ---------------- | -------------------------------- |
@@ -438,9 +454,10 @@ Subscriber cancels their subscription. Computes `expires_at_ts` as the end of th
 3. Verify subscription's delegatee matches the plan PDA (else `SubscriptionPlanMismatch`)
 
 **Process:**
-1. If plan is valid (program-owned): compute `expires_at_ts = current_period_start + (periods_elapsed + 1) * period_length`
-2. If plan is closed (not program-owned): set `expires_at_ts = current_ts`
-3. Emit `SubscriptionCancelled` event via self-CPI
+1. If plan is valid (program-owned) and `check_plan_terms()` passes: compute `expires_at_ts = current_period_start + (periods_elapsed + 1) * period_length` using subscription's snapshotted `terms.period_hours`
+2. If plan is valid but `check_plan_terms()` fails (ghost plan): set `expires_at_ts = current_ts` (immediate, no grace period)
+3. If plan is closed (not program-owned): set `expires_at_ts = current_ts`
+4. Emit `SubscriptionCancelled` event via self-CPI
 
 **Two-step revocation flow:**
 - `cancel_subscription` → pre-computes `expires_at_ts` (end of current period), allows pulls until then
@@ -507,7 +524,7 @@ sequenceDiagram
 ### Delegator Cancels and Revokes Subscription
 
 Cancellation is a two-step process:
-1. **`cancel_subscription`** — Sets `expires_at_ts` to the end of the current billing period. The merchant can still pull for the remainder of that period (grace period). If the plan is closed, `expires_at_ts` is set to the current timestamp (immediate).
+1. **`cancel_subscription`** — Sets `expires_at_ts`. Three paths: terms match (grace period until end of billing period), terms mismatch/ghost plan (immediate), plan closed (immediate).
 2. **`revoke_delegation`** — Closes the subscription account and reclaims rent. Only allowed after `expires_at_ts` is in the past.
 
 ```mermaid
@@ -529,6 +546,28 @@ sequenceDiagram
 
     D->>P: revoke_delegation(subscription_pda)
     Note over P: expires_at_ts in the past → Close account<br/>Return rent to payer
+```
+
+### Ghost Account Recovery
+
+When a merchant deletes an expired plan and recreates it with the same `plan_id`, the new plan occupies the same PDA. Existing subscriptions detect this via `check_plan_terms()`.
+
+```mermaid
+sequenceDiagram
+    participant M as Merchant
+    participant P as Program
+    participant D as Alice (Subscriber)
+
+    Note over M,P: Merchant deletes expired plan,<br/>recreates with same plan_id<br/>but different terms
+
+    M->>P: transfer_subscription(amount, alice, mint)
+    Note over P: check_plan_terms() fails:<br/>subscription.terms.created_at ≠ plan.terms.created_at<br/>Rejected (PlanTermsMismatch)
+
+    D->>P: cancel_subscription(plan_pda, subscription_pda)
+    Note over P: check_plan_terms() fails:<br/>Ghost plan detected<br/>expires_at_ts = current_ts (immediate)
+
+    D->>P: revoke_delegation(subscription_pda)
+    Note over P: expires_at_ts in the past → Close account<br/>Return rent to Alice
 ```
 
 ### Merchant Sunsets and Deletes Plan
@@ -557,7 +596,8 @@ sequenceDiagram
 
 | Attack | Prevention |
 |--------|------------|
-| Merchant changes terms mid-subscription | `update_plan` only modifies status, end_ts, pullers, metadata_uri; core billing terms (mint, amount, period_hours, destinations) are immutable |
+| Merchant changes terms mid-subscription | `update_plan` only modifies status, end_ts, pullers, metadata_uri; core billing terms (mint, terms, destinations) are immutable |
+| Ghost account (merchant deletes/recreates plan at same PDA) | `PlanTerms` (amount, period_hours, created_at) are snapshotted into each SubscriptionDelegation at subscribe time. `transfer_subscription` calls `check_plan_terms()` to compare the snapshot against the live plan; mismatch returns `PlanTermsMismatch`. `cancel_subscription` detects mismatch and expires immediately (no grace period). Subscriber then calls `revoke_delegation` to close the account. |
 | Delegator can't verify terms | Terms stored in immutable Plan PDA; delegator verifies before subscribing |
 | Unauthorized pull on Plans | Owner is always authorized, plus explicit pullers array (`Unauthorized`) |
 | Plan closed/deleted before pull | `transfer_subscription` checks plan ownership before loading; returns `PlanClosed` if account is no longer program-owned |

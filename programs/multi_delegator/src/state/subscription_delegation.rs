@@ -5,8 +5,9 @@ use core::mem::{size_of, transmute};
 use pinocchio::error::ProgramError;
 
 use crate::{
-    check_min_account_size, state::common::AccountDiscriminator,
-    state::header::DISCRIMINATOR_OFFSET, Header, MultiDelegatorError,
+    check_min_account_size, instructions::create_plan::PlanTerms,
+    state::common::AccountDiscriminator, state::header::DISCRIMINATOR_OFFSET, Header,
+    MultiDelegatorError,
 };
 
 /// A subscriber's delegation linked to a specific [`Plan`](super::plan::Plan).
@@ -25,6 +26,8 @@ pub struct SubscriptionDelegation {
     ///
     /// In this context, `delegator` is the subscriber and `delegatee` is the plan PDA.
     pub header: Header,
+    /// Snapshot of the plan's billing terms at subscribe time.
+    pub terms: PlanTerms,
     /// Token amount already transferred in the current billing period.
     pub amount_pulled_in_period: u64,
     /// Unix timestamp marking the start of the current billing period.
@@ -84,5 +87,15 @@ impl SubscriptionDelegation {
             return Err(MultiDelegatorError::InvalidAccountDiscriminator.into());
         }
         Ok(unsafe { &mut *transmute::<*mut u8, *mut Self>(bytes.as_mut_ptr()) })
+    }
+
+    pub fn check_plan_terms(&self, plan_terms: &PlanTerms) -> Result<(), ProgramError> {
+        if self.terms.created_at != plan_terms.created_at
+            || self.terms.amount != plan_terms.amount
+            || self.terms.period_hours != plan_terms.period_hours
+        {
+            return Err(MultiDelegatorError::PlanTermsMismatch.into());
+        }
+        Ok(())
     }
 }
