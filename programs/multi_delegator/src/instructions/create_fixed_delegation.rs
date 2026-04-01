@@ -25,7 +25,9 @@ pub struct CreateFixedDelegationData {
 impl CreateFixedDelegationData {
     /// Validates the instruction data against the current clock time.
     pub fn validate(&self, current_time: i64) -> Result<(), MultiDelegatorError> {
-        if self.expiry_ts != 0 && self.expiry_ts < current_time.saturating_sub(TIME_DRIFT_ALLOWED_SECS) {
+        if self.expiry_ts != 0
+            && self.expiry_ts < current_time.saturating_sub(TIME_DRIFT_ALLOWED_SECS)
+        {
             return Err(MultiDelegatorError::FixedDelegationExpiryInPast);
         }
 
