@@ -65,7 +65,13 @@ pub fn process(accounts: &[AccountView]) -> ProgramResult {
                 .and_then(|p| p.checked_mul(period_length_s))
                 .and_then(|offset| period_start.checked_add(offset))
                 // Cap at plan end so subscriber can revoke as soon as the plan expires
-                .map(|ts| if plan.data.end_ts != 0 { ts.min(plan.data.end_ts) } else { ts })
+                .map(|ts| {
+                    if plan.data.end_ts != 0 {
+                        ts.min(plan.data.end_ts)
+                    } else {
+                        ts
+                    }
+                })
                 .ok_or::<ProgramError>(MultiDelegatorError::ArithmeticOverflow.into())?;
         } else {
             // Plan is closed (not owned by our program) — expire immediately
