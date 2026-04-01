@@ -9,7 +9,7 @@ use pinocchio::{
 use crate::{
     create_plan_account,
     state::{
-        common::{AccountDiscriminator, PlanStatus},
+        common::{validate_plan_end_ts, AccountDiscriminator, PlanStatus},
         plan::{self, Plan},
     },
     CreatePlanAccounts, MultiDelegatorError,
@@ -70,12 +70,7 @@ impl PlanData {
 
         // Destinations are not validated here; empty destinations means any destination is valid at transfer time.
         // Pullers are not validated here; empty pullers defaults to owner-only authorization in transfer.
-        if self.end_ts != 0 {
-            let period_secs = (self.period_hours as i64) * 3600;
-            if current_time + period_secs > self.end_ts {
-                return Err(MultiDelegatorError::InvalidEndTs);
-            }
-        }
+        validate_plan_end_ts(self.end_ts, self.period_hours, current_time)?;
 
         Ok(())
     }
