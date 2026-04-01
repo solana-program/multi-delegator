@@ -220,6 +220,12 @@ export class IntegrationTest {
     return BigInt(blockTime);
   }
 
+  async minPlanEndTs(periodHours: bigint): Promise<bigint> {
+    const TX_PROPAGATION_BUFFER = 60n;
+    const now = await this.getValidatorTime();
+    return now + periodHours * 3600n + TX_PROPAGATION_BUFFER;
+  }
+
   async timeTravel(targetTimestampSec: number): Promise<void> {
     const res = await fetch(SURFPOOL_RPC_URL, {
       method: 'POST',
