@@ -62,6 +62,7 @@ impl TryFrom<u32> for MultiDelegatorError {
             404 => Ok(Self::RecurringDelegationStartTimeInPast),
             405 => Ok(Self::RecurringDelegationStartTimeGreaterThanExpiry),
             406 => Ok(Self::RecurringDelegationAmountZero),
+            407 => Ok(Self::DelegationNotStarted),
             // Plan and subscription errors (500-599)
             500 => Ok(Self::PlanSunset),
             501 => Ok(Self::PlanExpired),
@@ -196,6 +197,8 @@ pub enum MultiDelegatorError {
     RecurringDelegationStartTimeGreaterThanExpiry,
     #[error("zero amount specified")]
     RecurringDelegationAmountZero,
+    #[error("Delegation period has not started yet")]
+    DelegationNotStarted,
 
     // --- Plan and subscription errors (500--599) ---
     #[error("Plan is in sunset status")]

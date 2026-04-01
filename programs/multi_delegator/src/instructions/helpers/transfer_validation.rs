@@ -35,6 +35,7 @@ pub fn validate_fixed_transfer(
 /// Returns an error if:
 /// - `transfer_amount` is zero
 /// - the delegation has expired
+/// - the delegation period has not started (`current_ts < current_period_start_ts`)
 /// - `transfer_amount` exceeds the remaining per-period budget
 pub fn validate_recurring_transfer(
     transfer_amount: u64,
@@ -56,6 +57,10 @@ pub fn validate_recurring_transfer(
         i64::try_from(period_length_s).map_err(|_| MultiDelegatorError::InvalidPeriodLength)?;
     if period_length == 0 {
         return Err(MultiDelegatorError::InvalidPeriodLength.into());
+    }
+
+    if current_ts < *current_period_start_ts {
+        return Err(MultiDelegatorError::DelegationNotStarted.into());
     }
 
     let time_since_start = current_ts.saturating_sub(*current_period_start_ts);
