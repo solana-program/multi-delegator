@@ -12,7 +12,7 @@ export const ZERO_ADDRESS =
   '11111111111111111111111111111111' as import('gill').Address<'11111111111111111111111111111111'>;
 
 // Header struct layout offsets
-// Layout: discriminator (1 byte) + version (1 byte) + bump (1 byte) + delegator (32 bytes) + delegatee (32 bytes)
+// Layout: discriminator (1) + version (1) + bump (1) + delegator (32) + delegatee (32) + payer (32) + init_id (8) = 107 bytes
 // See: programs/multi_delegator/src/state/header.rs
 export const DISCRIMINATOR_OFFSET = 0;
 export const DELEGATOR_OFFSET = 3;
@@ -35,8 +35,8 @@ export const EVENT_AUTHORITY_SEED = 'event_authority';
 
 // Plan: discriminator(1) + owner(32) + bump(1) + status(1) + planData(448)
 export const PLAN_SIZE = 483;
-// Subscription: header(67) + amountPulledInPeriod(8) + currentPeriodStartTs(8) + expiresAtTs(8) + planPda(32)
-export const SUBSCRIPTION_SIZE = 123;
+// Subscription: header(107) + amountPulledInPeriod(8) + currentPeriodStartTs(8) + expiresAtTs(8)
+export const SUBSCRIPTION_SIZE = 131;
 
 export const PLAN_OWNER_OFFSET = 1;
 

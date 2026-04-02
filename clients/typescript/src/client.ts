@@ -76,11 +76,31 @@ export class MultiDelegatorClient {
     return { signature };
   }
 
-  /** Close a MultiDelegate PDA, returning rent to the user. */
+  /**
+   * Close a MultiDelegate PDA, returning rent to the user.
+   *
+   * Closing invalidates all existing delegations on re-initialization
+   * (init_id mismatch). This can serve as an emergency kill switch to
+   * immediately cut off all delegatees in a single transaction.
+   */
   async closeMultiDelegate(params: {
     user: TransactionSigner;
     tokenMint: Address;
   }): Promise<TransactionResult> {
+    try {
+      const delegations = await this.getDelegationsForWallet(
+        params.user.address,
+      );
+      if (delegations.length > 0) {
+        console.warn(
+          `Warning: ${delegations.length} active delegation(s) found across all mints. ` +
+            `Delegations for this mint will become permanently non-transferable if re-initialized.`,
+        );
+      }
+    } catch (e) {
+      console.warn('Could not check active delegations before closing:', e);
+    }
+
     const { instructions } = await buildCloseMultiDelegate(params);
     const signature = await this.buildAndSendTransaction(
       instructions,
@@ -297,5 +317,37 @@ export class MultiDelegatorClient {
   /** Fetch all plans owned by the given address. */
   async getPlansForOwner(owner: Address): Promise<PlanWithAddress[]> {
     return fetchPlansForOwner(this.client.rpc, owner);
+  }
+
+  /**
+   * Returns a summary of active delegations and subscriptions for a wallet.
+   * Useful for checking outstanding commitments before closing a MultiDelegate.
+   */
+  async getActiveDelegationSummary(wallet: Address): Promise<{
+    fixed: number;
+    recurring: number;
+    subscriptions: number;
+    total: number;
+  }> {
+    const delegations = await fetchDelegationsByDelegator(
+      this.client.rpc,
+      wallet,
+    );
+
+    let fixed = 0;
+    let recurring = 0;
+    let subscriptions = 0;
+    for (const d of delegations) {
+      if (d.kind === 'fixed') fixed++;
+      else if (d.kind === 'recurring') recurring++;
+      else if (d.kind === 'subscription') subscriptions++;
+    }
+
+    return {
+      fixed,
+      recurring,
+      subscriptions,
+      total: delegations.length,
+    };
   }
 }
