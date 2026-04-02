@@ -616,4 +616,41 @@ mod tests {
         result.assert_err(MultiDelegatorError::MigrationRequired);
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
     }
+
+    #[test]
+    fn test_fixed_transfer_within_drift_window() {
+        let amount: u64 = 50_000_000;
+        let expiry_ts: i64 = current_ts() + 100;
+        let nonce = 0;
+        let transfer_amount = 10_000_000;
+
+        let (mut litesvm, alice, bob, delegation_pda, mint, _, _) =
+            setup_fixed_delegation(amount, expiry_ts, nonce);
+
+        move_clock_forward(&mut litesvm, 110);
+
+        TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+            .amount(transfer_amount)
+            .fixed()
+            .assert_ok();
+    }
+
+    #[test]
+    fn test_fixed_transfer_past_drift_window() {
+        let amount: u64 = 50_000_000;
+        let expiry_ts: i64 = current_ts() + 100;
+        let nonce = 0;
+        let transfer_amount = 10_000_000;
+
+        let (mut litesvm, alice, bob, delegation_pda, mint, _, _) =
+            setup_fixed_delegation(amount, expiry_ts, nonce);
+
+        move_clock_forward(&mut litesvm, 221);
+
+        let result =
+            TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+                .amount(transfer_amount)
+                .fixed();
+        result.assert_err(MultiDelegatorError::DelegationExpired);
+    }
 }
