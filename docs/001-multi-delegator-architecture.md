@@ -212,17 +212,18 @@ pub enum AccountDiscriminator {
 The MultiDelegate PDA stores the delegator and mint information:
 
 ```rust
-#[repr(C)]
+#[repr(C, packed)]
 pub struct MultiDelegate {
     pub discriminator: u8,    // 1 byte - AccountDiscriminator::MultiDelegate
     pub user: Address,        // 32 bytes - delegator key
     pub token_mint: Address,  // 32 bytes - mint this MDA controls
     pub bump: u8,             // 1 byte
+    pub init_id: i64,         // 8 bytes - slot-based generation identifier
 }
 
 impl MultiDelegate {
     pub const SEED: &[u8] = b"MultiDelegate";
-    pub const LEN: usize = 66;
+    pub const LEN: usize = 74;
 
     pub fn find_pda(user: &Address, token_mint: &Address) -> (Address, u8) {
         Address::find_program_address(
@@ -234,6 +235,13 @@ impl MultiDelegate {
 ```
 
 **PDA seeds**: `["MultiDelegate", delegator_key, mint_key]`
+
+> **Note (init_id):** The `init_id` field is set from `Clock::slot` when the account is created.
+> Every delegation header stores a copy of this value. On transfer, the program validates
+> `header.init_id == multidelegate.init_id`. If a user closes and re-initializes their
+> MultiDelegate, the new slot produces a different `init_id`, making all old delegations
+> non-transferable (error: `StaleMultiDelegate`). This prevents orphaned delegations from
+> being revived and also makes closing an effective emergency kill switch.
 
 ### Header
 
@@ -248,10 +256,11 @@ pub struct Header {
     pub delegator: Address, // 32 bytes - user granting delegation
     pub delegatee: Address, // 32 bytes - beneficiary
     pub payer: Address,     // 32 bytes - who paid for the delegation account
+    pub init_id: i64,       // 8 bytes - copied from MultiDelegate.init_id at creation
 }
 
 impl Header {
-    pub const LEN: usize = 99;
+    pub const LEN: usize = 107;
 }
 ```
 
@@ -262,6 +271,7 @@ Field offsets are defined as standalone constants in `state/header.rs`:
 - `DELEGATOR_OFFSET = 3`
 - `DELEGATEE_OFFSET = 35`
 - `PAYER_OFFSET = 67`
+- `INIT_ID_OFFSET = 99`
 
 ### FixedDelegation
 
@@ -416,6 +426,13 @@ Closes a MultiDelegate PDA and returns rent to the owner.
 1. Verify signer matches the MDA's `user` field
 2. Verify PDA derivation from `["MultiDelegate", user, token_mint]`
 3. Close account and transfer lamports to user
+
+> **Emergency kill switch:** Closing does not revoke existing delegation PDAs, but they
+> become non-transferable because the MultiDelegate account no longer exists. If the user
+> re-initializes, the new `init_id` invalidates all old delegations. This allows a user
+> to immediately cut off all delegatees in a single transaction without revoking each one
+> individually. The delegator can still call `revoke_delegation` on orphaned delegations
+> afterward to reclaim rent.
 
 ---
 
