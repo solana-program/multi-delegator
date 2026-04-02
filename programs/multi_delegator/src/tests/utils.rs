@@ -72,6 +72,7 @@ pub fn current_ts() -> i64 {
 pub fn move_clock_forward(litesvm: &mut LiteSVM, seconds: u64) {
     let mut initial_clock = litesvm.get_sysvar::<Clock>();
     initial_clock.unix_timestamp += seconds as i64;
+    initial_clock.slot += seconds * 2;
     litesvm.set_sysvar::<Clock>(&initial_clock);
 }
 
@@ -878,6 +879,7 @@ pub struct CreateSubscription<'a> {
     litesvm: &'a mut LiteSVM,
     plan_pda: Pubkey,
     subscriber: Pubkey,
+    mint: Pubkey,
     period_start_ts: i64,
     amount_pulled: u64,
     expires_at_ts: i64,
@@ -888,12 +890,14 @@ impl<'a> CreateSubscription<'a> {
         litesvm: &'a mut LiteSVM,
         plan_pda: Pubkey,
         subscriber: Pubkey,
+        mint: Pubkey,
         period_start_ts: i64,
     ) -> Self {
         Self {
             litesvm,
             plan_pda,
             subscriber,
+            mint,
             period_start_ts,
             amount_pulled: 0,
             expires_at_ts: 0,
@@ -913,9 +917,14 @@ impl<'a> CreateSubscription<'a> {
     pub fn execute(self) -> Pubkey {
         use crate::{
             state::{common::AccountDiscriminator, versioning::CURRENT_VERSION},
-            tests::pda::get_subscription_pda,
-            Header, SubscriptionDelegation,
+            tests::pda::{get_multidelegate_pda, get_subscription_pda},
+            Header, MultiDelegate, SubscriptionDelegation,
         };
+
+        let (md_pda, _) = get_multidelegate_pda(&self.subscriber, &self.mint);
+        let md_account = self.litesvm.get_account(&md_pda).unwrap();
+        let md = MultiDelegate::load(&md_account.data).unwrap();
+        let init_id = md.init_id;
 
         let (subscription_pda, bump) = get_subscription_pda(&self.plan_pda, &self.subscriber);
 
@@ -927,6 +936,7 @@ impl<'a> CreateSubscription<'a> {
                 delegator: self.subscriber.to_bytes().into(),
                 delegatee: self.plan_pda.to_bytes().into(),
                 payer: self.subscriber.to_bytes().into(),
+                init_id,
             },
             amount_pulled_in_period: self.amount_pulled,
             current_period_start_ts: self.period_start_ts,

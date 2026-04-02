@@ -62,7 +62,8 @@ pub fn process(accounts: &[AccountView], call_data: &CreateFixedDelegationData) 
 
     let accounts = CreateDelegationAccounts::try_from(accounts)?;
 
-    let bump = create_delegation_account(&accounts, call_data.nonce, FixedDelegation::LEN)?;
+    let (bump, init_id) =
+        create_delegation_account(&accounts, call_data.nonce, FixedDelegation::LEN)?;
 
     let binding = &mut accounts.delegation_account.try_borrow_mut()?;
     // Set discriminator before load_mut so validation passes on freshly created account
@@ -75,6 +76,7 @@ pub fn process(accounts: &[AccountView], call_data: &CreateFixedDelegationData) 
         accounts.delegator.address(),
         accounts.delegatee.address(),
         accounts.payer.address(),
+        init_id,
     );
     delegation.amount = call_data.amount;
     delegation.expiry_ts = call_data.expiry_ts;

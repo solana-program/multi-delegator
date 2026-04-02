@@ -29,10 +29,15 @@ pub const DELEGATEE_OFFSET: usize = 35;
 /// Byte offset of the payer pubkey (who funded the account creation).
 pub const PAYER_OFFSET: usize = 67;
 
+/// Byte offset of the init_id field.
+pub const INIT_ID_OFFSET: usize = 99;
+
 /// Common header shared by all delegation account types.
 ///
-/// Occupies the first 99 bytes of every delegation PDA. The discriminator byte
-/// at offset 0 identifies the concrete delegation type.
+/// Occupies the first 107 bytes of every delegation PDA. The discriminator byte
+/// at offset 0 identifies the concrete delegation type. The `init_id` field
+/// is copied from the parent [`MultiDelegate`](super::multi_delegate::MultiDelegate)
+/// at creation time and validated on every transfer to detect stale delegations.
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy, CodamaType)]
 pub struct Header {
@@ -48,6 +53,8 @@ pub struct Header {
     pub delegatee: Address,
     /// The account that funded the PDA creation (receives rent on close).
     pub payer: Address,
+    /// Initialization identifier copied from the parent MultiDelegate's `init_id`.
+    pub init_id: i64,
 }
 
 impl Header {
@@ -61,6 +68,7 @@ impl Header {
         delegator: &Address,
         delegatee: &Address,
         payer: &Address,
+        init_id: i64,
     ) {
         self.version = CURRENT_VERSION;
         self.discriminator = discriminator.into();
@@ -68,5 +76,6 @@ impl Header {
         self.delegator = *delegator;
         self.delegatee = *delegatee;
         self.payer = *payer;
+        self.init_id = init_id;
     }
 }

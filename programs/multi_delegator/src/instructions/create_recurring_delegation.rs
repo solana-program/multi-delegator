@@ -79,7 +79,8 @@ pub fn process(
 
     let accounts = CreateDelegationAccounts::try_from(accounts)?;
 
-    let bump = create_delegation_account(&accounts, call_data.nonce, RecurringDelegation::LEN)?;
+    let (bump, init_id) =
+        create_delegation_account(&accounts, call_data.nonce, RecurringDelegation::LEN)?;
 
     let binding = &mut accounts.delegation_account.try_borrow_mut()?;
     // Set discriminator before load_mut so validation passes on freshly created account
@@ -92,6 +93,7 @@ pub fn process(
         accounts.delegator.address(),
         accounts.delegatee.address(),
         accounts.payer.address(),
+        init_id,
     );
     delegation.current_period_start_ts = call_data.start_ts;
     delegation.period_length_s = call_data.period_length_s;

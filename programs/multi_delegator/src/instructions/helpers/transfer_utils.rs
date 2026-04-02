@@ -71,6 +71,7 @@ pub fn transfer_with_delegate(
     amount: u64,
     delegator: &Address,
     mint: &Address,
+    init_id: i64,
     accounts: &TransferAccounts,
 ) -> ProgramResult {
     let bump = {
@@ -83,6 +84,9 @@ pub fn transfer_with_delegate(
         // we can trust its data. If the data matches, it is the correct PDA.
         if multidelegate.user != *delegator || multidelegate.token_mint != *mint {
             return Err(MultiDelegatorError::InvalidDelegatePda.into());
+        }
+        if multidelegate.init_id != init_id {
+            return Err(MultiDelegatorError::StaleMultiDelegate.into());
         }
         multidelegate.bump
     };

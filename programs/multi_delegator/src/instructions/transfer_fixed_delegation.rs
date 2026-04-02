@@ -30,6 +30,7 @@ pub fn process(accounts: &[AccountView], transfer: &TransferData) -> ProgramResu
 
     let remaining_amount: u64;
     let delegatee_address: Address;
+    let init_id: i64;
     {
         let mut binding = accounts_struct.delegation_pda.try_borrow_mut()?;
         check_and_update_version(&mut binding)?;
@@ -58,6 +59,7 @@ pub fn process(accounts: &[AccountView], transfer: &TransferData) -> ProgramResu
             .ok_or(MultiDelegatorError::ArithmeticUnderflow)?;
 
         remaining_amount = delegation.amount;
+        init_id = delegation.header.init_id;
     }
 
     // Extract receiver owner from token account data
@@ -77,6 +79,7 @@ pub fn process(accounts: &[AccountView], transfer: &TransferData) -> ProgramResu
         transfer.amount,
         &transfer.delegator,
         &transfer.mint,
+        init_id,
         &TransferAccounts {
             delegator_ata: accounts_struct.delegator_ata,
             to_ata: accounts_struct.receiver_ata,
@@ -615,5 +618,101 @@ mod tests {
 
         result.assert_err(MultiDelegatorError::MigrationRequired);
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
+    }
+
+    #[test]
+    fn test_fixed_transfer_stale_multidelegate() {
+        use crate::tests::utils::{move_clock_forward, CloseMultiDelegate, RevokeDelegation};
+
+        let amount: u64 = 50_000_000;
+        let expiry_ts: i64 = current_ts() + days(1) as i64;
+        let nonce = 0;
+
+        let (mut litesvm, alice, bob, delegation_pda, mint, alice_ata, bob_ata) =
+            setup_fixed_delegation(amount, expiry_ts, nonce);
+
+        CloseMultiDelegate::new(&mut litesvm, &alice, mint)
+            .execute()
+            .assert_ok();
+
+        move_clock_forward(&mut litesvm, 2);
+
+        initialize_multidelegate_action(&mut litesvm, &alice, mint)
+            .0
+            .assert_ok();
+
+        let result =
+            TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+                .amount(10_000_000)
+                .fixed();
+
+        result.assert_err(MultiDelegatorError::StaleMultiDelegate);
+        assert_eq!(get_ata_balance(&litesvm, &alice_ata), 100_000_000);
+        assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
+
+        RevokeDelegation::new(&mut litesvm, &alice, mint, bob.pubkey(), nonce)
+            .execute()
+            .assert_ok();
+    }
+
+    #[test]
+    fn test_close_multidelegate_blocks_all_transfers() {
+        use crate::tests::utils::{CloseMultiDelegate, RevokeDelegation};
+
+        let amount: u64 = 50_000_000;
+        let expiry_ts: i64 = current_ts() + days(1) as i64;
+
+        let (mut litesvm, alice) = setup();
+        let bob = Keypair::new();
+        let charlie = Keypair::new();
+        litesvm.airdrop(&bob.pubkey(), 10_000_000).unwrap();
+        litesvm.airdrop(&charlie.pubkey(), 10_000_000).unwrap();
+
+        let mint = init_mint(
+            &mut litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(alice.pubkey()),
+            &[],
+        );
+        let alice_ata = init_ata(&mut litesvm, mint, alice.pubkey(), 100_000_000);
+        let _bob_ata = init_ata(&mut litesvm, mint, bob.pubkey(), 0);
+        let _charlie_ata = init_ata(&mut litesvm, mint, charlie.pubkey(), 0);
+
+        initialize_multidelegate_action(&mut litesvm, &alice, mint)
+            .0
+            .assert_ok();
+
+        let (_, del_bob) = CreateDelegation::new(&mut litesvm, &alice, mint, bob.pubkey())
+            .nonce(0)
+            .fixed(amount, expiry_ts);
+
+        let (_, del_charlie) = CreateDelegation::new(&mut litesvm, &alice, mint, charlie.pubkey())
+            .nonce(0)
+            .fixed(amount, expiry_ts);
+
+        CloseMultiDelegate::new(&mut litesvm, &alice, mint)
+            .execute()
+            .assert_ok();
+
+        TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, del_bob)
+            .amount(10_000_000)
+            .fixed()
+            .assert_err(MultiDelegatorError::InvalidMultiDelegatePda);
+
+        TransferDelegation::new(&mut litesvm, &charlie, alice.pubkey(), mint, del_charlie)
+            .amount(10_000_000)
+            .fixed()
+            .assert_err(MultiDelegatorError::InvalidMultiDelegatePda);
+
+        assert_eq!(get_ata_balance(&litesvm, &alice_ata), 100_000_000);
+
+        RevokeDelegation::new(&mut litesvm, &alice, mint, bob.pubkey(), 0)
+            .execute()
+            .assert_ok();
+        RevokeDelegation::new(&mut litesvm, &alice, mint, charlie.pubkey(), 0)
+            .execute()
+            .assert_ok();
     }
 }

@@ -545,12 +545,12 @@ mod tests {
 
     #[test]
     fn revoke_subscription_with_future_expires_at_ts_rejected() {
-        let (mut litesvm, alice, _merchant, _mint, plan_pda, _, _subscription_pda) =
+        let (mut litesvm, alice, _merchant, mint, plan_pda, _, _subscription_pda) =
             setup_with_subscription();
 
         // Manually inject a subscription with expires_at_ts in the future
         let subscription_pda =
-            CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), current_ts())
+            CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), mint, current_ts())
                 .expires_at_ts(current_ts() + days(1) as i64)
                 .execute();
 
