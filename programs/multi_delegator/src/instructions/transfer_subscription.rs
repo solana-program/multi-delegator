@@ -58,7 +58,9 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
         plan.check_destination(&receiver_owner)?;
 
         amount_per_period = plan.data.amount;
-        period_length_s = plan.data.period_hours * 3600;
+        period_length_s = plan.data.period_hours
+            .checked_mul(3600)
+            .ok_or::<ProgramError>(MultiDelegatorError::ArithmeticOverflow.into())?;
     }
 
     // Load SubscriptionDelegation (mutable borrow)
