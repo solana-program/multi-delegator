@@ -488,4 +488,34 @@ mod tests {
         assert_eq!(owner.to_bytes(), merchant.pubkey().to_bytes());
         assert_eq!(status, PlanStatus::Active as u8);
     }
+
+    #[test]
+    fn create_plan_duplicate_plan_id() {
+        let (litesvm, merchant) = &mut setup();
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            None,
+            &[],
+        );
+        let dest = Pubkey::new_unique();
+
+        let (res, _) = CreatePlan::new(litesvm, merchant, mint)
+            .plan_id(1)
+            .amount(1_000)
+            .period_hours(24)
+            .destinations(vec![dest])
+            .execute();
+        res.assert_ok();
+
+        let (res2, _) = CreatePlan::new(litesvm, merchant, mint)
+            .plan_id(1)
+            .amount(2_000)
+            .period_hours(48)
+            .destinations(vec![dest])
+            .execute();
+        res2.assert_err(crate::MultiDelegatorError::PlanAlreadyExists);
+    }
 }

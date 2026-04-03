@@ -365,7 +365,7 @@ mod tests {
         let (res2, _) = CreateDelegation::new(litesvm, payer, mint, delegatee)
             .nonce(0)
             .fixed(200, current_ts() + 2000);
-        assert!(res2.is_err());
+        res2.assert_err(MultiDelegatorError::DelegationAlreadyExists);
     }
 
     #[test]
