@@ -25,7 +25,9 @@ pub struct CreateFixedDelegationData {
 impl CreateFixedDelegationData {
     /// Validates the instruction data against the current clock time.
     pub fn validate(&self, current_time: i64) -> Result<(), MultiDelegatorError> {
-        if self.expiry_ts < current_time.saturating_sub(TIME_DRIFT_ALLOWED_SECS) {
+        if self.expiry_ts != 0
+            && self.expiry_ts < current_time.saturating_sub(TIME_DRIFT_ALLOWED_SECS)
+        {
             return Err(MultiDelegatorError::FixedDelegationExpiryInPast);
         }
 
@@ -93,8 +95,9 @@ mod tests {
             constants::{MINT_DECIMALS, TOKEN_PROGRAM_ID},
             pda::get_delegation_pda,
             utils::{
-                current_ts, days, init_ata, init_mint, init_wallet,
-                initialize_multidelegate_action, setup, CreateDelegation, RevokeDelegation,
+                current_ts, days, get_ata_balance, init_ata, init_mint, init_wallet,
+                initialize_multidelegate_action, move_clock_forward, setup, CreateDelegation,
+                RevokeDelegation, TransferDelegation,
             },
         },
         AccountDiscriminator, FixedDelegation, MultiDelegatorError,
@@ -613,5 +616,52 @@ mod tests {
             .nonce(nonce)
             .fixed(amount, expiry_ts);
         res.assert_err(MultiDelegatorError::FixedDelegationExpiryInPast);
+    }
+
+    #[test]
+    fn create_fixed_delegation_with_zero_expiry() {
+        let (litesvm, user) = &mut setup();
+        let payer = user;
+        let amount: u64 = 100_000_000;
+        let expiry_ts: i64 = 0;
+        let nonce: u64 = 0;
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(payer.pubkey()),
+            &[],
+        );
+        let _user_ata = init_ata(litesvm, mint, payer.pubkey(), 100_000_000);
+
+        initialize_multidelegate_action(litesvm, payer, mint)
+            .0
+            .assert_ok();
+
+        let delegatee = solana_keypair::Keypair::new();
+        litesvm.airdrop(&delegatee.pubkey(), 10_000_000).unwrap();
+        let delegatee_ata = init_ata(litesvm, mint, delegatee.pubkey(), 0);
+
+        let (res, delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee.pubkey())
+            .nonce(nonce)
+            .fixed(amount, expiry_ts);
+        res.assert_ok();
+
+        let account = litesvm.get_account(&delegation_pda).unwrap();
+        let delegation = FixedDelegation::load(&account.data).unwrap();
+        let del_expiry_ts = delegation.expiry_ts;
+        assert_eq!(del_expiry_ts, 0);
+
+        move_clock_forward(litesvm, days(30));
+
+        let transfer_amount: u64 = 10_000_000;
+        TransferDelegation::new(litesvm, &delegatee, payer.pubkey(), mint, delegation_pda)
+            .amount(transfer_amount)
+            .fixed()
+            .assert_ok();
+
+        assert_eq!(get_ata_balance(litesvm, &delegatee_ata), transfer_amount);
     }
 }
