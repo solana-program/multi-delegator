@@ -50,6 +50,7 @@ impl TryFrom<u32> for MultiDelegatorError {
             132 => Ok(Self::AtaOwnerMismatch),
             133 => Ok(Self::DelegationVersionMismatch),
             134 => Ok(Self::MigrationRequired),
+            135 => Ok(Self::DelegationAlreadyExists),
             // Fixed delegation errors (300-399)
             300 => Ok(Self::AmountExceedsLimit),
             301 => Ok(Self::FixedDelegationExpiryInPast),
@@ -81,7 +82,8 @@ impl TryFrom<u32> for MultiDelegatorError {
             515 => Ok(Self::PlanNotExpired),
             516 => Ok(Self::PlanClosed),
             517 => Ok(Self::AlreadySubscribed),
-            518 => Ok(Self::PlanTermsMismatch),
+            518 => Ok(Self::PlanAlreadyExists),
+            519 => Ok(Self::PlanTermsMismatch),
             // Event errors (600-699)
             600 => Ok(Self::InvalidEventAuthority),
             601 => Ok(Self::InvalidEventData),
@@ -173,6 +175,8 @@ pub enum MultiDelegatorError {
     DelegationVersionMismatch,
     #[error("Account requires explicit migration")]
     MigrationRequired,
+    #[error("Delegation account already exists")]
+    DelegationAlreadyExists,
 
     // --- Fixed delegation errors (300--399) ---
     #[error("Transfer amount exceeds delegation limit")]
@@ -235,6 +239,8 @@ pub enum MultiDelegatorError {
     PlanClosed,
     #[error("Already subscribed to this plan")]
     AlreadySubscribed,
+    #[error("Plan account already exists")]
+    PlanAlreadyExists,
     #[error("Subscription plan terms do not match the current plan")]
     PlanTermsMismatch,
 

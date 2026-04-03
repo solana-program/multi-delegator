@@ -9,7 +9,7 @@ use pinocchio::{
 use crate::{
     create_plan_account,
     state::{
-        common::{AccountDiscriminator, PlanStatus},
+        common::{validate_plan_end_ts, AccountDiscriminator, PlanStatus},
         plan::{self, Plan},
     },
     CreatePlanAccounts, MultiDelegatorError,
@@ -80,12 +80,7 @@ impl PlanData {
 
         // Destinations are not validated here; empty destinations means any destination is valid at transfer time.
         // Pullers are not validated here; empty pullers defaults to owner-only authorization in transfer.
-        if self.end_ts != 0 {
-            let period_secs = (self.terms.period_hours as i64) * 3600;
-            if current_time + period_secs > self.end_ts {
-                return Err(MultiDelegatorError::InvalidEndTs);
-            }
-        }
+        validate_plan_end_ts(self.end_ts, self.terms.period_hours, current_time)?;
 
         Ok(())
     }
@@ -502,5 +497,35 @@ mod tests {
         let status = plan.status;
         assert_eq!(owner.to_bytes(), merchant.pubkey().to_bytes());
         assert_eq!(status, PlanStatus::Active as u8);
+    }
+
+    #[test]
+    fn create_plan_duplicate_plan_id() {
+        let (litesvm, merchant) = &mut setup();
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            None,
+            &[],
+        );
+        let dest = Pubkey::new_unique();
+
+        let (res, _) = CreatePlan::new(litesvm, merchant, mint)
+            .plan_id(1)
+            .amount(1_000)
+            .period_hours(24)
+            .destinations(vec![dest])
+            .execute();
+        res.assert_ok();
+
+        let (res2, _) = CreatePlan::new(litesvm, merchant, mint)
+            .plan_id(1)
+            .amount(2_000)
+            .period_hours(48)
+            .destinations(vec![dest])
+            .execute();
+        res2.assert_err(crate::MultiDelegatorError::PlanAlreadyExists);
     }
 }

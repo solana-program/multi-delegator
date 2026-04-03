@@ -71,6 +71,14 @@ pub fn process(accounts: &[AccountView]) -> ProgramResult {
                     .checked_add(1)
                     .and_then(|p| p.checked_mul(period_length_s))
                     .and_then(|offset| period_start.checked_add(offset))
+                    // Cap at plan end so subscriber can revoke as soon as the plan expires
+                    .map(|ts| {
+                        if plan.data.end_ts != 0 {
+                            ts.min(plan.data.end_ts)
+                        } else {
+                            ts
+                        }
+                    })
                     .ok_or::<ProgramError>(MultiDelegatorError::ArithmeticOverflow.into())?;
             }
         } else {
@@ -137,8 +145,8 @@ mod tests {
         tests::{
             asserts::TransactionResultExt,
             utils::{
-                current_ts, days, init_wallet, move_clock_forward, setup_with_subscription,
-                CancelSubscription, CreatePlan, DeletePlan, UpdatePlan,
+                current_ts, days, hours, init_wallet, minutes, move_clock_forward,
+                setup_with_subscription, CancelSubscription, CreatePlan, DeletePlan, UpdatePlan,
             },
         },
         MultiDelegatorError,
@@ -254,5 +262,137 @@ mod tests {
             .get_sysvar::<spl_associated_token_account::solana_program::clock::Clock>()
             .unix_timestamp;
         assert_eq!(expires, svm_ts);
+    }
+
+    #[test]
+    fn cancel_subscription_caps_at_plan_end_ts() {
+        use crate::instructions::create_plan::PlanTerms;
+        use crate::tests::{
+            constants::{MINT_DECIMALS, TOKEN_PROGRAM_ID},
+            utils::{
+                init_ata, init_mint, initialize_multidelegate_action, move_clock_forward, setup,
+                CreatePlan, CreateSubscription,
+            },
+        };
+        use solana_signer::Signer;
+
+        let (mut litesvm, alice) = setup();
+        let merchant = solana_keypair::Keypair::new();
+        litesvm.airdrop(&merchant.pubkey(), 10_000_000_000).unwrap();
+
+        let mint = init_mint(
+            &mut litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(alice.pubkey()),
+            &[],
+        );
+        init_ata(&mut litesvm, mint, alice.pubkey(), 100_000_000);
+        initialize_multidelegate_action(&mut litesvm, &alice, mint)
+            .0
+            .assert_ok();
+
+        let end_ts = current_ts() + minutes(90) as i64;
+        let (res, plan_pda) = CreatePlan::new(&mut litesvm, &merchant, mint)
+            .plan_id(1)
+            .amount(50_000_000)
+            .period_hours(1)
+            .end_ts(end_ts)
+            .execute();
+        res.assert_ok();
+
+        let svm_ts = litesvm
+            .get_sysvar::<spl_associated_token_account::solana_program::clock::Clock>()
+            .unix_timestamp;
+        let subscription_pda = CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), svm_ts)
+            .terms(PlanTerms {
+                amount: 50_000_000,
+                period_hours: 1,
+                created_at: svm_ts,
+            })
+            .execute();
+
+        move_clock_forward(&mut litesvm, hours(1) + minutes(5));
+
+        CancelSubscription::new(&mut litesvm, &alice, plan_pda, subscription_pda)
+            .execute()
+            .assert_ok();
+
+        let sub_account = litesvm.get_account(&subscription_pda).unwrap();
+        let sub = SubscriptionDelegation::load(&sub_account.data).unwrap();
+        assert_eq!(
+            { sub.expires_at_ts },
+            end_ts,
+            "expires_at_ts should be capped at plan end_ts, not period end"
+        );
+    }
+
+    #[test]
+    fn cancel_subscription_after_plan_expired_allows_immediate_revoke() {
+        use crate::instructions::create_plan::PlanTerms;
+        use crate::tests::{
+            constants::{MINT_DECIMALS, TOKEN_PROGRAM_ID},
+            utils::{
+                init_ata, init_mint, initialize_multidelegate_action, move_clock_forward, setup,
+                CreatePlan, CreateSubscription,
+            },
+        };
+        use solana_signer::Signer;
+
+        let (mut litesvm, alice) = setup();
+        let merchant = solana_keypair::Keypair::new();
+        litesvm.airdrop(&merchant.pubkey(), 10_000_000_000).unwrap();
+
+        let mint = init_mint(
+            &mut litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(alice.pubkey()),
+            &[],
+        );
+        init_ata(&mut litesvm, mint, alice.pubkey(), 100_000_000);
+        initialize_multidelegate_action(&mut litesvm, &alice, mint)
+            .0
+            .assert_ok();
+
+        let end_ts = current_ts() + hours(2) as i64;
+        let (res, plan_pda) = CreatePlan::new(&mut litesvm, &merchant, mint)
+            .plan_id(1)
+            .amount(50_000_000)
+            .period_hours(1)
+            .end_ts(end_ts)
+            .execute();
+        res.assert_ok();
+
+        let svm_ts = litesvm
+            .get_sysvar::<spl_associated_token_account::solana_program::clock::Clock>()
+            .unix_timestamp;
+        let subscription_pda = CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), svm_ts)
+            .terms(PlanTerms {
+                amount: 50_000_000,
+                period_hours: 1,
+                created_at: svm_ts,
+            })
+            .execute();
+
+        move_clock_forward(&mut litesvm, hours(3));
+
+        CancelSubscription::new(&mut litesvm, &alice, plan_pda, subscription_pda)
+            .execute()
+            .assert_ok();
+
+        let sub_account = litesvm.get_account(&subscription_pda).unwrap();
+        let sub = SubscriptionDelegation::load(&sub_account.data).unwrap();
+        let current_clock = litesvm
+            .get_sysvar::<spl_associated_token_account::solana_program::clock::Clock>()
+            .unix_timestamp;
+        assert!(
+            { sub.expires_at_ts } <= current_clock,
+            "expires_at_ts ({}) should be <= current time ({}) so subscriber can revoke immediately",
+            { sub.expires_at_ts },
+            current_clock
+        );
     }
 }

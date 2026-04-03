@@ -11,6 +11,7 @@ describe('Subscription Lifecycle', () => {
   test('full lifecycle: create, subscribe, pull, cancel, sunset, delete', async () => {
     const t = await initTestSuite();
     const planAmount = 500_000n;
+    const periodHours = 1n;
 
     // 1. Merchant creates a plan
     const { planPda } = await t.client.createPlan({
@@ -18,7 +19,7 @@ describe('Subscription Lifecycle', () => {
       planId: 1n,
       mint: t.tokenMint,
       amount: planAmount,
-      periodHours: 1n,
+      periodHours,
       endTs: 0n,
       destinations: [],
       pullers: [],
@@ -96,8 +97,7 @@ describe('Subscription Lifecycle', () => {
     expect(subAfterCancel.expiresAtTs).not.toBe(0n);
 
     // 5. Merchant sunsets the plan
-    const validatorTs = await t.getValidatorTime();
-    const endTs = validatorTs + 10n;
+    const endTs = await t.minPlanEndTs(periodHours);
 
     await t.client.updatePlan({
       owner: t.payerKeypair,
@@ -108,7 +108,7 @@ describe('Subscription Lifecycle', () => {
     });
 
     // 6. Time-travel past endTs, then delete the plan
-    await t.timeTravel(Number(endTs) + 5);
+    await t.timeTravel(Number(endTs) + 60);
 
     const { signature: deleteSig } = await t.client.deletePlan({
       owner: t.payerKeypair,
@@ -221,8 +221,7 @@ describe('Subscription Lifecycle', () => {
     });
 
     // 3. Merchant sunsets, expires, and deletes the plan
-    const validatorTs = await t.getValidatorTime();
-    const endTs = validatorTs + 10n;
+    const endTs = await t.minPlanEndTs(1n);
 
     await t.client.updatePlan({
       owner: t.payerKeypair,

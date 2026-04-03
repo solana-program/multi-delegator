@@ -48,6 +48,10 @@ pub fn create_plan_account(
     accounts: &CreatePlanAccounts,
     plan_id: u64,
 ) -> Result<u8, ProgramError> {
+    if accounts.plan_pda.data_len() > 0 {
+        return Err(MultiDelegatorError::PlanAlreadyExists.into());
+    }
+
     let (expected_pda, bump) = find_plan_pda(accounts.merchant.address(), plan_id);
 
     if expected_pda != *accounts.plan_pda.address() {
