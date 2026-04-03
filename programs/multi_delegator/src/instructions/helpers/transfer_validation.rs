@@ -1,12 +1,13 @@
 use pinocchio::ProgramResult;
 
+use crate::constants::TIME_DRIFT_ALLOWED_SECS;
 use crate::MultiDelegatorError;
 
 /// Validates a fixed transfer against the delegation's remaining allowance and expiry.
 ///
 /// Returns an error if:
 /// - `transfer_amount` is zero
-/// - the delegation has expired (`expiry_ts != 0 && current_ts > expiry_ts`)
+/// - the delegation has expired (`expiry_ts != 0 && current_ts > expiry_ts + TIME_DRIFT_ALLOWED_SECS`)
 /// - `transfer_amount` exceeds the remaining allowance
 pub fn validate_fixed_transfer(
     transfer_amount: u64,
@@ -17,7 +18,7 @@ pub fn validate_fixed_transfer(
     if transfer_amount == 0 {
         return Err(MultiDelegatorError::InvalidAmount.into());
     }
-    if expiry_ts != 0 && current_ts > expiry_ts {
+    if expiry_ts != 0 && current_ts > expiry_ts.saturating_add(TIME_DRIFT_ALLOWED_SECS) {
         return Err(MultiDelegatorError::DelegationExpired.into());
     }
     if transfer_amount > remaining {
@@ -49,7 +50,7 @@ pub fn validate_recurring_transfer(
     if transfer_amount == 0 {
         return Err(MultiDelegatorError::InvalidAmount.into());
     }
-    if expiry_ts != 0 && current_ts > expiry_ts {
+    if expiry_ts != 0 && current_ts > expiry_ts.saturating_add(TIME_DRIFT_ALLOWED_SECS) {
         return Err(MultiDelegatorError::DelegationExpired.into());
     }
 

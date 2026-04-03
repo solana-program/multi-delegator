@@ -1,5 +1,4 @@
 use super::traits::{AccountCheck, AccountClose, ProgramAccountInit};
-use crate::MultiDelegatorError;
 use pinocchio::{
     cpi::{Seed, Signer},
     error::ProgramError,
@@ -44,9 +43,7 @@ impl ProgramAccountInit for ProgramAccount {
             }
             .invoke_signed(&signer)?;
         } else {
-            let required_lamports = lamports
-                .checked_sub(account.lamports())
-                .ok_or(MultiDelegatorError::ArithmeticUnderflow)?;
+            let required_lamports = lamports.saturating_sub(account.lamports());
 
             if required_lamports > 0 {
                 Transfer {
