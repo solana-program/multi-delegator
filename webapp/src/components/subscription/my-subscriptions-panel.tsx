@@ -160,8 +160,8 @@ function SubscriptionCard({ item }: { item: EnrichedSubscription }) {
 
   const planDeleted = !item.plan
   const planName = meta.n || 'Unknown Plan'
-  const amount = item.plan ? Number(item.plan.data.amount) / USDC_MULTIPLIER : null
-  const period = item.plan ? formatPeriod(item.plan.data.periodHours) : null
+  const amount = item.plan ? Number(item.plan.data.terms.amount) / USDC_MULTIPLIER : null
+  const period = item.plan ? formatPeriod(item.plan.data.terms.periodHours) : null
   const pulled = Number(item.subscription.amountPulledInPeriod) / USDC_MULTIPLIER
 
   return (

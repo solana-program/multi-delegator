@@ -99,7 +99,7 @@ pub fn process(accounts: &[AccountView], data: &UpdatePlanData) -> ProgramResult
 
     let current_ts = Clock::get()?.unix_timestamp;
     data.validate(current_ts)?;
-    validate_plan_end_ts(data.end_ts, plan.data.period_hours, current_ts)?;
+    validate_plan_end_ts(data.end_ts, plan.data.terms.period_hours, current_ts)?;
 
     if plan.data.end_ts != 0 && current_ts > plan.data.end_ts {
         return Err(MultiDelegatorError::PlanExpired.into());
@@ -193,8 +193,8 @@ mod tests {
 
         let account_before = litesvm.get_account(&plan_pda).unwrap();
         let plan_before = Plan::load(&account_before.data).unwrap();
-        let amount_before = plan_before.data.amount;
-        let period_before = plan_before.data.period_hours;
+        let amount_before = plan_before.data.terms.amount;
+        let period_before = plan_before.data.terms.period_hours;
         let mint_before = plan_before.data.mint;
         let dests_before = plan_before.data.destinations;
         let id_before = plan_before.data.plan_id;
@@ -209,8 +209,8 @@ mod tests {
 
         let account_after = litesvm.get_account(&plan_pda).unwrap();
         let plan_after = Plan::load(&account_after.data).unwrap();
-        let amount_after = plan_after.data.amount;
-        let period_after = plan_after.data.period_hours;
+        let amount_after = plan_after.data.terms.amount;
+        let period_after = plan_after.data.terms.period_hours;
         let mint_after = plan_after.data.mint;
         let dests_after = plan_after.data.destinations;
         let id_after = plan_after.data.plan_id;

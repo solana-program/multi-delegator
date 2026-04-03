@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   fetchMaybePlan,
+  fetchMaybeSubscriptionDelegation,
   fetchSubscriptionDelegation,
   PlanStatus,
 } from '../src/generated/index.ts';
@@ -180,5 +181,122 @@ describe('Subscription Lifecycle', () => {
 
     const balance = await t.rpc.getTokenAccountBalance(pullerAta).send();
     expect(balance.value.amount).toBe(pullAmount.toString());
+  });
+
+  test('ghost account attack is blocked and subscriber can recover', async () => {
+    const t = await initTestSuite();
+
+    // 1. Merchant creates plan
+    const { planPda } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 10n,
+      mint: t.tokenMint,
+      amount: 500_000n,
+      periodHours: 1n,
+      endTs: 0n,
+      destinations: [],
+      pullers: [],
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    // 2. Subscriber subscribes
+    const subscriber = await t.createFundedKeypair();
+    const subscriberAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      subscriber.address,
+      DEFAULT_TEST_BALANCE,
+    );
+    await t.client.initMultiDelegate({
+      owner: subscriber,
+      tokenMint: t.tokenMint,
+      userAta: subscriberAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const { subscriptionPda } = await t.client.subscribe({
+      subscriber,
+      merchant: t.payerKeypair.address,
+      planId: 10n,
+      tokenMint: t.tokenMint,
+    });
+
+    // 3. Merchant sunsets, expires, and deletes the plan
+    const endTs = await t.minPlanEndTs(1n);
+
+    await t.client.updatePlan({
+      owner: t.payerKeypair,
+      planPda,
+      status: PlanStatus.Sunset,
+      endTs,
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    await t.timeTravel(Number(endTs) + 5);
+
+    await t.client.deletePlan({
+      owner: t.payerKeypair,
+      planPda,
+    });
+
+    // 4. Merchant recreates plan with same planId but different terms (ghost)
+    const { planPda: ghostPlanPda } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 10n,
+      mint: t.tokenMint,
+      amount: 999_000_000n,
+      periodHours: 720n,
+      endTs: 0n,
+      destinations: [],
+      pullers: [],
+      metadataUri: 'https://example.com/ghost.json',
+    });
+
+    expect(ghostPlanPda).toBe(planPda);
+
+    // 5. Transfer is blocked with PlanTermsMismatch
+    const merchantAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      t.payerKeypair.address,
+      0n,
+    );
+
+    await expect(
+      t.client.transferSubscription({
+        caller: t.payerKeypair,
+        delegator: subscriber.address,
+        tokenMint: t.tokenMint,
+        subscriptionPda,
+        planPda,
+        amount: 100_000n,
+        receiverAta: merchantAta,
+        tokenProgram: t.tokenProgram,
+      }),
+    ).rejects.toThrow();
+
+    // 6. Subscriber cancels (immediate expiry, no grace period)
+    await t.client.cancelSubscription({
+      subscriber,
+      planPda,
+      subscriptionPda,
+    });
+
+    const subAfterCancel = (
+      await fetchSubscriptionDelegation(t.rpc, subscriptionPda)
+    ).data;
+    expect(subAfterCancel.expiresAtTs).not.toBe(0n);
+
+    // 7. Subscriber revokes delegation, getting rent back
+    const { signature: revokeSig } = await t.client.revokeDelegation({
+      authority: subscriber,
+      delegationAccount: subscriptionPda,
+    });
+    expect(revokeSig).toBeDefined();
+
+    // Subscription account should be closed
+    const subAfterRevoke = await fetchMaybeSubscriptionDelegation(
+      t.rpc,
+      subscriptionPda,
+    );
+    expect(subAfterRevoke.exists).toBe(false);
   });
 });

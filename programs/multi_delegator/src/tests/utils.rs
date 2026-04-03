@@ -31,7 +31,7 @@ use solana_instruction::AccountMeta;
 
 use crate::{
     event_engine::event_authority_pda,
-    instructions::create_plan::{PlanData, MAX_DESTINATIONS, MAX_PULLERS},
+    instructions::create_plan::{PlanData, PlanTerms, MAX_DESTINATIONS, MAX_PULLERS},
     instructions::update_plan::UpdatePlanData,
     instructions::{
         cancel_subscription, close_multidelegate, create_fixed_delegation, create_plan,
@@ -637,8 +637,11 @@ impl<'a> CreatePlan<'a> {
             data: PlanData {
                 plan_id: 0,
                 mint: mint.to_bytes().into(),
-                amount: 0,
-                period_hours: 0,
+                terms: PlanTerms {
+                    amount: 0,
+                    period_hours: 0,
+                    created_at: 0,
+                },
                 end_ts: 0,
                 destinations: [zero_addr; MAX_DESTINATIONS],
                 pullers: [zero_addr; MAX_PULLERS],
@@ -656,12 +659,12 @@ impl<'a> CreatePlan<'a> {
     }
 
     pub fn amount(mut self, amount: u64) -> Self {
-        self.data.amount = amount;
+        self.data.terms.amount = amount;
         self
     }
 
     pub fn period_hours(mut self, period_hours: u64) -> Self {
-        self.data.period_hours = period_hours;
+        self.data.terms.period_hours = period_hours;
         self
     }
 
@@ -881,6 +884,7 @@ pub struct CreateSubscription<'a> {
     period_start_ts: i64,
     amount_pulled: u64,
     expires_at_ts: i64,
+    terms: PlanTerms,
 }
 
 impl<'a> CreateSubscription<'a> {
@@ -897,6 +901,11 @@ impl<'a> CreateSubscription<'a> {
             period_start_ts,
             amount_pulled: 0,
             expires_at_ts: 0,
+            terms: PlanTerms {
+                amount: 0,
+                period_hours: 0,
+                created_at: 0,
+            },
         }
     }
 
@@ -907,6 +916,11 @@ impl<'a> CreateSubscription<'a> {
 
     pub fn expires_at_ts(mut self, expires_at_ts: i64) -> Self {
         self.expires_at_ts = expires_at_ts;
+        self
+    }
+
+    pub fn terms(mut self, terms: PlanTerms) -> Self {
+        self.terms = terms;
         self
     }
 
@@ -928,6 +942,7 @@ impl<'a> CreateSubscription<'a> {
                 delegatee: self.plan_pda.to_bytes().into(),
                 payer: self.subscriber.to_bytes().into(),
             },
+            terms: self.terms,
             amount_pulled_in_period: self.amount_pulled,
             current_period_start_ts: self.period_start_ts,
             expires_at_ts: self.expires_at_ts,

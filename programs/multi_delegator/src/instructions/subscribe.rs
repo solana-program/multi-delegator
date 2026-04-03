@@ -70,6 +70,7 @@ pub fn process(accounts: &[AccountView], data: &SubscribeData) -> ProgramResult 
 
     // Load and validate Plan
     let plan_mint;
+    let plan_terms;
     {
         let plan_data = accounts_struct.plan_pda.try_borrow()?;
         let plan = Plan::load(&plan_data)?;
@@ -87,6 +88,7 @@ pub fn process(accounts: &[AccountView], data: &SubscribeData) -> ProgramResult 
         }
 
         plan_mint = plan.data.mint;
+        plan_terms = plan.data.terms;
     }
 
     // Validate MultiDelegate belongs to subscriber and matches plan mint
@@ -147,6 +149,7 @@ pub fn process(accounts: &[AccountView], data: &SubscribeData) -> ProgramResult 
             accounts_struct.subscriber.address(),
         );
 
+        subscription.terms = plan_terms;
         subscription.amount_pulled_in_period = 0;
         subscription.current_period_start_ts = current_ts;
         subscription.expires_at_ts = 0;
