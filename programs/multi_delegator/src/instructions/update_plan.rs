@@ -7,7 +7,10 @@ use pinocchio::{
 };
 
 use crate::{
-    state::{common::PlanStatus, plan::Plan},
+    state::{
+        common::{validate_plan_end_ts, PlanStatus},
+        plan::Plan,
+    },
     AccountCheck, MultiDelegatorError, ProgramAccount, SignerAccount, WritableAccount,
 };
 
@@ -96,6 +99,7 @@ pub fn process(accounts: &[AccountView], data: &UpdatePlanData) -> ProgramResult
 
     let current_ts = Clock::get()?.unix_timestamp;
     data.validate(current_ts)?;
+    validate_plan_end_ts(data.end_ts, plan.data.period_hours, current_ts)?;
 
     if plan.data.end_ts != 0 && current_ts > plan.data.end_ts {
         return Err(MultiDelegatorError::PlanExpired.into());
@@ -623,5 +627,30 @@ mod tests {
         for (i, p) in pullers.iter().enumerate() {
             assert_eq!(plan.data.pullers[i].to_bytes(), p.to_bytes());
         }
+    }
+
+    #[test]
+    fn update_plan_rejects_near_immediate_end_ts() {
+        let (litesvm, owner) = &mut setup();
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            None,
+            &[],
+        );
+
+        let (res, plan_pda) = CreatePlan::new(litesvm, owner, mint)
+            .plan_id(1)
+            .amount(1_000)
+            .period_hours(720)
+            .execute();
+        res.assert_ok();
+
+        let res = UpdatePlan::new(litesvm, owner, plan_pda)
+            .end_ts(current_ts() + 2)
+            .execute();
+        res.assert_err(crate::MultiDelegatorError::InvalidEndTs);
     }
 }
