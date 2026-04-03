@@ -913,4 +913,55 @@ mod tests {
         result.assert_err(MultiDelegatorError::MigrationRequired);
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
     }
+
+    #[test]
+    fn test_recurring_transfer_within_drift_window() {
+        let amount_per_period: u64 = 50_000_000;
+        let period_length_s: u64 = hours(1);
+        let start_ts: i64 = current_ts();
+        let expiry_ts: i64 = current_ts() + hours(1) as i64;
+        let nonce = 0;
+        let transfer_amount = 10_000_000;
+
+        let (mut litesvm, alice, bob, delegation_pda, mint, _, _, _) = setup_recurring_delegation(
+            amount_per_period,
+            period_length_s,
+            start_ts,
+            expiry_ts,
+            nonce,
+        );
+
+        move_clock_forward(&mut litesvm, hours(1) + 60);
+
+        TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+            .amount(transfer_amount)
+            .recurring()
+            .assert_ok();
+    }
+
+    #[test]
+    fn test_recurring_transfer_past_drift_window() {
+        let amount_per_period: u64 = 50_000_000;
+        let period_length_s: u64 = hours(1);
+        let start_ts: i64 = current_ts();
+        let expiry_ts: i64 = current_ts() + hours(1) as i64;
+        let nonce = 0;
+        let transfer_amount = 10_000_000;
+
+        let (mut litesvm, alice, bob, delegation_pda, mint, _, _, _) = setup_recurring_delegation(
+            amount_per_period,
+            period_length_s,
+            start_ts,
+            expiry_ts,
+            nonce,
+        );
+
+        move_clock_forward(&mut litesvm, hours(1) + 121);
+
+        let result =
+            TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+                .amount(transfer_amount)
+                .recurring();
+        result.assert_err(MultiDelegatorError::DelegationExpired);
+    }
 }
