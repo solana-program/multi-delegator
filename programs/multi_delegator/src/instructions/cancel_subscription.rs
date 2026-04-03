@@ -305,13 +305,14 @@ mod tests {
         let svm_ts = litesvm
             .get_sysvar::<spl_associated_token_account::solana_program::clock::Clock>()
             .unix_timestamp;
-        let subscription_pda = CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), svm_ts)
-            .terms(PlanTerms {
-                amount: 50_000_000,
-                period_hours: 1,
-                created_at: svm_ts,
-            })
-            .execute();
+        let subscription_pda =
+            CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), svm_ts)
+                .terms(PlanTerms {
+                    amount: 50_000_000,
+                    period_hours: 1,
+                    created_at: svm_ts,
+                })
+                .execute();
 
         move_clock_forward(&mut litesvm, hours(1) + minutes(5));
 
@@ -369,13 +370,14 @@ mod tests {
         let svm_ts = litesvm
             .get_sysvar::<spl_associated_token_account::solana_program::clock::Clock>()
             .unix_timestamp;
-        let subscription_pda = CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), svm_ts)
-            .terms(PlanTerms {
-                amount: 50_000_000,
-                period_hours: 1,
-                created_at: svm_ts,
-            })
-            .execute();
+        let subscription_pda =
+            CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), svm_ts)
+                .terms(PlanTerms {
+                    amount: 50_000_000,
+                    period_hours: 1,
+                    created_at: svm_ts,
+                })
+                .execute();
 
         move_clock_forward(&mut litesvm, hours(3));
 
