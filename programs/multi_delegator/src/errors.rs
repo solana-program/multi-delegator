@@ -51,6 +51,7 @@ impl TryFrom<u32> for MultiDelegatorError {
             133 => Ok(Self::DelegationVersionMismatch),
             134 => Ok(Self::MigrationRequired),
             135 => Ok(Self::DelegationAlreadyExists),
+            136 => Ok(Self::StaleMultiDelegate),
             // Fixed delegation errors (300-399)
             300 => Ok(Self::AmountExceedsLimit),
             301 => Ok(Self::FixedDelegationExpiryInPast),
@@ -178,6 +179,8 @@ pub enum MultiDelegatorError {
     MigrationRequired,
     #[error("Delegation account already exists")]
     DelegationAlreadyExists,
+    #[error("Delegation init_id does not match current MultiDelegate")]
+    StaleMultiDelegate,
 
     // --- Fixed delegation errors (300--399) ---
     #[error("Transfer amount exceeds delegation limit")]

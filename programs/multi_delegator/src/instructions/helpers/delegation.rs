@@ -60,20 +60,22 @@ impl<'a> TryFrom<&'a [AccountView]> for CreateDelegationAccounts<'a> {
 /// Creates and allocates a delegation PDA.
 ///
 /// Verifies the delegator owns the [`MultiDelegate`], derives the expected PDA,
-/// and creates the account via CPI. Returns the PDA bump on success.
+/// and creates the account via CPI. Returns `(bump, init_id)` on success.
 pub fn create_delegation_account(
     accounts: &CreateDelegationAccounts,
     nonce: u64,
     space: usize,
-) -> Result<u8, ProgramError> {
+) -> Result<(u8, i64), ProgramError> {
     if accounts.delegation_account.data_len() > 0 {
         return Err(MultiDelegatorError::DelegationAlreadyExists.into());
     }
 
+    let init_id;
     {
         let md_data = accounts.multi_delegate.try_borrow()?;
         let multi_delegate = MultiDelegate::load(&md_data)?;
         multi_delegate.check_owner(accounts.delegator.address())?;
+        init_id = multi_delegate.init_id;
     }
 
     let nonce_bytes = nonce.to_le_bytes();
@@ -101,7 +103,7 @@ pub fn create_delegation_account(
 
     ProgramAccount::init::<()>(accounts.payer, accounts.delegation_account, &seeds, space)?;
 
-    Ok(bump)
+    Ok((bump, init_id))
 }
 
 /// Populates a delegation [`Header`] with the standard fields.
@@ -112,6 +114,7 @@ pub fn init_header(
     delegator: &Address,
     delegatee: &Address,
     payer: &Address,
+    init_id: i64,
 ) {
     header.version = CURRENT_VERSION;
     header.discriminator = discriminator.into();
@@ -119,6 +122,7 @@ pub fn init_header(
     header.delegator = *delegator;
     header.delegatee = *delegatee;
     header.payer = *payer;
+    header.init_id = init_id;
 }
 
 /// Authorization checker for delegation transfers.

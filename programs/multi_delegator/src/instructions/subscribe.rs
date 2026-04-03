@@ -92,6 +92,7 @@ pub fn process(accounts: &[AccountView], data: &SubscribeData) -> ProgramResult 
     }
 
     // Validate MultiDelegate belongs to subscriber and matches plan mint
+    let init_id;
     {
         let md_data = accounts_struct.multi_delegate_pda.try_borrow()?;
         let multi_delegate = MultiDelegate::load(&md_data)?;
@@ -100,6 +101,7 @@ pub fn process(accounts: &[AccountView], data: &SubscribeData) -> ProgramResult 
         if multi_delegate.token_mint != plan_mint {
             return Err(MultiDelegatorError::MintMismatch.into());
         }
+        init_id = multi_delegate.init_id;
     }
 
     // Derive and verify subscription PDA
@@ -147,6 +149,7 @@ pub fn process(accounts: &[AccountView], data: &SubscribeData) -> ProgramResult 
             accounts_struct.subscriber.address(),
             accounts_struct.plan_pda.address(),
             accounts_struct.subscriber.address(),
+            init_id,
         );
 
         subscription.terms = plan_terms;

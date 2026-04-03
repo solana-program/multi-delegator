@@ -306,7 +306,7 @@ mod tests {
             .get_sysvar::<spl_associated_token_account::solana_program::clock::Clock>()
             .unix_timestamp;
         let subscription_pda =
-            CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), svm_ts)
+            CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), mint, svm_ts)
                 .terms(PlanTerms {
                     amount: 50_000_000,
                     period_hours: 1,
@@ -371,7 +371,7 @@ mod tests {
             .get_sysvar::<spl_associated_token_account::solana_program::clock::Clock>()
             .unix_timestamp;
         let subscription_pda =
-            CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), svm_ts)
+            CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), mint, svm_ts)
                 .terms(PlanTerms {
                     amount: 50_000_000,
                     period_hours: 1,

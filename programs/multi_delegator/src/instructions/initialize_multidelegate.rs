@@ -1,4 +1,9 @@
-use pinocchio::{cpi::Seed, error::ProgramError, AccountView, ProgramResult};
+use pinocchio::{
+    cpi::Seed,
+    error::ProgramError,
+    sysvars::{clock::Clock, Sysvar},
+    AccountView, ProgramResult,
+};
 
 use pinocchio_token::instructions::Approve as ApproveSpl;
 use pinocchio_token_2022::instructions::Approve as Approve2022;
@@ -85,12 +90,14 @@ pub fn process(accounts: &[AccountView]) -> ProgramResult {
             MultiDelegate::LEN,
         )?;
 
+        let init_id = Clock::get()?.slot as i64;
         let mut data = accounts.multi_delegate.try_borrow_mut()?;
         MultiDelegate::init(
             &mut data,
             accounts.user.address(),
             accounts.token_mint.address(),
             bump,
+            init_id,
         )?;
     }
 
@@ -168,6 +175,7 @@ mod tests {
         assert_eq!(multi_delegate.user.to_bytes(), user.pubkey().to_bytes());
         assert_eq!(multi_delegate.token_mint.to_bytes(), mint.to_bytes());
         assert_eq!(multi_delegate.bump, bump);
+        assert!(multi_delegate.init_id >= 0);
 
         // Verify delegation
         let ata_account = fetch_account::<spl_token_2022::state::Account>(litesvm, &user_ata);
@@ -247,6 +255,7 @@ mod tests {
                 assert_eq!(multi_delegate.user.to_bytes(), user.pubkey().to_bytes());
                 assert_eq!(multi_delegate.token_mint.to_bytes(), mint.to_bytes());
                 assert_eq!(multi_delegate.bump, bump);
+                assert!(multi_delegate.init_id >= 0);
 
                 // Verify delegation
                 let ata_account =
@@ -352,6 +361,7 @@ mod tests {
         assert_eq!(multi_delegate.user.to_bytes(), user.pubkey().to_bytes());
         assert_eq!(multi_delegate.token_mint.to_bytes(), mint.to_bytes());
         assert_eq!(multi_delegate.bump, bump);
+        assert!(multi_delegate.init_id >= 0);
 
         // Verify delegation
         let ata_account = fetch_account::<spl_token_2022::state::Account>(litesvm, &user_ata);

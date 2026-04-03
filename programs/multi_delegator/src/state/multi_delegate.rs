@@ -14,7 +14,7 @@ use crate::{state::common::AccountDiscriminator, MultiDelegatorError};
 /// actually transfer.
 ///
 /// **PDA seeds:** `["MultiDelegate", user, token_mint]`
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(CodamaAccount)]
 pub struct MultiDelegate {
     /// Account type discriminator ([`AccountDiscriminator::MultiDelegate`]).
@@ -25,6 +25,8 @@ pub struct MultiDelegate {
     pub token_mint: Address,
     /// PDA bump seed.
     pub bump: u8,
+    /// Initialization identifier set from `Clock::slot` when the account is created.
+    pub init_id: i64,
 }
 
 impl MultiDelegate {
@@ -43,6 +45,7 @@ impl MultiDelegate {
         user: &Address,
         token_mint: &Address,
         bump: u8,
+        init_id: i64,
     ) -> Result<&'a Self, ProgramError> {
         if bytes.len() != Self::LEN {
             return Err(MultiDelegatorError::InvalidAccountData.into());
@@ -52,6 +55,7 @@ impl MultiDelegate {
         account.user = *user;
         account.token_mint = *token_mint;
         account.bump = bump;
+        account.init_id = init_id;
         Ok(account)
     }
 

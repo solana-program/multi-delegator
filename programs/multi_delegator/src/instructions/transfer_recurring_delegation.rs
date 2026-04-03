@@ -33,6 +33,7 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
     let amount_pulled_in_period: u64;
     let period_length_s: u64;
     let delegatee_address: Address;
+    let init_id: i64;
     {
         let mut binding = accounts_struct.delegation_pda.try_borrow_mut()?;
         check_and_update_version(&mut binding)?;
@@ -64,6 +65,7 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
 
         period_start = ps;
         amount_pulled_in_period = pulled;
+        init_id = delegation_mut.header.init_id;
     }
 
     // Extract receiver owner from token account data
@@ -83,6 +85,7 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
         transfer_data.amount,
         &transfer_data.delegator,
         &transfer_data.mint,
+        init_id,
         &TransferAccounts {
             delegator_ata: accounts_struct.delegator_ata,
             to_ata: accounts_struct.receiver_ata,
@@ -911,6 +914,45 @@ mod tests {
                 .recurring();
 
         result.assert_err(MultiDelegatorError::MigrationRequired);
+        assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
+    }
+
+    #[test]
+    fn test_recurring_transfer_stale_multidelegate() {
+        use crate::tests::utils::{move_clock_forward, CloseMultiDelegate};
+
+        let amount_per_period: u64 = 50_000_000;
+        let period_length_s = days(1);
+        let start_ts = current_ts();
+        let expiry_ts = current_ts() + days(30) as i64;
+        let nonce = 0;
+
+        let (mut litesvm, alice, bob, delegation_pda, mint, alice_ata, bob_ata, _) =
+            setup_recurring_delegation(
+                amount_per_period,
+                period_length_s,
+                start_ts,
+                expiry_ts,
+                nonce,
+            );
+
+        CloseMultiDelegate::new(&mut litesvm, &alice, mint)
+            .execute()
+            .assert_ok();
+
+        move_clock_forward(&mut litesvm, 2);
+
+        initialize_multidelegate_action(&mut litesvm, &alice, mint)
+            .0
+            .assert_ok();
+
+        let result =
+            TransferDelegation::new(&mut litesvm, &bob, alice.pubkey(), mint, delegation_pda)
+                .amount(10_000_000)
+                .recurring();
+
+        result.assert_err(MultiDelegatorError::StaleMultiDelegate);
+        assert_eq!(get_ata_balance(&litesvm, &alice_ata), 100_000_000);
         assert_eq!(get_ata_balance(&litesvm, &bob_ata), 0);
     }
 
