@@ -141,7 +141,7 @@ test-program:
 
 # Run tests with compute unit benchmark report
 test-and-benchmark:
-    cd {{program_dir}} && CU_REPORT=1 cargo test-sbf
+    cd {{program_dir}} && CU_REPORT=1 CU_REPORT_DATE=$(date +%Y-%m-%d) cargo test-sbf
 
 # Run TypeScript client integration tests
 test-client: build-program generate-client ensure-surfpool

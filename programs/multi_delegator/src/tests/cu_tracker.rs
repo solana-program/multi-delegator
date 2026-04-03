@@ -203,7 +203,7 @@ impl CuTracker {
         let mut output = String::new();
         output.push_str("# Compute Unit Report\n\n");
         output.push_str(&Table::new(&stats).with(Style::markdown()).to_string());
-        output.push_str(&format!("\n\n*Generated: {}*\n", simple_timestamp()));
+        output.push_str(&format!("\n\n*Generated: {}*\n", report_date()));
 
         output
     }
@@ -257,20 +257,6 @@ fn output_cu_report_on_exit() {
     output_report_if_enabled();
 }
 
-/// Simple timestamp without external dependencies.
-fn simple_timestamp() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let duration = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = duration.as_secs();
-
-    let days = secs / 86400;
-    let years = 1970 + days / 365;
-    let remaining_days = days % 365;
-    let months = remaining_days / 30 + 1;
-    let day = remaining_days % 30 + 1;
-
-    format!("{:04}-{:02}-{:02}", years, months, day)
+fn report_date() -> String {
+    std::env::var("CU_REPORT_DATE").unwrap_or_default()
 }
