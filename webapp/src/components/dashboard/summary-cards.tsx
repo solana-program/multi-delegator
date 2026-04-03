@@ -22,7 +22,7 @@ export function SummaryCards() {
     let totalAmount = 0
     for (const sub of active) {
       if (sub.plan) {
-        totalAmount += Number(sub.plan.data.amount) / USDC_MULTIPLIER
+        totalAmount += Number(sub.plan.data.terms.amount) / USDC_MULTIPLIER
       }
     }
     

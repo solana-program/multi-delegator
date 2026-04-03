@@ -33,10 +33,10 @@ export const PLAN_SEED = 'plan';
 export const SUBSCRIPTION_SEED = 'subscription';
 export const EVENT_AUTHORITY_SEED = 'event_authority';
 
-// Plan: discriminator(1) + owner(32) + bump(1) + status(1) + planData(448)
-export const PLAN_SIZE = 483;
-// Subscription: header(107) + amountPulledInPeriod(8) + currentPeriodStartTs(8) + expiresAtTs(8)
-export const SUBSCRIPTION_SIZE = 131;
+// Plan: discriminator(1) + owner(32) + bump(1) + status(1) + planData(456)
+export const PLAN_SIZE = 491;
+// Subscription: header(107) + terms(24) + amountPulledInPeriod(8) + currentPeriodStartTs(8) + expiresAtTs(8)
+export const SUBSCRIPTION_SIZE = 155;
 
 export const PLAN_OWNER_OFFSET = 1;
 

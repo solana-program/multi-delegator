@@ -148,6 +148,21 @@ pub fn find_plan_pda(owner: &Address, plan_id: u64) -> (Address, u8) {
     )
 }
 
+/// Rejects non-zero `end_ts` that falls within one billing period of `current_time`.
+pub fn validate_plan_end_ts(
+    end_ts: i64,
+    period_hours: u64,
+    current_time: i64,
+) -> Result<(), MultiDelegatorError> {
+    if end_ts != 0 {
+        let period_secs = (period_hours as i64) * 3600;
+        if current_time + period_secs > end_ts {
+            return Err(MultiDelegatorError::InvalidEndTs);
+        }
+    }
+    Ok(())
+}
+
 /// Finds the canonical subscription PDA and bump for a given plan and subscriber.
 pub fn find_subscription_pda(plan_pda: &Address, subscriber: &Address) -> (Address, u8) {
     Address::find_program_address(
@@ -158,4 +173,45 @@ pub fn find_subscription_pda(plan_pda: &Address, subscriber: &Address) -> (Addre
         ],
         &crate::ID,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn end_ts_zero_always_valid() {
+        assert!(validate_plan_end_ts(0, 720, 1_000_000).is_ok());
+        assert!(validate_plan_end_ts(0, 1, 0).is_ok());
+    }
+
+    #[test]
+    fn end_ts_exactly_one_period_ahead() {
+        let current = 1_000_000i64;
+        let period_hours = 720u64;
+        let end_ts = current + (period_hours as i64) * 3600;
+        assert!(validate_plan_end_ts(end_ts, period_hours, current).is_ok());
+    }
+
+    #[test]
+    fn end_ts_less_than_one_period_ahead() {
+        let current = 1_000_000i64;
+        let period_hours = 720u64;
+        let end_ts = current + (period_hours as i64) * 3600 - 1;
+        assert!(validate_plan_end_ts(end_ts, period_hours, current).is_err());
+    }
+
+    #[test]
+    fn end_ts_well_beyond_period() {
+        let current = 1_000_000i64;
+        let period_hours = 720u64;
+        let end_ts = current + (period_hours as i64) * 3600 * 2;
+        assert!(validate_plan_end_ts(end_ts, period_hours, current).is_ok());
+    }
+
+    #[test]
+    fn end_ts_near_immediate() {
+        let current = 1_000_000i64;
+        assert!(validate_plan_end_ts(current + 1, 720, current).is_err());
+    }
 }

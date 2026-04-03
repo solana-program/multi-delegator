@@ -66,6 +66,10 @@ pub fn create_delegation_account(
     nonce: u64,
     space: usize,
 ) -> Result<(u8, i64), ProgramError> {
+    if accounts.delegation_account.data_len() > 0 {
+        return Err(MultiDelegatorError::DelegationAlreadyExists.into());
+    }
+
     let init_id;
     {
         let md_data = accounts.multi_delegate.try_borrow()?;

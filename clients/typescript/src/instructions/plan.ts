@@ -96,8 +96,11 @@ export async function buildCreatePlan(params: {
       planData: {
         planId,
         mint,
-        amount,
-        periodHours,
+        terms: {
+          amount,
+          periodHours,
+          createdAt: 0n,
+        },
         endTs,
         destinations: paddedDestinations,
         pullers: paddedPullers,

@@ -127,7 +127,7 @@ function CollectAllButton({
       for (const pd of eligiblePlans) {
         const subscribers = await fetchPlanSubscriptions(rpcUrl, pd.plan.address, progAddr!)
         const eligible = computeEligibleSubscribers(
-          subscribers, pd.plan.data.amount, pd.plan.data.periodHours, ts,
+          subscribers, pd.plan.data.terms.amount, pd.plan.data.terms.periodHours, ts,
         )
         if (eligible.length === 0) continue
         plans.push({
@@ -157,7 +157,7 @@ function CollectAllButton({
       for (const pd of eligiblePlans) {
         const meta = parsePlanMeta(pd.plan.data.metadataUri)
         const planName = meta.n || `Plan ${ellipsify(pd.plan.address)}`
-        const amountUsd = Number(pd.plan.data.amount) / USDC_MULTIPLIER
+        const amountUsd = Number(pd.plan.data.terms.amount) / USDC_MULTIPLIER
         addCollectionRecord(createSuccessRecord(
           pd.plan.address, planName, res, pd.subscribers.length, amountUsd,
         ))
@@ -168,7 +168,7 @@ function CollectAllButton({
       for (const pd of eligiblePlans) {
         const meta = parsePlanMeta(pd.plan.data.metadataUri)
         const planName = meta.n || `Plan ${ellipsify(pd.plan.address)}`
-        const amountUsd = Number(pd.plan.data.amount) / USDC_MULTIPLIER
+        const amountUsd = Number(pd.plan.data.terms.amount) / USDC_MULTIPLIER
         addCollectionRecord(createFailureRecord(
           pd.plan.address, planName, pd.subscribers.length, amountUsd, err,
         ))
@@ -212,7 +212,7 @@ function EnhancedPlanCard({ planData, blockTs }: { planData: PlanSubscriberData;
   const meta = useMemo(() => parsePlanMeta(plan.data.metadataUri), [plan.data.metadataUri])
   const planName = meta.n || `Plan ${ellipsify(plan.address)}`
   const PlanIcon = (meta.i && ICON_MAP[meta.i]) || Star
-  const amountUsd = Number(plan.data.amount) / USDC_MULTIPLIER
+  const amountUsd = Number(plan.data.terms.amount) / USDC_MULTIPLIER
   const pendingUsd = Number(planData.totalPending) / USDC_MULTIPLIER
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -223,7 +223,7 @@ function EnhancedPlanCard({ planData, blockTs }: { planData: PlanSubscriberData;
     try {
       const subs = await fetchPlanSubscriptions(rpcUrl, plan.address, progAddr!)
       const ts = await getBlockTimestamp(rpcUrl)
-      const elig = computeEligibleSubscribers(subs, plan.data.amount, plan.data.periodHours, ts)
+      const elig = computeEligibleSubscribers(subs, plan.data.terms.amount, plan.data.terms.periodHours, ts)
 
       if (elig.length === 0) {
         toast.info('All payments already collected this period')
@@ -265,7 +265,7 @@ function EnhancedPlanCard({ planData, blockTs }: { planData: PlanSubscriberData;
     }
   }, [rpcUrl, progAddr, plan, planName, amountUsd, subscribers.length, collectSubscriptionPayments])
 
-  const periodHoursSec = Number(plan.data.periodHours) * 3600
+  const periodHoursSec = Number(plan.data.terms.periodHours) * 3600
 
   return (
     <div className="border border-emerald-500/15 bg-slate-900/60 rounded-xl overflow-hidden">

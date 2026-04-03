@@ -46,8 +46,8 @@ export function useAllPlanSubscribers() {
           const subscribers = await fetchPlanSubscriptions(rpcUrl, plan.address, progAddr!)
           const eligible = computeEligibleSubscribers(
             subscribers,
-            plan.data.amount,
-            plan.data.periodHours,
+            plan.data.terms.amount,
+            plan.data.terms.periodHours,
             blockTimestamp,
           )
           const totalPending = eligible.reduce((sum, e) => sum + e.collectAmount, 0n)

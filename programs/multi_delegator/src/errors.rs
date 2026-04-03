@@ -50,7 +50,8 @@ impl TryFrom<u32> for MultiDelegatorError {
             132 => Ok(Self::AtaOwnerMismatch),
             133 => Ok(Self::DelegationVersionMismatch),
             134 => Ok(Self::MigrationRequired),
-            135 => Ok(Self::StaleMultiDelegate),
+            135 => Ok(Self::DelegationAlreadyExists),
+            136 => Ok(Self::StaleMultiDelegate),
             // Fixed delegation errors (300-399)
             300 => Ok(Self::AmountExceedsLimit),
             301 => Ok(Self::FixedDelegationExpiryInPast),
@@ -63,6 +64,7 @@ impl TryFrom<u32> for MultiDelegatorError {
             404 => Ok(Self::RecurringDelegationStartTimeInPast),
             405 => Ok(Self::RecurringDelegationStartTimeGreaterThanExpiry),
             406 => Ok(Self::RecurringDelegationAmountZero),
+            407 => Ok(Self::DelegationNotStarted),
             // Plan and subscription errors (500-599)
             500 => Ok(Self::PlanSunset),
             501 => Ok(Self::PlanExpired),
@@ -82,6 +84,8 @@ impl TryFrom<u32> for MultiDelegatorError {
             515 => Ok(Self::PlanNotExpired),
             516 => Ok(Self::PlanClosed),
             517 => Ok(Self::AlreadySubscribed),
+            518 => Ok(Self::PlanAlreadyExists),
+            519 => Ok(Self::PlanTermsMismatch),
             // Event errors (600-699)
             600 => Ok(Self::InvalidEventAuthority),
             601 => Ok(Self::InvalidEventData),
@@ -173,6 +177,8 @@ pub enum MultiDelegatorError {
     DelegationVersionMismatch,
     #[error("Account requires explicit migration")]
     MigrationRequired,
+    #[error("Delegation account already exists")]
+    DelegationAlreadyExists,
     #[error("Delegation init_id does not match current MultiDelegate")]
     StaleMultiDelegate,
 
@@ -199,6 +205,8 @@ pub enum MultiDelegatorError {
     RecurringDelegationStartTimeGreaterThanExpiry,
     #[error("zero amount specified")]
     RecurringDelegationAmountZero,
+    #[error("Delegation period has not started yet")]
+    DelegationNotStarted,
 
     // --- Plan and subscription errors (500--599) ---
     #[error("Plan is in sunset status")]
@@ -237,6 +245,10 @@ pub enum MultiDelegatorError {
     PlanClosed,
     #[error("Already subscribed to this plan")]
     AlreadySubscribed,
+    #[error("Plan account already exists")]
+    PlanAlreadyExists,
+    #[error("Subscription plan terms do not match the current plan")]
+    PlanTermsMismatch,
 
     // --- Event errors (600--699) ---
     #[error("Invalid event authority PDA")]

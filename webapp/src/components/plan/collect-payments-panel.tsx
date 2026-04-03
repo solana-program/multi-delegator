@@ -57,7 +57,7 @@ function CollectPlanCard({ plan, subscriberCount, progAddr }: { plan: PlanItem; 
   const meta = useMemo(() => parsePlanMeta(plan.data.metadataUri), [plan.data.metadataUri])
   const planName = meta.n || `Plan ${ellipsify(plan.address)}`
   const PlanIcon = (meta.i && ICON_MAP[meta.i]) || Star
-  const amountUsd = Number(plan.data.amount) / USDC_MULTIPLIER
+  const amountUsd = Number(plan.data.terms.amount) / USDC_MULTIPLIER
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const history = useMemo(() => getCollectionHistory(plan.address), [plan.address, historyVersion])
@@ -70,8 +70,8 @@ function CollectPlanCard({ plan, subscriberCount, progAddr }: { plan: PlanItem; 
       const ts = await getBlockTimestamp(rpcUrl)
       const eligible = computeEligibleSubscribers(
         subscribers,
-        plan.data.amount,
-        plan.data.periodHours,
+        plan.data.terms.amount,
+        plan.data.terms.periodHours,
         ts,
       )
 

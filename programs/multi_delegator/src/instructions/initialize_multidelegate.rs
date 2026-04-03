@@ -371,6 +371,58 @@ mod tests {
     }
 
     #[test]
+    fn initialize_multidelegate_with_overfunded_pda() {
+        use solana_account::Account;
+
+        let (litesvm, user) = &mut setup();
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(user.pubkey()),
+            &[],
+        );
+        let user_ata = init_ata(litesvm, mint, user.pubkey(), 1_000_000);
+
+        let (multi_delegate_pda, _) =
+            crate::tests::pda::get_multidelegate_pda(&user.pubkey(), &mint);
+
+        litesvm
+            .set_account(
+                multi_delegate_pda,
+                Account {
+                    lamports: 10_000_000,
+                    data: vec![],
+                    owner: solana_pubkey::Pubkey::default(),
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+            .unwrap();
+
+        let (res, _, bump) = initialize_multidelegate_action(litesvm, user, mint);
+        res.assert_ok();
+
+        let account = litesvm.get_account(&multi_delegate_pda).unwrap();
+        let multi_delegate = MultiDelegate::load(&account.data).unwrap();
+
+        assert_eq!(
+            multi_delegate.discriminator,
+            AccountDiscriminator::MultiDelegate as u8
+        );
+        assert_eq!(multi_delegate.user.to_bytes(), user.pubkey().to_bytes());
+        assert_eq!(multi_delegate.token_mint.to_bytes(), mint.to_bytes());
+        assert_eq!(multi_delegate.bump, bump);
+
+        let ata_account = fetch_account::<spl_token_2022::state::Account>(litesvm, &user_ata);
+        assert!(ata_account.delegate.is_some());
+        assert_eq!(ata_account.delegate.unwrap(), multi_delegate_pda);
+        assert_eq!(ata_account.delegated_amount, u64::MAX);
+    }
+
+    #[test]
     fn writable_accounts_must_be_writable() {
         use solana_instruction::{AccountMeta, Instruction};
 

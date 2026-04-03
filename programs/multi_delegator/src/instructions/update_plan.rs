@@ -7,7 +7,10 @@ use pinocchio::{
 };
 
 use crate::{
-    state::{common::PlanStatus, plan::Plan},
+    state::{
+        common::{validate_plan_end_ts, PlanStatus},
+        plan::Plan,
+    },
     AccountCheck, MultiDelegatorError, ProgramAccount, SignerAccount, WritableAccount,
 };
 
@@ -96,6 +99,7 @@ pub fn process(accounts: &[AccountView], data: &UpdatePlanData) -> ProgramResult
 
     let current_ts = Clock::get()?.unix_timestamp;
     data.validate(current_ts)?;
+    validate_plan_end_ts(data.end_ts, plan.data.terms.period_hours, current_ts)?;
 
     if plan.data.end_ts != 0 && current_ts > plan.data.end_ts {
         return Err(MultiDelegatorError::PlanExpired.into());
@@ -189,8 +193,8 @@ mod tests {
 
         let account_before = litesvm.get_account(&plan_pda).unwrap();
         let plan_before = Plan::load(&account_before.data).unwrap();
-        let amount_before = plan_before.data.amount;
-        let period_before = plan_before.data.period_hours;
+        let amount_before = plan_before.data.terms.amount;
+        let period_before = plan_before.data.terms.period_hours;
         let mint_before = plan_before.data.mint;
         let dests_before = plan_before.data.destinations;
         let id_before = plan_before.data.plan_id;
@@ -205,8 +209,8 @@ mod tests {
 
         let account_after = litesvm.get_account(&plan_pda).unwrap();
         let plan_after = Plan::load(&account_after.data).unwrap();
-        let amount_after = plan_after.data.amount;
-        let period_after = plan_after.data.period_hours;
+        let amount_after = plan_after.data.terms.amount;
+        let period_after = plan_after.data.terms.period_hours;
         let mint_after = plan_after.data.mint;
         let dests_after = plan_after.data.destinations;
         let id_after = plan_after.data.plan_id;
@@ -623,5 +627,30 @@ mod tests {
         for (i, p) in pullers.iter().enumerate() {
             assert_eq!(plan.data.pullers[i].to_bytes(), p.to_bytes());
         }
+    }
+
+    #[test]
+    fn update_plan_rejects_near_immediate_end_ts() {
+        let (litesvm, owner) = &mut setup();
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            None,
+            &[],
+        );
+
+        let (res, plan_pda) = CreatePlan::new(litesvm, owner, mint)
+            .plan_id(1)
+            .amount(1_000)
+            .period_hours(720)
+            .execute();
+        res.assert_ok();
+
+        let res = UpdatePlan::new(litesvm, owner, plan_pda)
+            .end_ts(current_ts() + 2)
+            .execute();
+        res.assert_err(crate::MultiDelegatorError::InvalidEndTs);
     }
 }

@@ -83,7 +83,7 @@ function EditPlanDialog({ plan, meta, open, onOpenChange }: {
   const selectedIconEntry = PLAN_ICONS.find((i) => i.name === selectedIcon)
   const SelectedIconComponent = selectedIconEntry?.icon
 
-  const amount = Number(plan.data.amount) / USDC_MULTIPLIER
+  const amount = Number(plan.data.terms.amount) / USDC_MULTIPLIER
   const activeDestinations = plan.data.destinations.filter((d) => d !== ZERO_ADDRESS)
 
   const metadataJson = useMemo(() => {
@@ -218,7 +218,7 @@ function EditPlanDialog({ plan, meta, open, onOpenChange }: {
             </div>
 
             <ImmutableField label="Amount (USDC)" value={`$${amount}`} />
-            <ImmutableField label="Billing Period" value={formatPeriodLabel(plan.data.periodHours)} />
+            <ImmutableField label="Billing Period" value={formatPeriodLabel(plan.data.terms.periodHours)} />
 
             <div className="sm:col-span-2 grid gap-2">
               <Label>End Date/Time</Label>
@@ -404,7 +404,7 @@ function SubscribeDialog({ plan, meta, open, onOpenChange }: {
   const { subscribe, initMultiDelegate } = useMultiDelegatorMutations()
   const { isInitialized, isLoading: statusLoading, refetch: refetchStatus } = useMultiDelegateStatus(plan.data.mint)
   const { account } = useWalletUi()
-  const amount = Number(plan.data.amount) / USDC_MULTIPLIER
+  const amount = Number(plan.data.terms.amount) / USDC_MULTIPLIER
 
   const handleInit = async () => {
     if (!account?.address) return
@@ -427,7 +427,7 @@ function SubscribeDialog({ plan, meta, open, onOpenChange }: {
         <DialogHeader>
           <DialogTitle className="text-emerald-400">Subscribe to: {meta.n || 'Unnamed'}</DialogTitle>
           <DialogDescription>
-            ${amount} / {formatPeriod(plan.data.periodHours)} from merchant {ellipsify(plan.owner, 4)}
+            ${amount} / {formatPeriod(plan.data.terms.periodHours)} from merchant {ellipsify(plan.owner, 4)}
           </DialogDescription>
         </DialogHeader>
 
@@ -547,7 +547,7 @@ function PlanExpandedDetails({ plan, isExpanded }: { plan: PlanItem; isExpanded:
           </div>
           <div className="flex items-center justify-between bg-slate-800/40 rounded-lg px-3 py-2 border border-emerald-500/8 hover:border-emerald-500/20 transition-colors">
             <p className="text-[11px] text-gray-500 uppercase tracking-wider">Period</p>
-            <p className="font-mono text-sm text-white">{formatPeriodLabel(plan.data.periodHours)}</p>
+            <p className="font-mono text-sm text-white">{formatPeriodLabel(plan.data.terms.periodHours)}</p>
           </div>
         </div>
       </div>
@@ -572,8 +572,8 @@ export function PlanCard({ plan, variant = 'owner', isExpanded = false, onToggle
   const meta = useMemo(() => parsePlanMeta(plan.data.metadataUri), [plan.data.metadataUri])
 
   const Icon = (meta.i && ICON_MAP[meta.i]) || Star
-  const amount = Number(plan.data.amount) / USDC_MULTIPLIER
-  const period = formatPeriod(plan.data.periodHours)
+  const amount = Number(plan.data.terms.amount) / USDC_MULTIPLIER
+  const period = formatPeriod(plan.data.terms.periodHours)
   const activeDestinations = plan.data.destinations.filter((d) => d !== ZERO_ADDRESS).length
   const activePullers = plan.data.pullers.filter((p) => p !== ZERO_ADDRESS).length
   const { data: subscriberCount } = useSubscriberCount(variant === 'owner' ? plan.address : null)

@@ -33,8 +33,7 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
     let current_ts = Clock::get()?.unix_timestamp;
 
     // Load Plan (immutable borrow) — extract needed data, then drop borrow
-    let amount_per_period: u64;
-    let period_length_s: u64;
+    let plan_terms: crate::instructions::create_plan::PlanTerms;
     let plan_end_ts: i64;
     let receiver_owner: Address;
     {
@@ -57,11 +56,12 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
         receiver_owner = get_token_account_owner(&receiver_data)?;
         plan.check_destination(&receiver_owner)?;
 
-        amount_per_period = plan.data.amount;
-        period_length_s = plan.data.period_hours * 3600;
+        plan_terms = plan.data.terms;
     }
 
     // Load SubscriptionDelegation (mutable borrow)
+    let amount_per_period: u64;
+    let period_length_s: u64;
     let period_start: i64;
     let amount_pulled_in_period: u64;
     let init_id: i64;
@@ -69,6 +69,8 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
         let mut binding = accounts_struct.subscription_pda.try_borrow_mut()?;
         check_and_update_version(&mut binding)?;
         let subscription = SubscriptionDelegation::load_mut(&mut binding)?;
+
+        subscription.check_plan_terms(&plan_terms)?;
 
         let delegator = subscription.header.delegator;
 
@@ -87,6 +89,9 @@ pub fn process(accounts: &[AccountView], transfer_data: &TransferData) -> Progra
         if expires_at_ts != 0 && current_ts >= expires_at_ts {
             return Err(MultiDelegatorError::SubscriptionCancelled.into());
         }
+
+        amount_per_period = subscription.terms.amount;
+        period_length_s = subscription.terms.period_hours * 3600;
 
         // Validate recurring transfer
         let mut ps = subscription.current_period_start_ts;
@@ -211,7 +216,7 @@ impl<'a> TryFrom<&'a [AccountView]> for TransferSubscriptionAccounts<'a> {
 mod tests {
     use crate::{
         event_engine::event_authority_pda,
-        state::subscription_delegation::SubscriptionDelegation,
+        state::{plan::Plan, subscription_delegation::SubscriptionDelegation},
         tests::{
             asserts::TransactionResultExt,
             constants::{MINT_DECIMALS, PROGRAM_ID, TOKEN_PROGRAM_ID},
@@ -219,7 +224,8 @@ mod tests {
             utils::{
                 build_and_send_transaction, current_ts, days, get_ata_balance, hours, init_ata,
                 init_mint, init_wallet, initialize_multidelegate_action, move_clock_forward, setup,
-                CancelSubscription, CreatePlan, CreateSubscription, TransferSubscription,
+                CancelSubscription, CreatePlan, CreateSubscription, DeletePlan,
+                TransferSubscription, UpdatePlan,
             },
         },
         MultiDelegatorError,
@@ -283,8 +289,13 @@ mod tests {
         let svm_ts = litesvm
             .get_sysvar::<spl_associated_token_account::solana_program::clock::Clock>()
             .unix_timestamp;
+        let plan_account = litesvm.get_account(&plan_pda).unwrap();
+        let plan = Plan::load(&plan_account.data).unwrap();
+        let plan_terms = plan.data.terms;
         let subscription_pda =
-            CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), mint, svm_ts).execute();
+            CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), mint, svm_ts)
+                .terms(plan_terms)
+                .execute();
 
         let (_, plan_bump) = get_plan_pda(&merchant.pubkey(), 1);
 
@@ -557,8 +568,12 @@ mod tests {
         // Create subscription with expires_at_ts set to end of a past period
         let period_start = current_ts() - hours(2) as i64;
         let expires_at = period_start + hours(1) as i64; // end of that period, which is in the past
+        let plan_account = litesvm.get_account(&plan_pda).unwrap();
+        let plan = Plan::load(&plan_account.data).unwrap();
+        let plan_terms = plan.data.terms;
         let subscription_pda =
             CreateSubscription::new(&mut litesvm, plan_pda, alice.pubkey(), mint, period_start)
+                .terms(plan_terms)
                 .expires_at_ts(expires_at)
                 .execute();
 
@@ -766,8 +781,12 @@ mod tests {
         res.assert_ok();
 
         // Create subscription for plan 2
+        let plan2_account = litesvm.get_account(&plan_pda_2).unwrap();
+        let plan2 = Plan::load(&plan2_account.data).unwrap();
+        let plan2_terms = plan2.data.terms;
         let subscription_for_plan2 =
             CreateSubscription::new(&mut litesvm, plan_pda_2, alice.pubkey(), mint, current_ts())
+                .terms(plan2_terms)
                 .execute();
 
         // Try to use subscription for plan 2 with plan 1
@@ -1068,5 +1087,52 @@ mod tests {
 
         result.assert_err(MultiDelegatorError::StaleMultiDelegate);
         assert_eq!(get_ata_balance(&litesvm, &merchant_ata), 0);
+    }
+
+    #[test]
+    fn test_transfer_subscription_ghost_plan_rejected() {
+        use crate::state::common::PlanStatus;
+
+        let amount_per_period = 50_000_000u64;
+        let period_hours = 1u64;
+        let end_ts = current_ts() + days(2) as i64;
+
+        let (mut litesvm, alice, merchant, mint, plan_pda, _, subscription_pda, _, _) =
+            setup_plan_and_subscription(amount_per_period, period_hours, end_ts, vec![], vec![]);
+
+        UpdatePlan::new(&mut litesvm, &merchant, plan_pda)
+            .status(PlanStatus::Sunset)
+            .end_ts(end_ts)
+            .execute()
+            .assert_ok();
+
+        move_clock_forward(&mut litesvm, days(3));
+
+        DeletePlan::new(&mut litesvm, &merchant, plan_pda)
+            .execute()
+            .assert_ok();
+
+        let new_end_ts = current_ts() + days(60) as i64;
+        let (res, new_plan_pda) = CreatePlan::new(&mut litesvm, &merchant, mint)
+            .plan_id(1)
+            .amount(999_000_000)
+            .period_hours(720)
+            .end_ts(new_end_ts)
+            .execute();
+        res.assert_ok();
+        assert_eq!(plan_pda, new_plan_pda);
+
+        let result = TransferSubscription::new(
+            &mut litesvm,
+            &merchant,
+            alice.pubkey(),
+            mint,
+            subscription_pda,
+            plan_pda,
+        )
+        .amount(10_000_000)
+        .execute();
+
+        result.assert_err(MultiDelegatorError::PlanTermsMismatch);
     }
 }

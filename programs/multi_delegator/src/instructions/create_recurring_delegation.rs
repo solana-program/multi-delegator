@@ -52,7 +52,7 @@ impl CreateRecurringDelegationData {
             return Err(MultiDelegatorError::InvalidPeriodLength);
         }
 
-        if self.start_ts >= self.expiry_ts {
+        if self.expiry_ts != 0 && self.start_ts >= self.expiry_ts {
             return Err(MultiDelegatorError::RecurringDelegationStartTimeGreaterThanExpiry);
         }
 
@@ -117,7 +117,8 @@ mod tests {
             asserts::TransactionResultExt,
             constants::{MINT_DECIMALS, TOKEN_PROGRAM_ID},
             utils::{
-                days, init_ata, init_mint, initialize_multidelegate_action, setup, CreateDelegation,
+                days, get_ata_balance, init_ata, init_mint, initialize_multidelegate_action,
+                move_clock_forward, setup, CreateDelegation, TransferDelegation,
             },
         },
         AccountDiscriminator, MultiDelegatorError, RecurringDelegation,
@@ -307,5 +308,54 @@ mod tests {
             .nonce(nonce)
             .recurring(amount_per_period, period_length_s, start_ts, expiry_ts);
         res.assert_err(MultiDelegatorError::InvalidPeriodLength);
+    }
+
+    #[test]
+    fn create_recurring_delegation_with_zero_expiry() {
+        let (litesvm, user) = &mut setup();
+        let payer = user;
+        let amount_per_period: u64 = 50_000_000;
+        let period_length_s: u64 = 86400;
+        let start_ts: i64 = current_ts();
+        let expiry_ts: i64 = 0;
+        let nonce: u64 = 0;
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(payer.pubkey()),
+            &[],
+        );
+        let _user_ata = init_ata(litesvm, mint, payer.pubkey(), 100_000_000);
+
+        initialize_multidelegate_action(litesvm, payer, mint)
+            .0
+            .assert_ok();
+
+        let delegatee = solana_keypair::Keypair::new();
+        litesvm.airdrop(&delegatee.pubkey(), 10_000_000).unwrap();
+        let delegatee_ata = init_ata(litesvm, mint, delegatee.pubkey(), 0);
+
+        let (res, delegation_pda) = CreateDelegation::new(litesvm, payer, mint, delegatee.pubkey())
+            .nonce(nonce)
+            .recurring(amount_per_period, period_length_s, start_ts, expiry_ts);
+        res.assert_ok();
+
+        let account = litesvm.get_account(&delegation_pda).unwrap();
+        let delegation = RecurringDelegation::load(&account.data).unwrap();
+        let del_expiry_ts = delegation.expiry_ts;
+        assert_eq!(del_expiry_ts, 0);
+
+        move_clock_forward(litesvm, days(30));
+
+        let transfer_amount: u64 = 10_000_000;
+        TransferDelegation::new(litesvm, &delegatee, payer.pubkey(), mint, delegation_pda)
+            .amount(transfer_amount)
+            .recurring()
+            .assert_ok();
+
+        assert_eq!(get_ata_balance(litesvm, &delegatee_ata), transfer_amount);
     }
 }

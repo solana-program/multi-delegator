@@ -1,12 +1,13 @@
 use pinocchio::ProgramResult;
 
+use crate::constants::TIME_DRIFT_ALLOWED_SECS;
 use crate::MultiDelegatorError;
 
 /// Validates a fixed transfer against the delegation's remaining allowance and expiry.
 ///
 /// Returns an error if:
 /// - `transfer_amount` is zero
-/// - the delegation has expired (`expiry_ts != 0 && current_ts > expiry_ts`)
+/// - the delegation has expired (`expiry_ts != 0 && current_ts > expiry_ts + TIME_DRIFT_ALLOWED_SECS`)
 /// - `transfer_amount` exceeds the remaining allowance
 pub fn validate_fixed_transfer(
     transfer_amount: u64,
@@ -17,7 +18,7 @@ pub fn validate_fixed_transfer(
     if transfer_amount == 0 {
         return Err(MultiDelegatorError::InvalidAmount.into());
     }
-    if expiry_ts != 0 && current_ts > expiry_ts {
+    if expiry_ts != 0 && current_ts > expiry_ts.saturating_add(TIME_DRIFT_ALLOWED_SECS) {
         return Err(MultiDelegatorError::DelegationExpired.into());
     }
     if transfer_amount > remaining {
@@ -35,6 +36,7 @@ pub fn validate_fixed_transfer(
 /// Returns an error if:
 /// - `transfer_amount` is zero
 /// - the delegation has expired
+/// - the delegation period has not started (`current_ts < current_period_start_ts`)
 /// - `transfer_amount` exceeds the remaining per-period budget
 pub fn validate_recurring_transfer(
     transfer_amount: u64,
@@ -48,7 +50,7 @@ pub fn validate_recurring_transfer(
     if transfer_amount == 0 {
         return Err(MultiDelegatorError::InvalidAmount.into());
     }
-    if expiry_ts != 0 && current_ts > expiry_ts {
+    if expiry_ts != 0 && current_ts > expiry_ts.saturating_add(TIME_DRIFT_ALLOWED_SECS) {
         return Err(MultiDelegatorError::DelegationExpired.into());
     }
 
@@ -56,6 +58,10 @@ pub fn validate_recurring_transfer(
         i64::try_from(period_length_s).map_err(|_| MultiDelegatorError::InvalidPeriodLength)?;
     if period_length == 0 {
         return Err(MultiDelegatorError::InvalidPeriodLength.into());
+    }
+
+    if current_ts < *current_period_start_ts {
+        return Err(MultiDelegatorError::DelegationNotStarted.into());
     }
 
     let time_since_start = current_ts.saturating_sub(*current_period_start_ts);
