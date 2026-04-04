@@ -7,6 +7,7 @@ import {
 } from "gill/programs/token";
 import {
   buildInitMultiDelegate,
+  buildCloseMultiDelegate,
   buildCreateFixedDelegation,
   buildCreateRecurringDelegation,
   buildRevokeDelegation,
@@ -71,6 +72,31 @@ export function useMultiDelegatorMutations() {
         ["multiDelegateStatus"],
         ["get-token-accounts"],
         ["delegations"],
+      ]);
+    },
+    onError: (error) => toast.onError(error),
+  });
+
+  const closeMultiDelegate = useMutation({
+    mutationFn: async ({ tokenMint }: { tokenMint: string }) => {
+      if (!signer) throw new Error("Wallet not connected");
+      if (!progId) throw new Error("Program address not configured");
+
+      const { instructions } = await buildCloseMultiDelegate({
+        user: signer,
+        tokenMint: address(tokenMint),
+        programAddress: progId,
+      });
+
+      const signature = await signAndSend(instructions, signer);
+      return { signature };
+    },
+    onSuccess: (res) => {
+      toast.onSuccess(res.signature);
+      invalidateWithDelay(queryClient, [
+        ["multiDelegateStatus"],
+        ["delegations"],
+        ["get-token-accounts"],
       ]);
     },
     onError: (error) => toast.onError(error),
@@ -660,6 +686,7 @@ export function useMultiDelegatorMutations() {
 
   return {
     initMultiDelegate,
+    closeMultiDelegate,
     createFixedDelegation,
     createRecurringDelegation,
     revokeDelegation,

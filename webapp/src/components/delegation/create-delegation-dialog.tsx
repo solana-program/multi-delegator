@@ -113,7 +113,7 @@ export function CreateDelegationDialog({ tokenMint, disabled }: CreateDelegation
     const nonce = generateNonce()
     const expiryDateTime = new Date(`${expiryDate}T${expiryHour.padStart(2, '0')}:00:00`)
     const expiryTimestamp = Math.floor(expiryDateTime.getTime() / 1000)
-    if (Number.isNaN(expiryTimestamp)) return
+    if (Number.isNaN(expiryTimestamp) || expiryTimestamp <= 0) return
     const amountInSmallestUnits = BigInt(Math.round(Number(amount) * USDC_MULTIPLIER))
 
     if (selectedKind === 'fixed') {

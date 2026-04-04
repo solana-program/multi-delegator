@@ -160,8 +160,12 @@ function SubscriptionCard({ item }: { item: EnrichedSubscription }) {
 
   const planDeleted = !item.plan
   const planName = meta.n || 'Unknown Plan'
-  const amount = item.plan ? Number(item.plan.data.terms.amount) / USDC_MULTIPLIER : null
-  const period = item.plan ? formatPeriod(item.plan.data.terms.periodHours) : null
+  const amount = Number(item.subscription.terms.amount) / USDC_MULTIPLIER
+  const period = formatPeriod(item.subscription.terms.periodHours)
+  const termsChanged = item.plan && (
+    item.plan.data.terms.amount !== item.subscription.terms.amount ||
+    item.plan.data.terms.periodHours !== item.subscription.terms.periodHours
+  )
   const pulled = Number(item.subscription.amountPulledInPeriod) / USDC_MULTIPLIER
 
   return (
@@ -188,11 +192,12 @@ function SubscriptionCard({ item }: { item: EnrichedSubscription }) {
           </div>
 
           <div className="flex items-baseline gap-1.5">
-            {amount !== null && period && (
-              <>
-                <span className="text-base sm:text-lg lg:text-xl font-bold text-teal-400">${amount}</span>
-                <span className="text-sm text-teal-400/60">/{period.toLowerCase()}</span>
-              </>
+            <span className="text-base sm:text-lg lg:text-xl font-bold text-teal-400">${amount}</span>
+            <span className="text-sm text-teal-400/60">/{period.toLowerCase()}</span>
+            {termsChanged && (
+              <span className="text-xs text-amber-400 ml-1" title="Plan terms have changed since you subscribed">
+                (terms changed)
+              </span>
             )}
           </div>
 

@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
 import {
   createSolanaDevnet,
-  createSolanaLocalnet,
   createSolanaTestnet,
   createWalletUiConfig,
   WalletUi,
@@ -12,12 +11,12 @@ import { WalletSignerProvider } from './use-wallet-ui-signer'
 
 export { WalletUiDropdown as WalletButton, WalletUiClusterDropdown as ClusterButton }
 
-const defaultClusterId = import.meta.env.VITE_DEFAULT_CLUSTER ?? 'solana:localnet'
+const defaultClusterId = localStorage.getItem('setup-cluster') || import.meta.env.VITE_DEFAULT_CLUSTER || 'solana:localnet'
 
 const allClusters = [
   createSolanaDevnet(),
   createSolanaTestnet(),
-  createSolanaLocalnet(),
+  { id: 'solana:localnet' as const, label: 'Localnet', url: '/rpc' },
 ]
 
 const config = createWalletUiConfig({

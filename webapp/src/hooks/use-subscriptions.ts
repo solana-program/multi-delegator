@@ -18,6 +18,7 @@ import { useProgramAddress } from '@/hooks/use-token-config'
 export interface PlanSubscriber {
   subscriptionAddress: string
   delegator: string
+  terms: { amount: bigint; periodHours: bigint; createdAt: bigint }
   amountPulledInPeriod: bigint
   currentPeriodStartTs: bigint
   expiresAtTs: bigint
@@ -84,6 +85,7 @@ export async function fetchPlanSubscriptions(rpcUrl: string, planAddress: string
       subscribers.push({
         subscriptionAddress: entry.pubkey as string,
         delegator: sub.header.delegator,
+        terms: sub.terms,
         amountPulledInPeriod: sub.amountPulledInPeriod,
         currentPeriodStartTs: sub.currentPeriodStartTs,
         expiresAtTs: sub.expiresAtTs,

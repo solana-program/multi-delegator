@@ -13,15 +13,45 @@ import { Setup } from '@/routes/setup'
 import { useNetworkConfig } from '@/hooks/use-token-config'
 import { clusterIdToNetwork } from '@/lib/api-client'
 import { useClusterConfig } from '@/hooks/use-cluster-config'
+import { useQuery } from '@tanstack/react-query'
+import { createSolanaRpc } from 'gill'
+
+function useRpcReachable() {
+  const { id, url } = useClusterConfig()
+  const isLocalnet = id === 'solana:localnet'
+
+  return useQuery({
+    queryKey: ['rpc-health', id],
+    queryFn: async () => {
+      try {
+        const rpc = createSolanaRpc(url)
+        await rpc.getVersion().send()
+        return true
+      } catch {
+        return false
+      }
+    },
+    enabled: isLocalnet,
+    staleTime: 10_000,
+    retry: false,
+  })
+}
 
 function useIsSetupValid(): { ready: boolean; loading: boolean } {
   const { id } = useClusterConfig()
   const network = clusterIdToNetwork(id)
+  const isLocalnet = id === 'solana:localnet'
   const lsComplete = localStorage.getItem(`setup-complete-${network}`) === 'true'
   const { data, isLoading } = useNetworkConfig()
+  const { data: rpcReachable, isLoading: rpcLoading } = useRpcReachable()
 
   if (!lsComplete) return { ready: false, loading: false }
-  if (isLoading) return { ready: true, loading: true }
+  if (isLoading || (isLocalnet && rpcLoading)) return { ready: true, loading: true }
+
+  if (isLocalnet && rpcReachable === false) {
+    localStorage.removeItem(`setup-complete-${network}`)
+    return { ready: false, loading: false }
+  }
 
   const hasProgram = !!data?.programAddress
   const hasTokens = (data?.tokens?.length ?? 0) > 0

@@ -1,4 +1,4 @@
-import { RefreshCw, FileX, Coins, ShieldAlert } from 'lucide-react'
+import { RefreshCw, FileX, Coins, ShieldAlert, Power } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Table,
@@ -29,10 +29,12 @@ import { CreateDelegationDialog } from './create-delegation-dialog'
 import type { TokenAccountEntry } from '@/lib/types'
 import { useClusterConfig } from '@/hooks/use-cluster-config'
 import { getBlockTimestamp } from '@/hooks/use-time-travel'
+import { useMySubscriptions } from '@/hooks/use-subscriptions'
 
 interface ActiveDelegationsProps {
   tokenMint: string
   isApproved: boolean
+  multiDelegateInitId?: bigint | null
   onInitSuccess?: () => void
 }
 
@@ -255,9 +257,10 @@ interface DelegationTableProps {
   showExpired?: boolean
   tokenMint: string
   blockTime?: number
+  multiDelegateInitId?: bigint | null
 }
 
-function FixedDelegationTable({ delegations, mode, showExpired, tokenMint, blockTime }: DelegationTableProps) {
+function FixedDelegationTable({ delegations, mode, showExpired, tokenMint, blockTime, multiDelegateInitId }: DelegationTableProps) {
   if (delegations.length === 0) return null
   const isOutgoing = mode === 'outgoing'
   const partyLabel = isOutgoing ? 'Delegatee' : 'Delegator'
@@ -283,11 +286,13 @@ function FixedDelegationTable({ delegations, mode, showExpired, tokenMint, block
           <TableBody>
             {delegations.map((d) => {
               const rowExpired = showExpired || (!isOutgoing && isExpired(d.data.expiryTs, blockTime))
+              const isStale = multiDelegateInitId != null && d.data.header.initId !== multiDelegateInitId
               return (
-                <TableRow key={d.address} className={`border-none hover:bg-white/[0.03] transition-colors ${rowExpired ? 'opacity-60' : ''}`}>
+                <TableRow key={d.address} className={`border-none hover:bg-white/[0.03] transition-colors ${rowExpired || isStale ? 'opacity-60' : ''}`}>
                   <TableCell className="font-mono text-[15px] text-gray-300 py-5 text-center">
                     {formatAddress(isOutgoing ? d.data.header.delegatee : d.data.header.delegator)}
                     <span className="ml-1.5 text-xs font-bold text-blue-400/60 font-sans">v{d.data.header.version}</span>
+                    {isStale && <span className="ml-1.5 text-xs font-bold text-amber-400 font-sans" title="Delegation init_id does not match current MultiDelegate. Transfers will fail.">Stale</span>}
                   </TableCell>
                   <TableCell className="text-emerald-400 py-5 font-medium text-[15px] text-center">
                     {formatAmount(d.data.amount)} USDC
@@ -309,7 +314,7 @@ function FixedDelegationTable({ delegations, mode, showExpired, tokenMint, block
                     {isOutgoing ? (
                       <RevokeDelegationButton delegation={d} />
                     ) : (
-                      <TransferDelegationButton delegation={d} tokenMint={tokenMint} disabled={rowExpired} blockTime={blockTime} />
+                      <TransferDelegationButton delegation={d} tokenMint={tokenMint} disabled={rowExpired || isStale} blockTime={blockTime} />
                     )}
                   </TableCell>
                 </TableRow>
@@ -322,7 +327,7 @@ function FixedDelegationTable({ delegations, mode, showExpired, tokenMint, block
   )
 }
 
-function RecurringDelegationTable({ delegations, mode, showExpired, tokenMint, blockTime }: DelegationTableProps) {
+function RecurringDelegationTable({ delegations, mode, showExpired, tokenMint, blockTime, multiDelegateInitId }: DelegationTableProps) {
   if (delegations.length === 0) return null
   const isOutgoing = mode === 'outgoing'
   const partyLabel = isOutgoing ? 'Delegatee' : 'Delegator'
@@ -348,12 +353,14 @@ function RecurringDelegationTable({ delegations, mode, showExpired, tokenMint, b
           <TableBody>
             {delegations.map((d) => {
               const rowExpired = showExpired || (!isOutgoing && isExpired(d.data.expiryTs, blockTime))
+              const isStale = multiDelegateInitId != null && d.data.header.initId !== multiDelegateInitId
               const available = recurringAvailable(d.data.amountPerPeriod, d.data.amountPulledInPeriod, d.data.currentPeriodStartTs, d.data.periodLengthS, blockTime)
               return (
-                <TableRow key={d.address} className={`border-none hover:bg-white/[0.03] transition-colors ${rowExpired ? 'opacity-60' : ''}`}>
+                <TableRow key={d.address} className={`border-none hover:bg-white/[0.03] transition-colors ${rowExpired || isStale ? 'opacity-60' : ''}`}>
                   <TableCell className="font-mono text-[15px] text-gray-300 py-5 text-center">
                     {formatAddress(isOutgoing ? d.data.header.delegatee : d.data.header.delegator)}
                     <span className="ml-1.5 text-xs font-bold text-blue-400/60 font-sans">v{d.data.header.version}</span>
+                    {isStale && <span className="ml-1.5 text-xs font-bold text-amber-400 font-sans" title="Delegation init_id does not match current MultiDelegate. Transfers will fail.">Stale</span>}
                   </TableCell>
                   <TableCell className="text-emerald-400 py-5 font-medium text-[15px] text-center">
                     {formatAmount(available)} USDC
@@ -378,7 +385,7 @@ function RecurringDelegationTable({ delegations, mode, showExpired, tokenMint, b
                     {isOutgoing ? (
                       <RevokeDelegationButton delegation={d} />
                     ) : (
-                      <TransferDelegationButton delegation={d} tokenMint={tokenMint} disabled={rowExpired} blockTime={blockTime} />
+                      <TransferDelegationButton delegation={d} tokenMint={tokenMint} disabled={rowExpired || isStale} blockTime={blockTime} />
                     )}
                   </TableCell>
                 </TableRow>
@@ -503,9 +510,97 @@ function InitPrompt({ tokenMint, onSuccess }: { tokenMint: string; onSuccess?: (
   )
 }
 
-export function ActiveDelegations({ tokenMint, isApproved, onInitSuccess }: ActiveDelegationsProps) {
+function CloseMultiDelegateDialog({ tokenMint, open, onOpenChange }: {
+  tokenMint: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const { closeMultiDelegate } = useMultiDelegatorMutations()
+  const outgoing = useDelegations()
+  const incoming = useIncomingDelegations()
+  const { data: subscriptions } = useMySubscriptions()
+  const { url: rpcUrl } = useClusterConfig()
+  const { data: blockTime } = useQuery({
+    queryKey: ['blockTime', 'closeDialog', rpcUrl],
+    queryFn: () => getBlockTimestamp(rpcUrl),
+    enabled: open,
+  })
+  const [confirmText, setConfirmText] = useState('')
+
+  const activeFixed = outgoing.fixed.filter((d) => !isExpired(d.data.expiryTs, blockTime)).length
+  const activeRecurring = outgoing.recurring.filter((d) => !isExpired(d.data.expiryTs, blockTime)).length
+  const activeIncoming = incoming.all.filter((d) => !isExpired(d.data.expiryTs, blockTime)).length
+  const activeSubscriptions = subscriptions?.filter((s) => Number(s.subscription.expiresAtTs) === 0).length ?? 0
+  const totalActive = activeFixed + activeRecurring + activeIncoming + activeSubscriptions
+  const hasActive = totalActive > 0
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) setConfirmText('')
+    onOpenChange(nextOpen)
+  }
+
+  const handleClose = async () => {
+    try {
+      await closeMultiDelegate.mutateAsync({ tokenMint })
+      handleOpenChange(false)
+    } catch {
+      // error handled by toast
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="border-red-500/30 bg-slate-950">
+        <DialogHeader>
+          <DialogTitle className="text-red-400">Disable Delegations</DialogTitle>
+          <DialogDescription>
+            {hasActive
+              ? 'You have active delegations. Closing the MultiDelegate account will invalidate them all.'
+              : 'Close your MultiDelegate account and return the rent to your wallet.'}
+          </DialogDescription>
+        </DialogHeader>
+        {hasActive && (
+          <div className="space-y-2 text-sm">
+            <div className="p-3 rounded-lg border border-amber-500/20 bg-amber-500/5 space-y-1">
+              {activeFixed > 0 && <p className="text-amber-400">{activeFixed} active fixed delegation{activeFixed > 1 ? 's' : ''}</p>}
+              {activeRecurring > 0 && <p className="text-amber-400">{activeRecurring} active recurring delegation{activeRecurring > 1 ? 's' : ''}</p>}
+              {activeIncoming > 0 && <p className="text-amber-400">{activeIncoming} incoming delegation{activeIncoming > 1 ? 's' : ''}</p>}
+              {activeSubscriptions > 0 && <p className="text-amber-400">{activeSubscriptions} active subscription{activeSubscriptions > 1 ? 's' : ''}</p>}
+            </div>
+            <p className="text-gray-400 text-xs">
+              Delegatees will no longer be able to transfer tokens. If you re-initialize later, old delegations will remain stale. This acts as an emergency kill switch.
+            </p>
+            <div className="space-y-1 pt-2">
+              <label className="text-xs text-gray-400">Type CLOSE to confirm</label>
+              <input
+                type="text"
+                value={confirmText}
+                onChange={(e) => setConfirmText(e.target.value)}
+                placeholder="CLOSE"
+                className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm"
+              />
+            </div>
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => handleOpenChange(false)}>Cancel</Button>
+          <Button
+            variant="destructive"
+            onClick={handleClose}
+            disabled={closeMultiDelegate.isPending || (hasActive && confirmText !== 'CLOSE')}
+          >
+            {closeMultiDelegate.isPending ? 'Closing...' : 'Disable Delegations'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export function ActiveDelegations({ tokenMint, isApproved, multiDelegateInitId, onInitSuccess }: ActiveDelegationsProps) {
   const [activeTab, setActiveTab] = useState<TabType>('outgoing')
   const [outgoingSubTab, setOutgoingSubTab] = useState<OutgoingSubTab>('active')
+  const [closeDialogOpen, setCloseDialogOpen] = useState(false)
   const queryClient = useQueryClient()
   const { url: rpcUrl } = useClusterConfig()
   const { data: blockTime } = useQuery({
@@ -570,8 +665,8 @@ export function ActiveDelegations({ tokenMint, isApproved, onInitSuccess }: Acti
 
     return (
       <div className="space-y-6">
-        <FixedDelegationTable delegations={data.fixed} mode="outgoing" showExpired={showExpired} tokenMint={tokenMint} blockTime={blockTime} />
-        <RecurringDelegationTable delegations={data.recurring} mode="outgoing" showExpired={showExpired} tokenMint={tokenMint} blockTime={blockTime} />
+        <FixedDelegationTable delegations={data.fixed} mode="outgoing" showExpired={showExpired} tokenMint={tokenMint} blockTime={blockTime} multiDelegateInitId={multiDelegateInitId} />
+        <RecurringDelegationTable delegations={data.recurring} mode="outgoing" showExpired={showExpired} tokenMint={tokenMint} blockTime={blockTime} multiDelegateInitId={multiDelegateInitId} />
       </div>
     )
   }
@@ -589,7 +684,18 @@ export function ActiveDelegations({ tokenMint, isApproved, onInitSuccess }: Acti
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-end gap-2">
+        {isApproved && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCloseDialogOpen(true)}
+            className="text-red-400 border-red-500/20 hover:bg-red-500/10 hover:text-red-300"
+          >
+            <Power className="h-4 w-4 mr-1.5" />
+            Disable
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="sm"
@@ -645,6 +751,7 @@ export function ActiveDelegations({ tokenMint, isApproved, onInitSuccess }: Acti
       <div className="flex justify-end">
         <CreateDelegationDialog tokenMint={tokenMint} disabled={!isApproved} />
       </div>
+      <CloseMultiDelegateDialog tokenMint={tokenMint} open={closeDialogOpen} onOpenChange={setCloseDialogOpen} />
     </div>
   )
 }

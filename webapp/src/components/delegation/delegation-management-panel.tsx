@@ -51,7 +51,7 @@ function StatusError({ onRetry }: { onRetry: () => void }) {
 
 export function DelegationManagementPanel() {
   const { mint: usdcMint, isLoading: isMintLoading } = useUsdcMintRaw()
-  const { isLoading: statusLoading, isError, isApproved, refetch: refetchStatus } = useMultiDelegateStatus(usdcMint)
+  const { isLoading: statusLoading, isError, isApproved, data: statusData, refetch: refetchStatus } = useMultiDelegateStatus(usdcMint)
 
   if (isMintLoading || statusLoading) {
     return <LoadingState />
@@ -65,9 +65,11 @@ export function DelegationManagementPanel() {
     return <TokenConfigError />
   }
 
+  const multiDelegateInitId = statusData?.data?.initId ?? null
+
   return (
     <div className="w-full">
-      <ActiveDelegations tokenMint={usdcMint} isApproved={isApproved} onInitSuccess={refetchStatus} />
+      <ActiveDelegations tokenMint={usdcMint} isApproved={isApproved} multiDelegateInitId={multiDelegateInitId} onInitSuccess={refetchStatus} />
     </div>
   )
 }
