@@ -8,6 +8,8 @@ import {
 } from '@/components/ui/dialog'
 import { useMySubscriptions, type EnrichedSubscription } from '@/hooks/use-subscriptions'
 import { useMultiDelegatorMutations } from '@/hooks/use-multi-delegator'
+import { useMultiDelegateStatus } from '@/hooks/use-multi-delegate-status'
+import { useUsdcMintRaw } from '@/hooks/use-token-config'
 import { useTimeTravel } from '@/hooks/use-time-travel'
 import { cn, USDC_MULTIPLIER, ellipsify, fmtDate, fmtDateTime, formatPeriod } from '@/lib/utils'
 import { parsePlanMeta } from '@/lib/plan-constants'
@@ -97,8 +99,9 @@ function RevokeSubscriptionDialog({ item, open, onOpenChange }: {
   )
 }
 
-function CancelAndRevokeDialog({ item, open, onOpenChange }: {
+function CancelAndRevokeDialog({ item, isGhostPlan, open, onOpenChange }: {
   item: EnrichedSubscription
+  isGhostPlan?: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
@@ -110,7 +113,9 @@ function CancelAndRevokeDialog({ item, open, onOpenChange }: {
         <DialogHeader>
           <DialogTitle className="text-red-400">Unsubscribe & Delete</DialogTitle>
           <DialogDescription>
-            The plan for this subscription has been deleted. This will cancel and immediately delete the subscription, returning rent to your wallet.
+            {isGhostPlan
+              ? 'The plan terms have changed since you subscribed (ghost plan). Payments cannot be collected. This will cancel and immediately delete the subscription, returning rent to your wallet.'
+              : 'The plan for this subscription has been deleted. This will cancel and immediately delete the subscription, returning rent to your wallet.'}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
@@ -132,10 +137,11 @@ function CancelAndRevokeDialog({ item, open, onOpenChange }: {
   )
 }
 
-function SubscriptionCard({ item }: { item: EnrichedSubscription }) {
+function SubscriptionCard({ item, multiDelegateInitId }: { item: EnrichedSubscription; multiDelegateInitId: bigint | null }) {
   const [cancelOpen, setCancelOpen] = useState(false)
   const [revokeOpen, setRevokeOpen] = useState(false)
   const [cancelAndRevokeOpen, setCancelAndRevokeOpen] = useState(false)
+  const { cancelSubscription } = useMultiDelegatorMutations()
   const { getCurrentTimestamp } = useTimeTravel()
   const isActive = Number(item.subscription.expiresAtTs) === 0
   const isCancelled = !isActive
@@ -162,11 +168,14 @@ function SubscriptionCard({ item }: { item: EnrichedSubscription }) {
   const planName = meta.n || 'Unknown Plan'
   const amount = Number(item.subscription.terms.amount) / USDC_MULTIPLIER
   const period = formatPeriod(item.subscription.terms.periodHours)
-  const termsChanged = item.plan && (
+  const isGhostPlan = item.plan != null && (
     item.plan.data.terms.amount !== item.subscription.terms.amount ||
-    item.plan.data.terms.periodHours !== item.subscription.terms.periodHours
+    item.plan.data.terms.periodHours !== item.subscription.terms.periodHours ||
+    item.plan.data.terms.createdAt !== item.subscription.terms.createdAt
   )
   const pulled = Number(item.subscription.amountPulledInPeriod) / USDC_MULTIPLIER
+  const subInitId = item.subscription.header.initId
+  const isStale = multiDelegateInitId != null && subInitId !== multiDelegateInitId
 
   return (
     <>
@@ -184,6 +193,8 @@ function SubscriptionCard({ item }: { item: EnrichedSubscription }) {
             <p className="font-semibold text-white truncate">{planName}</p>
             {planDeleted ? (
               <Badge variant="outline" className="text-red-400 border-red-400/30 text-xs shrink-0">Plan Deleted</Badge>
+            ) : isGhostPlan ? (
+              <Badge variant="outline" className="text-amber-400 border-amber-400/30 text-xs shrink-0">Ghost Plan</Badge>
             ) : isActive ? (
               <Badge variant="outline" className="text-teal-400 border-teal-400/30 text-xs shrink-0">Active</Badge>
             ) : (
@@ -194,17 +205,15 @@ function SubscriptionCard({ item }: { item: EnrichedSubscription }) {
           <div className="flex items-baseline gap-1.5">
             <span className="text-base sm:text-lg lg:text-xl font-bold text-teal-400">${amount}</span>
             <span className="text-sm text-teal-400/60">/{period.toLowerCase()}</span>
-            {termsChanged && (
-              <span className="text-xs text-amber-400 ml-1" title="Plan terms have changed since you subscribed">
-                (terms changed)
-              </span>
-            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-400">
             <span className="font-mono">{ellipsify(item.address, 4)}</span>
             <span className="text-teal-800">|</span>
-            <span className="text-xs font-bold text-blue-400/60">v{item.subscription.header.version}</span>
+            <span className="font-bold text-blue-400/50">V{item.subscription.header.version}</span>
+            <span className="text-teal-800">|</span>
+            <span className="font-bold text-teal-400/40">ID: {subInitId.toString()}</span>
+            {isStale && <><span className="text-teal-800">|</span><span className="font-semibold text-amber-400">Stale</span></>}
             <span className="text-teal-800">|</span>
             <span>Pulled: ${pulled.toFixed(2)}</span>
             {isCancelled && !planDeleted && (
@@ -219,7 +228,7 @@ function SubscriptionCard({ item }: { item: EnrichedSubscription }) {
           </div>
 
           <div className={cn('pt-2 border-t', planDeleted ? 'border-red-500/10' : 'border-teal-500/10')}>
-            {planDeleted && isActive ? (
+            {(planDeleted || isGhostPlan) && isActive ? (
               <Button
                 variant="outline"
                 size="sm"
@@ -233,10 +242,14 @@ function SubscriptionCard({ item }: { item: EnrichedSubscription }) {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setCancelOpen(true)}
+                onClick={() => isStale
+                  ? cancelSubscription.mutate({ planPda: item.subscription.header.delegatee, subscriptionPda: item.address })
+                  : setCancelOpen(true)
+                }
+                disabled={cancelSubscription.isPending}
                 className="w-full border-amber-500/30 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
               >
-                Unsubscribe
+                {cancelSubscription.isPending ? 'Unsubscribing...' : 'Unsubscribe'}
               </Button>
             ) : (
               <Button
@@ -260,13 +273,16 @@ function SubscriptionCard({ item }: { item: EnrichedSubscription }) {
       </Card>
       <CancelSubscriptionDialog item={item} open={cancelOpen} onOpenChange={setCancelOpen} />
       <RevokeSubscriptionDialog item={item} open={revokeOpen} onOpenChange={setRevokeOpen} />
-      <CancelAndRevokeDialog item={item} open={cancelAndRevokeOpen} onOpenChange={setCancelAndRevokeOpen} />
+      <CancelAndRevokeDialog item={item} isGhostPlan={isGhostPlan} open={cancelAndRevokeOpen} onOpenChange={setCancelAndRevokeOpen} />
     </>
   )
 }
 
 export function MySubscriptionsPanel() {
   const { data: subscriptions, isLoading } = useMySubscriptions()
+  const { mint: usdcMint } = useUsdcMintRaw()
+  const { data: statusData } = useMultiDelegateStatus(usdcMint)
+  const multiDelegateInitId = statusData?.data?.initId ?? null
 
   if (isLoading) {
     return (
@@ -299,7 +315,7 @@ export function MySubscriptionsPanel() {
           {hasSubs ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {subscriptions.map((item) => (
-                <SubscriptionCard key={item.address} item={item} />
+                <SubscriptionCard key={item.address} item={item} multiDelegateInitId={multiDelegateInitId} />
               ))}
             </div>
           ) : (

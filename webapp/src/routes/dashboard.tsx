@@ -5,7 +5,6 @@ import { SummaryCards } from '@/components/dashboard/summary-cards'
 
 function DashboardConnected() {
   const { account } = useWalletUi()
-
   return (
     <div className="space-y-8 max-w-5xl mx-auto">
       {account && <WalletBalanceCards address={address(account.address)} />}

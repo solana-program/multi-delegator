@@ -17,7 +17,8 @@ import {
   useAirdropUsdc,
 } from './account-data-access'
 import { useDelegations, useIncomingDelegations } from '@/hooks/use-delegations'
-import { useUsdcMint } from '@/hooks/use-token-config'
+import { useUsdcMint, useUsdcMintRaw } from '@/hooks/use-token-config'
+import { useMultiDelegateStatus } from '@/hooks/use-multi-delegate-status'
 import { USDC_MULTIPLIER, recurringAvailable } from '@/lib/utils'
 import { getBlockTimestamp } from '@/hooks/use-time-travel'
 import { useClusterConfig } from '@/hooks/use-cluster-config'
@@ -108,6 +109,10 @@ export function WalletBalanceCards({ address: addr }: { address: Address }) {
 
   const usdcBalance = usdcAccount?.account?.data?.parsed?.info?.tokenAmount?.uiAmount ?? 0
 
+  const { mint: usdcMintRaw } = useUsdcMintRaw()
+  const { data: statusData } = useMultiDelegateStatus(usdcMintRaw)
+  const delegationId = statusData?.data?.initId ?? null
+
   const [spinning, setSpinning] = useState(false)
   const [copiedField, setCopiedField] = useState<string | null>(null)
   const isFetching = solQuery.isFetching || tokenQuery.isFetching
@@ -139,6 +144,12 @@ export function WalletBalanceCards({ address: addr }: { address: Address }) {
               {copiedField === 'program' ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
             </button>
           </div>
+          {delegationId != null && (
+            <div className="flex items-center gap-1.5 text-xs text-gray-500">
+              <span>Delegation ID:</span>
+              <span className="text-gray-400">{delegationId.toString()}</span>
+            </div>
+          )}
         </div>
         <Button
           variant="outline"
