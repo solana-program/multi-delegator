@@ -1,11 +1,16 @@
 import { describe, expect, test } from 'vitest';
+import { MULTI_DELEGATOR_ERROR__PLAN_TERMS_MISMATCH } from '../src/generated/errors/multiDelegator.ts';
 import {
   fetchMaybePlan,
   fetchMaybeSubscriptionDelegation,
   fetchSubscriptionDelegation,
   PlanStatus,
 } from '../src/generated/index.ts';
-import { DEFAULT_TEST_BALANCE, initTestSuite } from './setup.ts';
+import {
+  DEFAULT_TEST_BALANCE,
+  expectProgramError,
+  initTestSuite,
+} from './setup.ts';
 
 describe('Subscription Lifecycle', () => {
   test('full lifecycle: create, subscribe, pull, cancel, sunset, delete', async () => {
@@ -260,7 +265,7 @@ describe('Subscription Lifecycle', () => {
       0n,
     );
 
-    await expect(
+    await expectProgramError(
       t.client.transferSubscription({
         caller: t.payerKeypair,
         delegator: subscriber.address,
@@ -271,7 +276,8 @@ describe('Subscription Lifecycle', () => {
         receiverAta: merchantAta,
         tokenProgram: t.tokenProgram,
       }),
-    ).rejects.toThrow();
+      MULTI_DELEGATOR_ERROR__PLAN_TERMS_MISMATCH,
+    );
 
     // 6. Subscriber cancels (immediate expiry, no grace period)
     await t.client.cancelSubscription({
