@@ -684,6 +684,47 @@ export function useMultiDelegatorMutations() {
     onError: (error) => toast.onError(error),
   });
 
+  const revokeMultipleDelegations = useMutation({
+    mutationFn: async ({ delegationAccounts, tokenMint }: { delegationAccounts: string[]; tokenMint: string }) => {
+      if (!signer) throw new Error("Wallet not connected");
+      if (!progId) throw new Error("Program address not configured");
+
+      const revokeIxs = delegationAccounts.map((account) => {
+        const { instructions } = buildRevokeDelegation({
+          authority: signer,
+          delegationAccount: address(account),
+          programAddress: progId,
+        });
+        return instructions[0];
+      });
+
+      const { instructions: closeIxs } = await buildCloseMultiDelegate({
+        user: signer,
+        tokenMint: address(tokenMint),
+        programAddress: progId,
+      });
+
+      const allIxs = [...revokeIxs, ...closeIxs];
+      const batches = packInstructionBatches(allIxs, signer);
+      const signatures: string[] = [];
+
+      for (const batch of batches) {
+        signatures.push(await signAndSend(batch, signer));
+      }
+
+      return { signatures, revoked: delegationAccounts.length };
+    },
+    onSuccess: (res) => {
+      toast.onSuccess(res.signatures[0]);
+      invalidateWithDelay(queryClient, [
+        ["delegations"],
+        ["multiDelegateStatus"],
+        ["get-token-accounts"],
+      ]);
+    },
+    onError: (error) => toast.onError(error),
+  });
+
   return {
     initMultiDelegate,
     closeMultiDelegate,
@@ -701,5 +742,6 @@ export function useMultiDelegatorMutations() {
     cancelAndRevokeSubscription,
     collectSubscriptionPayments,
     collectAllPlanPayments,
+    revokeMultipleDelegations,
   };
 }

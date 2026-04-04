@@ -1,4 +1,4 @@
-import { RefreshCw, FileX, Coins, ShieldAlert, Power } from 'lucide-react'
+import { RefreshCw, FileX, Coins, ShieldAlert, Power, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Table,
@@ -478,7 +478,16 @@ function InitPrompt({ tokenMint, onSuccess }: { tokenMint: string; onSuccess?: (
     address: walletAddress ? address(walletAddress) : address('11111111111111111111111111111111'),
   })
 
-  if (!walletAddress) return null
+  if (!walletAddress) {
+    return (
+      <div className="flex flex-col items-center justify-center py-8 text-center space-y-3">
+        <ShieldAlert className="h-10 w-10 text-amber-500/60" />
+        <div>
+          <p className="text-sm font-medium text-muted-foreground">Connect your wallet to manage delegations</p>
+        </div>
+      </div>
+    )
+  }
 
   const userAta = (tokenAccounts as TokenAccountEntry[] | undefined)?.find((entry) => {
     return entry.account?.data?.parsed?.info?.mint === tokenMint
@@ -529,7 +538,6 @@ function CloseMultiDelegateDialog({ tokenMint, open, onOpenChange }: {
 }) {
   const { closeMultiDelegate } = useMultiDelegatorMutations()
   const outgoing = useDelegations()
-  const incoming = useIncomingDelegations()
   const { data: subscriptions } = useMySubscriptions()
   const { url: rpcUrl } = useClusterConfig()
   const { data: blockTime } = useQuery({
@@ -541,9 +549,8 @@ function CloseMultiDelegateDialog({ tokenMint, open, onOpenChange }: {
 
   const activeFixed = outgoing.fixed.filter((d) => !isExpired(d.data.expiryTs, blockTime)).length
   const activeRecurring = outgoing.recurring.filter((d) => !isExpired(d.data.expiryTs, blockTime)).length
-  const activeIncoming = incoming.all.filter((d) => !isExpired(d.data.expiryTs, blockTime)).length
   const activeSubscriptions = subscriptions?.filter((s) => Number(s.subscription.expiresAtTs) === 0).length ?? 0
-  const totalActive = activeFixed + activeRecurring + activeIncoming + activeSubscriptions
+  const totalActive = activeFixed + activeRecurring + activeSubscriptions
   const hasActive = totalActive > 0
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -567,20 +574,19 @@ function CloseMultiDelegateDialog({ tokenMint, open, onOpenChange }: {
           <DialogTitle className="text-red-400">Disable Delegations</DialogTitle>
           <DialogDescription>
             {hasActive
-              ? 'You have active delegations. Closing the MultiDelegate account will invalidate them all.'
+              ? 'You have active outgoing delegations. Closing the MultiDelegate account will invalidate them.'
               : 'Close your MultiDelegate account and return the rent to your wallet.'}
           </DialogDescription>
         </DialogHeader>
         {hasActive && (
           <div className="space-y-2 text-sm">
             <div className="p-3 rounded-lg border border-amber-500/20 bg-amber-500/5 space-y-1">
-              {activeFixed > 0 && <p className="text-amber-400">{activeFixed} active fixed delegation{activeFixed > 1 ? 's' : ''}</p>}
-              {activeRecurring > 0 && <p className="text-amber-400">{activeRecurring} active recurring delegation{activeRecurring > 1 ? 's' : ''}</p>}
-              {activeIncoming > 0 && <p className="text-amber-400">{activeIncoming} incoming delegation{activeIncoming > 1 ? 's' : ''}</p>}
+              {activeFixed > 0 && <p className="text-amber-400">{activeFixed} outgoing fixed delegation{activeFixed > 1 ? 's' : ''}</p>}
+              {activeRecurring > 0 && <p className="text-amber-400">{activeRecurring} outgoing recurring delegation{activeRecurring > 1 ? 's' : ''}</p>}
               {activeSubscriptions > 0 && <p className="text-amber-400">{activeSubscriptions} active subscription{activeSubscriptions > 1 ? 's' : ''}</p>}
             </div>
             <p className="text-gray-400 text-xs">
-              Delegatees will no longer be able to transfer tokens. If you re-initialize later, old delegations will remain stale. This acts as an emergency kill switch.
+              Delegatees will no longer be able to transfer from your outgoing delegations. Incoming delegations from others are not affected. If you re-initialize later, old delegations will remain stale.
             </p>
             <div className="space-y-1 pt-2">
               <label className="text-xs text-gray-400">Type CLOSE to confirm</label>
@@ -648,6 +654,22 @@ export function ActiveDelegations({ tokenMint, isApproved, multiDelegateInitId, 
     }
   }, [incoming.all])
 
+  const staleDelegations = useMemo(() => {
+    if (multiDelegateInitId == null) return []
+    return outgoing.all.filter((d) => d.data.header.initId !== multiDelegateInitId)
+  }, [outgoing.all, multiDelegateInitId])
+
+  const { revokeMultipleDelegations } = useMultiDelegatorMutations()
+
+  const handleRevokeAllStale = async () => {
+    if (staleDelegations.length === 0) return
+    await revokeMultipleDelegations.mutateAsync({
+      delegationAccounts: staleDelegations.map((d) => d.address),
+      tokenMint,
+    })
+    onInitSuccess?.()
+  }
+
   const isLoading = activeTab === 'outgoing' ? outgoing.isLoading : incoming.isLoading
   const isFetching = outgoing.isFetching || incoming.isFetching
   const [spinning, setSpinning] = useState(false)
@@ -697,6 +719,18 @@ export function ActiveDelegations({ tokenMint, isApproved, multiDelegateInitId, 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-end gap-2">
+        {staleDelegations.length > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRevokeAllStale}
+            disabled={revokeMultipleDelegations.isPending}
+            className="text-amber-400 border-amber-500/20 hover:bg-amber-500/10 hover:text-amber-300"
+          >
+            <Trash2 className="h-4 w-4 mr-1.5" />
+            {revokeMultipleDelegations.isPending ? 'Revoking...' : `Revoke ${staleDelegations.length} Stale`}
+          </Button>
+        )}
         {isApproved && (
           <Button
             variant="outline"
