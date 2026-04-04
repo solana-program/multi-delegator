@@ -453,7 +453,7 @@ function DevnetWizard({ onComplete, onBack }: { onComplete: () => void; onBack: 
       log('error', `Deploy failed: ${msg}`)
       markStepError('deploy-program', msg)
     }
-  }, [programStatus.data, programDeploy, markStepDone, markStepError, markStepRunning, log])
+  }, [programStatus.data, programDeploy, markStepDone, markStepError, markStepRunning, setResult, log])
 
   const handleTransferAuthority = useCallback(async () => {
     if (!walletSigner) return

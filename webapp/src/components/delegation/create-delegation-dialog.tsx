@@ -60,6 +60,7 @@ export function CreateDelegationDialog({ tokenMint, disabled }: CreateDelegation
   // Form states
   const [delegatee, setDelegatee] = useState('')
   const [amount, setAmount] = useState('')
+  const [noExpiry, setNoExpiry] = useState(false)
   const [expiryDate, setExpiryDate] = useState('')
   const [expiryHour, setExpiryHour] = useState('12')
   const [periodDays, setPeriodDays] = useState('')
@@ -79,6 +80,7 @@ export function CreateDelegationDialog({ tokenMint, disabled }: CreateDelegation
   const resetForm = () => {
     setDelegatee('')
     setAmount('')
+    setNoExpiry(false)
     setExpiryDate('')
     setExpiryHour('12')
     setPeriodDays('')
@@ -111,9 +113,12 @@ export function CreateDelegationDialog({ tokenMint, disabled }: CreateDelegation
 
   const handleSubmit = async () => {
     const nonce = generateNonce()
-    const expiryDateTime = new Date(`${expiryDate}T${expiryHour.padStart(2, '0')}:00:00`)
-    const expiryTimestamp = Math.floor(expiryDateTime.getTime() / 1000)
-    if (Number.isNaN(expiryTimestamp)) return
+    let expiryTimestamp = 0
+    if (!noExpiry) {
+      const expiryDateTime = new Date(`${expiryDate}T${expiryHour.padStart(2, '0')}:00:00`)
+      expiryTimestamp = Math.floor(expiryDateTime.getTime() / 1000)
+      if (Number.isNaN(expiryTimestamp) || expiryTimestamp <= 0) return
+    }
     const amountInSmallestUnits = BigInt(Math.round(Number(amount) * USDC_MULTIPLIER))
 
     if (selectedKind === 'fixed') {
@@ -155,6 +160,7 @@ export function CreateDelegationDialog({ tokenMint, disabled }: CreateDelegation
   const isPending = createFixedDelegation.isPending || createRecurringDelegation.isPending
 
   const isExpiryValid = () => {
+    if (noExpiry) return true
     if (!expiryDate) return false
     const expiryDateTime = new Date(`${expiryDate}T${expiryHour.padStart(2, '0')}:00:00`)
     return expiryDateTime > blockDate
@@ -165,7 +171,7 @@ export function CreateDelegationDialog({ tokenMint, disabled }: CreateDelegation
     delegatee.length <= 44 &&
     amount.length > 0 &&
     Number(amount) > 0 &&
-    expiryDate.length > 0 &&
+    (noExpiry || expiryDate.length > 0) &&
     isExpiryValid() &&
     (selectedKind === 'fixed' || (periodDays.length > 0 && Number(periodDays) > 0))
 
@@ -257,37 +263,56 @@ export function CreateDelegationDialog({ tokenMint, disabled }: CreateDelegation
               )}
 
               <div className="grid gap-2">
-                <Label htmlFor="expiry-date">Expiry Date & Time</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="expiry-date"
-                    type="date"
-                    value={expiryDate}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setExpiryDate(e.target.value)}
-                    min={blockDate.toLocaleDateString('en-CA')}
-                    className="flex-1"
-                  />
-                  <select
-                    id="expiry-hour"
-                    value={expiryHour}
-                    onChange={(e) => setExpiryHour(e.target.value)}
-                    className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                  >
-                    {Array.from({ length: 24 }, (_, i) => (
-                      <option key={i} value={i.toString()}>
-                        {i.toString().padStart(2, '0')}:00
-                      </option>
-                    ))}
-                  </select>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="expiry-date">Expiry</Label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <span className="text-xs text-muted-foreground">No expiry</span>
+                    <input
+                      type="checkbox"
+                      checked={noExpiry}
+                      onChange={(e) => { setNoExpiry(e.target.checked); if (e.target.checked) setExpiryDate('') }}
+                      className="h-4 w-4 rounded border-gray-600 bg-gray-800 text-emerald-500 focus:ring-emerald-500/30"
+                    />
+                  </label>
                 </div>
-                {expiryDate && !isExpiryValid() && (
-                  <p className="text-xs text-destructive">
-                    Expiry date must be in the future
-                  </p>
+                {noExpiry ? (
+                  <div className="flex items-center gap-2 rounded-md border border-gray-700/50 bg-gray-900/50 px-3 py-2.5">
+                    <span className="text-sm text-gray-400">This delegation will not have an expiration time</span>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex gap-2">
+                      <Input
+                        id="expiry-date"
+                        type="date"
+                        value={expiryDate}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setExpiryDate(e.target.value)}
+                        min={blockDate.toLocaleDateString('en-CA')}
+                        className="flex-1"
+                      />
+                      <select
+                        id="expiry-hour"
+                        value={expiryHour}
+                        onChange={(e) => setExpiryHour(e.target.value)}
+                        className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                      >
+                        {Array.from({ length: 24 }, (_, i) => (
+                          <option key={i} value={i.toString()}>
+                            {i.toString().padStart(2, '0')}:00
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {expiryDate && !isExpiryValid() && (
+                      <p className="text-xs text-destructive">
+                        Expiry date must be in the future
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      The delegation will expire and become invalid after this date
+                    </p>
+                  </>
                 )}
-                <p className="text-xs text-muted-foreground">
-                  The delegation will expire and become invalid after this date
-                </p>
               </div>
             </div>
 

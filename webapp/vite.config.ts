@@ -6,6 +6,15 @@ import path from 'path'
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  server: {
+    proxy: {
+      '/rpc': {
+        target: 'http://localhost:8899',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/rpc/, ''),
+      },
+    },
+  },
   plugins: [
     nodePolyfills({
       globals: {

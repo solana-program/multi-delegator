@@ -55,8 +55,6 @@ function EditPlanDialog({ plan, meta, open, onOpenChange }: {
     if (open) getCurrentTimestamp().then(setBlockTime).catch((err) => console.error('Failed to fetch block timestamp:', err))
   }, [open, getCurrentTimestamp])
 
-  const blockDate = blockTime ? new Date(blockTime * 1000) : new Date()
-
   const [planName, setPlanName] = useState(meta.n || '')
   const [description, setDescription] = useState(meta.d || '')
   const [selectedIcon, setSelectedIcon] = useState(meta.i || '')
@@ -98,10 +96,14 @@ function EditPlanDialog({ plan, meta, open, onOpenChange }: {
     [metadataJson],
   )
 
+  const endTsComputed = endDate
+    ? Math.floor(new Date(`${endDate}T${endHour.padStart(2, '0')}:00:00`).getTime() / 1000)
+    : 0
+  const minEndTs = (blockTime ?? 0) + Number(plan.data.terms.periodHours) * 3600
+  const isEndDateValid = endTsComputed === 0 || endTsComputed > minEndTs
+
   const handleUpdate = () => {
-    const endTs = endDate
-      ? Math.floor(new Date(`${endDate}T${endHour.padStart(2, '0')}:00:00`).getTime() / 1000)
-      : 0
+    const endTs = endTsComputed
     const status = sunsetMode ? PlanStatus.Sunset : PlanStatus.Active
 
     const filteredPullers = pullers.filter((p) => p.length > 0)
@@ -119,7 +121,9 @@ function EditPlanDialog({ plan, meta, open, onOpenChange }: {
     planName.length > 0 &&
     description.length > 0 &&
     metadataBytes <= 128 &&
-    !(sunsetMode && !endDate)
+    !(sunsetMode && !endDate) &&
+    isEndDateValid &&
+    (endTsComputed === 0 || blockTime !== undefined)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -227,7 +231,7 @@ function EditPlanDialog({ plan, meta, open, onOpenChange }: {
                   type="date"
                   value={endDate}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEndDate(e.target.value)}
-                  min={blockDate.toLocaleDateString('en-CA')}
+                  min={new Date(minEndTs * 1000).toLocaleDateString('en-CA')}
                   className="flex-1"
                   disabled={isSunset}
                 />
@@ -244,6 +248,11 @@ function EditPlanDialog({ plan, meta, open, onOpenChange }: {
                   ))}
                 </select>
               </div>
+              {endDate && !isEndDateValid && (
+                <p className="text-xs text-destructive">
+                  End date must be at least one billing period from now
+                </p>
+              )}
               <p className="text-xs text-muted-foreground">Leave empty for no end date</p>
             </div>
 

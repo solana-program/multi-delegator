@@ -20,8 +20,7 @@ const QUICK_JUMPS = [
   { label: '+30d', seconds: 2592000 },
 ] as const
 
-const DRIFT_THRESHOLD_SEC = 30
-
+const TIME_TRAVELED_KEY = 'time-traveled'
 
 function TimeTravelButtonInner() {
   const { timeTravel, getCurrentTimestamp } = useTimeTravel()
@@ -31,22 +30,21 @@ function TimeTravelButtonInner() {
   const [loading, setLoading] = useState(false)
   const [date, setDate] = useState('')
   const [hour, setHour] = useState('12')
-  const [timeTraveled, setTimeTraveled] = useState(false)
+  const [timeTraveled, setTimeTraveled] = useState(() => sessionStorage.getItem(TIME_TRAVELED_KEY) === 'true')
 
-  const updateDrift = useCallback((blockTime: number) => {
-    const wallTime = Math.floor(Date.now() / 1000)
-    setTimeTraveled(Math.abs(blockTime - wallTime) > DRIFT_THRESHOLD_SEC)
+  const markTimeTraveled = useCallback(() => {
+    sessionStorage.setItem(TIME_TRAVELED_KEY, 'true')
+    setTimeTraveled(true)
   }, [])
 
   const fetchTime = useCallback(async () => {
     try {
       const ts = await getCurrentTimestamp()
       setCurrentTime(ts)
-      updateDrift(ts)
     } catch (e) {
       console.warn('[TimeTravel] Failed to fetch clock:', e)
     }
-  }, [getCurrentTimestamp, updateDrift])
+  }, [getCurrentTimestamp])
 
   useEffect(() => { fetchTime() }, [fetchTime])
 
@@ -93,7 +91,7 @@ function TimeTravelButtonInner() {
         animRef.current = 0
         setLoading(true)
         timeTravel(endTs)
-          .then(() => fetchTime())
+          .then(() => { markTimeTraveled(); return fetchTime() })
           .then(() => {
             queryClient.invalidateQueries()
             setTimeout(() => queryClient.invalidateQueries(), 500)
@@ -119,6 +117,7 @@ function TimeTravelButtonInner() {
         return
       }
       await timeTravel(ts)
+      markTimeTraveled()
       await fetchTime()
       queryClient.invalidateQueries()
       setTimeout(() => queryClient.invalidateQueries(), 500)

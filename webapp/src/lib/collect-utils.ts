@@ -18,6 +18,7 @@ export function computeEligibleSubscribers(
 
   for (const sub of subscribers) {
     if (sub.expiresAtTs !== 0n && currentTs >= Number(sub.expiresAtTs)) continue
+    if (sub.terms.amount !== planAmount || sub.terms.periodHours !== periodHours) continue
 
     const periodEnd = Number(sub.currentPeriodStartTs) + Number(periodHours) * 3600
     const collectAmount = currentTs >= periodEnd

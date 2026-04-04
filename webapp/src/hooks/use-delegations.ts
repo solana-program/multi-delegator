@@ -13,7 +13,9 @@ export interface DelegationData {
   header: {
     delegator: string
     delegatee: string
+    payer: string
     version: number
+    initId: bigint
   }
   amount: bigint
   amountPerPeriod: bigint
@@ -88,6 +90,8 @@ function useDelegationsByRole(role: DelegationRole) {
       return fetchDelegationsByRole(clusterConfig.url, account.address, role, progAddr!)
     },
     enabled: !!account?.address && !!progAddr,
+    staleTime: 15_000,
+    retry: 1,
   })
 
   const refetch = async () => {

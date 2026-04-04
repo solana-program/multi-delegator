@@ -36,6 +36,7 @@ export function CreatePlanDialog({ open, onOpenChange }: CreatePlanDialogProps) 
   const [amount, setAmount] = useState('')
   const [periodValue, setPeriodValue] = useState('')
   const [periodUnit, setPeriodUnit] = useState<'hours' | 'days' | 'weeks' | 'months'>('days')
+  const [noEndDate, setNoEndDate] = useState(true)
   const [endDate, setEndDate] = useState('')
   const [endHour, setEndHour] = useState('12')
   const [destinations, setDestinations] = useState<string[]>([])
@@ -78,6 +79,7 @@ export function CreatePlanDialog({ open, onOpenChange }: CreatePlanDialogProps) 
     setAmount('')
     setPeriodValue('')
     setPeriodUnit('days')
+    setNoEndDate(true)
     setEndDate('')
     setEndHour('12')
     setDestinations([])
@@ -354,33 +356,51 @@ export function CreatePlanDialog({ open, onOpenChange }: CreatePlanDialogProps) 
             </div>
 
             <div className="sm:col-span-2 grid gap-2">
-              <Label>End Date/Time <span className="text-muted-foreground font-normal">(optional)</span></Label>
-              <div className="flex gap-2">
-                <Input
-                  type="date"
-                  value={endDate}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEndDate(e.target.value)}
-                  min={new Date(minEndTs * 1000).toLocaleDateString('en-CA')}
-                  className="flex-1"
-                />
-                <select
-                  value={endHour}
-                  onChange={(e) => setEndHour(e.target.value)}
-                  className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                >
-                  {Array.from({ length: 24 }, (_, i) => (
-                    <option key={i} value={i.toString()}>
-                      {i.toString().padStart(2, '0')}:00
-                    </option>
-                  ))}
-                </select>
+              <div className="flex items-center justify-between">
+                <Label>End Date/Time</Label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <span className="text-xs text-muted-foreground">No end date</span>
+                  <input
+                    type="checkbox"
+                    checked={noEndDate}
+                    onChange={(e) => { setNoEndDate(e.target.checked); if (e.target.checked) setEndDate('') }}
+                    className="h-4 w-4 rounded border-gray-600 bg-gray-800 text-emerald-500 focus:ring-emerald-500/30"
+                  />
+                </label>
               </div>
-              {endDate && !isEndDateValid && (
-                <p className="text-xs text-destructive">
-                  End date must be at least one billing period ({periodHours}h) from now
-                </p>
+              {noEndDate ? (
+                <div className="flex items-center gap-2 rounded-md border border-gray-700/50 bg-gray-900/50 px-3 py-2.5">
+                  <span className="text-sm text-gray-400">This plan will not have an end date</span>
+                </div>
+              ) : (
+                <>
+                  <div className="flex gap-2">
+                    <Input
+                      type="date"
+                      value={endDate}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEndDate(e.target.value)}
+                      min={new Date(minEndTs * 1000).toLocaleDateString('en-CA')}
+                      className="flex-1"
+                    />
+                    <select
+                      value={endHour}
+                      onChange={(e) => setEndHour(e.target.value)}
+                      className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                    >
+                      {Array.from({ length: 24 }, (_, i) => (
+                        <option key={i} value={i.toString()}>
+                          {i.toString().padStart(2, '0')}:00
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {endDate && !isEndDateValid && (
+                    <p className="text-xs text-destructive">
+                      End date must be at least one billing period ({periodHours}h) from now
+                    </p>
+                  )}
+                </>
               )}
-              <p className="text-xs text-muted-foreground">Leave empty for no end date (endTs = 0)</p>
             </div>
 
             <div className="sm:col-span-2">

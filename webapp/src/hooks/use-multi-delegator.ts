@@ -7,6 +7,7 @@ import {
 } from "gill/programs/token";
 import {
   buildInitMultiDelegate,
+  buildCloseMultiDelegate,
   buildCreateFixedDelegation,
   buildCreateRecurringDelegation,
   buildRevokeDelegation,
@@ -71,6 +72,31 @@ export function useMultiDelegatorMutations() {
         ["multiDelegateStatus"],
         ["get-token-accounts"],
         ["delegations"],
+      ]);
+    },
+    onError: (error) => toast.onError(error),
+  });
+
+  const closeMultiDelegate = useMutation({
+    mutationFn: async ({ tokenMint }: { tokenMint: string }) => {
+      if (!signer) throw new Error("Wallet not connected");
+      if (!progId) throw new Error("Program address not configured");
+
+      const { instructions } = await buildCloseMultiDelegate({
+        user: signer,
+        tokenMint: address(tokenMint),
+        programAddress: progId,
+      });
+
+      const signature = await signAndSend(instructions, signer);
+      return { signature };
+    },
+    onSuccess: (res) => {
+      toast.onSuccess(res.signature);
+      invalidateWithDelay(queryClient, [
+        ["multiDelegateStatus"],
+        ["delegations"],
+        ["get-token-accounts"],
       ]);
     },
     onError: (error) => toast.onError(error),
@@ -658,8 +684,50 @@ export function useMultiDelegatorMutations() {
     onError: (error) => toast.onError(error),
   });
 
+  const revokeMultipleDelegations = useMutation({
+    mutationFn: async ({ delegationAccounts, tokenMint }: { delegationAccounts: string[]; tokenMint: string }) => {
+      if (!signer) throw new Error("Wallet not connected");
+      if (!progId) throw new Error("Program address not configured");
+
+      const revokeIxs = delegationAccounts.map((account) => {
+        const { instructions } = buildRevokeDelegation({
+          authority: signer,
+          delegationAccount: address(account),
+          programAddress: progId,
+        });
+        return instructions[0];
+      });
+
+      const { instructions: closeIxs } = await buildCloseMultiDelegate({
+        user: signer,
+        tokenMint: address(tokenMint),
+        programAddress: progId,
+      });
+
+      const allIxs = [...revokeIxs, ...closeIxs];
+      const batches = packInstructionBatches(allIxs, signer);
+      const signatures: string[] = [];
+
+      for (const batch of batches) {
+        signatures.push(await signAndSend(batch, signer));
+      }
+
+      return { signatures, revoked: delegationAccounts.length };
+    },
+    onSuccess: (res) => {
+      toast.onSuccess(res.signatures[0]);
+      invalidateWithDelay(queryClient, [
+        ["delegations"],
+        ["multiDelegateStatus"],
+        ["get-token-accounts"],
+      ]);
+    },
+    onError: (error) => toast.onError(error),
+  });
+
   return {
     initMultiDelegate,
+    closeMultiDelegate,
     createFixedDelegation,
     createRecurringDelegation,
     revokeDelegation,
@@ -674,5 +742,6 @@ export function useMultiDelegatorMutations() {
     cancelAndRevokeSubscription,
     collectSubscriptionPayments,
     collectAllPlanPayments,
+    revokeMultipleDelegations,
   };
 }

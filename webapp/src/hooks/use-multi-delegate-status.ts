@@ -1,18 +1,16 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useWalletUi } from '@wallet-ui/react'
-import { createSolanaRpc, address, type Address } from 'gill'
-import { TOKEN_PROGRAM_ADDRESS, TOKEN_2022_PROGRAM_ADDRESS } from 'gill/programs/token'
+import { createSolanaRpc, address } from 'gill'
+import { TOKEN_PROGRAM_ADDRESS, TOKEN_2022_PROGRAM_ADDRESS, findAssociatedTokenPda } from 'gill/programs/token'
 import { getMultiDelegatePDA, fetchMaybeMultiDelegate } from '@multidelegator/client'
 import { useClusterConfig } from '@/hooks/use-cluster-config'
 import { useProgramAddress } from '@/hooks/use-token-config'
-import type { TokenAccountEntry } from '@/lib/types'
-
-const TOKEN_PROGRAMS: Address[] = [TOKEN_PROGRAM_ADDRESS, TOKEN_2022_PROGRAM_ADDRESS]
 
 export interface MultiDelegateData {
   owner: string
   tokenMint: string
   bump: number
+  initId: bigint
 }
 
 export interface MultiDelegateStatus {
@@ -52,25 +50,25 @@ export function useMultiDelegateStatus(tokenMint: string | null) {
       let approved = false
       if (exists) {
         try {
-          const tokenAccounts = await Promise.all(
-            TOKEN_PROGRAMS.map((programId) =>
-              rpc
-                .getTokenAccountsByOwner(address(account.address), { programId }, { encoding: 'jsonParsed', commitment: 'confirmed' })
-                .send()
-                .then((res) => (res.value ?? []) as unknown as TokenAccountEntry[])
-                .catch(() => [] as TokenAccountEntry[])
-            )
-          ).then((results) => results.flat())
+          const mint = address(tokenMint)
+          const owner = address(account.address)
+          const tokenPrograms = [TOKEN_2022_PROGRAM_ADDRESS, TOKEN_PROGRAM_ADDRESS]
 
-          const matchingAccount = tokenAccounts.find((entry) => {
-            const info = entry.account?.data?.parsed?.info
-            return info?.mint === tokenMint
-          })
+          for (const tokenProgram of tokenPrograms) {
+            const [ata] = await findAssociatedTokenPda({ mint, owner, tokenProgram })
+            const ataAccount = await rpc
+              .getAccountInfo(ata, { encoding: 'jsonParsed', commitment: 'confirmed' })
+              .send()
 
-          const delegate = matchingAccount?.account?.data?.parsed?.info?.delegate ?? null
-          approved = delegate === pda
+            if (ataAccount.value) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const delegate = (ataAccount.value.data as any)?.parsed?.info?.delegate ?? null
+              approved = delegate === pda
+              break
+            }
+          }
         } catch (err) {
-          console.error('Failed to fetch token accounts:', err)
+          console.error('Failed to check delegate status:', err)
         }
       }
 
