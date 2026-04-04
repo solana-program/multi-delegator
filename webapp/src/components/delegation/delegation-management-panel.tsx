@@ -69,6 +69,14 @@ export function DelegationManagementPanel() {
 
   return (
     <div className="w-full">
+      {multiDelegateInitId != null && (
+        <div className="flex items-center gap-2 mb-4 text-xs text-gray-500 tracking-wide">
+          <div className="h-px flex-1 bg-gradient-to-r from-transparent via-gray-700/40 to-transparent" />
+          <span className="uppercase">Current Delegation ID</span>
+          <span className="text-gray-400">{multiDelegateInitId.toString()}</span>
+          <div className="h-px flex-1 bg-gradient-to-r from-transparent via-gray-700/40 to-transparent" />
+        </div>
+      )}
       <ActiveDelegations tokenMint={usdcMint} isApproved={isApproved} multiDelegateInitId={multiDelegateInitId} onInitSuccess={refetchStatus} />
     </div>
   )

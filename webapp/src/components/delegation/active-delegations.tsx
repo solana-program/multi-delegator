@@ -289,10 +289,14 @@ function FixedDelegationTable({ delegations, mode, showExpired, tokenMint, block
               const isStale = multiDelegateInitId != null && d.data.header.initId !== multiDelegateInitId
               return (
                 <TableRow key={d.address} className={`border-none hover:bg-white/[0.03] transition-colors ${rowExpired || isStale ? 'opacity-60' : ''}`}>
-                  <TableCell className="font-mono text-[15px] text-gray-300 py-5 text-center">
-                    {formatAddress(isOutgoing ? d.data.header.delegatee : d.data.header.delegator)}
-                    <span className="ml-1.5 text-xs font-bold text-blue-400/60 font-sans">v{d.data.header.version}</span>
-                    {isStale && <span className="ml-1.5 text-xs font-bold text-amber-400 font-sans" title="Delegation init_id does not match current MultiDelegate. Transfers will fail.">Stale</span>}
+                  <TableCell className="py-5 text-center">
+                    <div className="font-mono text-[15px] text-gray-300">{formatAddress(isOutgoing ? d.data.header.delegatee : d.data.header.delegator)}</div>
+                    <div className="flex items-center justify-center gap-2 mt-0.5 text-[11px] font-sans">
+                      <span className="text-blue-400/50 font-bold">V{d.data.header.version}</span>
+                      <span className="text-gray-700">|</span>
+                      <span className="text-teal-400/40 font-bold">ID: {d.data.header.initId.toString()}</span>
+                      {isStale && <><span className="text-gray-700">|</span><span className="text-amber-400 font-semibold">Stale</span></>}
+                    </div>
                   </TableCell>
                   <TableCell className="text-emerald-400 py-5 font-medium text-[15px] text-center">
                     {formatAmount(d.data.amount)} USDC
@@ -301,6 +305,8 @@ function FixedDelegationTable({ delegations, mode, showExpired, tokenMint, block
                   <TableCell className="py-5 text-gray-300 text-[15px] text-center">
                     {rowExpired ? (
                       <span className="text-red-400 font-medium">Expired</span>
+                    ) : d.data.expiryTs === 0n ? (
+                      <span className="text-gray-500 text-sm">No expiry</span>
                     ) : (
                       <div>
                         <div>{formatDelegationDateTime(d.data.expiryTs)}</div>
@@ -357,10 +363,14 @@ function RecurringDelegationTable({ delegations, mode, showExpired, tokenMint, b
               const available = recurringAvailable(d.data.amountPerPeriod, d.data.amountPulledInPeriod, d.data.currentPeriodStartTs, d.data.periodLengthS, blockTime)
               return (
                 <TableRow key={d.address} className={`border-none hover:bg-white/[0.03] transition-colors ${rowExpired || isStale ? 'opacity-60' : ''}`}>
-                  <TableCell className="font-mono text-[15px] text-gray-300 py-5 text-center">
-                    {formatAddress(isOutgoing ? d.data.header.delegatee : d.data.header.delegator)}
-                    <span className="ml-1.5 text-xs font-bold text-blue-400/60 font-sans">v{d.data.header.version}</span>
-                    {isStale && <span className="ml-1.5 text-xs font-bold text-amber-400 font-sans" title="Delegation init_id does not match current MultiDelegate. Transfers will fail.">Stale</span>}
+                  <TableCell className="py-5 text-center">
+                    <div className="font-mono text-[15px] text-gray-300">{formatAddress(isOutgoing ? d.data.header.delegatee : d.data.header.delegator)}</div>
+                    <div className="flex items-center justify-center gap-2 mt-0.5 text-[11px] font-sans">
+                      <span className="text-blue-400/50 font-bold">V{d.data.header.version}</span>
+                      <span className="text-gray-700">|</span>
+                      <span className="text-teal-400/40 font-bold">ID: {d.data.header.initId.toString()}</span>
+                      {isStale && <><span className="text-gray-700">|</span><span className="text-amber-400 font-semibold">Stale</span></>}
+                    </div>
                   </TableCell>
                   <TableCell className="text-emerald-400 py-5 font-medium text-[15px] text-center">
                     {formatAmount(available)} USDC
@@ -372,6 +382,8 @@ function RecurringDelegationTable({ delegations, mode, showExpired, tokenMint, b
                   <TableCell className="py-5 text-gray-300 text-[15px] text-center">
                     {rowExpired ? (
                       <span className="text-red-400 font-medium">Expired</span>
+                    ) : d.data.expiryTs === 0n ? (
+                      <span className="text-gray-500 text-sm">No expiry</span>
                     ) : (
                       <div>
                         <div>{formatDelegationDateTime(d.data.expiryTs)}</div>
