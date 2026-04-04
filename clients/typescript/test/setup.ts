@@ -20,7 +20,9 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
 } from 'gill';
+import { expect } from 'vitest';
 import { MultiDelegatorClient } from '../src/client.js';
+import { parseProgramError } from '../src/errors/map.js';
 import { KeyPairWallet, type Wallet } from '../src/wallet.js';
 import {
   createSmartWallets as createAdapterSmartWallets,
@@ -513,6 +515,47 @@ async function createAtaWithTokens(
   await client.sendAndConfirmTransaction(signedTransaction);
 
   return ata;
+}
+
+function extractErrorCode(error: unknown): number | null {
+  if (error == null) return null;
+  const pe = parseProgramError(error);
+  if (pe) return pe.errorCode;
+  // biome-ignore lint/suspicious/noExplicitAny: error introspection
+  const ctx = (error as any)?.context;
+  if (ctx?.code != null) return Number(ctx.code);
+  const msg = error instanceof Error ? error.message : String(error);
+  const m = /custom program error: #(\d+)/.exec(msg);
+  if (m?.[1]) return Number(m[1]);
+  if (error instanceof Error && error.cause) {
+    return extractErrorCode(error.cause);
+  }
+  return null;
+}
+
+export async function expectProgramError(
+  promise: Promise<unknown>,
+  expectedCode: number,
+): Promise<void> {
+  try {
+    await promise;
+    throw new Error(
+      `Expected program error 0x${expectedCode.toString(16)} but tx succeeded`,
+    );
+  } catch (error: unknown) {
+    if (
+      error instanceof Error &&
+      error.message.startsWith('Expected program error')
+    ) {
+      throw error;
+    }
+    const code = extractErrorCode(error);
+    if (code != null) {
+      expect(code).toBe(expectedCode);
+      return;
+    }
+    throw error;
+  }
 }
 
 // ============================================================================

@@ -1,0 +1,1213 @@
+import { describe, expect, test } from 'vitest';
+import {
+  MULTI_DELEGATOR_ERROR__ALREADY_SUBSCRIBED,
+  MULTI_DELEGATOR_ERROR__PLAN_CLOSED,
+  MULTI_DELEGATOR_ERROR__PLAN_EXPIRED,
+  MULTI_DELEGATOR_ERROR__PLAN_IMMUTABLE_AFTER_SUNSET,
+  MULTI_DELEGATOR_ERROR__PLAN_NOT_EXPIRED,
+  MULTI_DELEGATOR_ERROR__PLAN_SUNSET,
+  MULTI_DELEGATOR_ERROR__STALE_MULTI_DELEGATE,
+  MULTI_DELEGATOR_ERROR__SUBSCRIPTION_ALREADY_CANCELLED,
+  MULTI_DELEGATOR_ERROR__SUBSCRIPTION_CANCELLED,
+  MULTI_DELEGATOR_ERROR__SUBSCRIPTION_NOT_CANCELLED,
+  MULTI_DELEGATOR_ERROR__SUBSCRIPTION_PLAN_MISMATCH,
+  MULTI_DELEGATOR_ERROR__UNAUTHORIZED,
+  MULTI_DELEGATOR_ERROR__UNAUTHORIZED_DESTINATION,
+} from '../src/generated/errors/multiDelegator.ts';
+import {
+  fetchMaybePlan,
+  fetchMaybeSubscriptionDelegation,
+  fetchSubscriptionDelegation,
+  PlanStatus,
+} from '../src/generated/index.ts';
+import { buildCloseMultiDelegate } from '../src/instructions/delegation.ts';
+import { getMultiDelegatePDA, getPlanPDA } from '../src/pdas.ts';
+import { addressAsSigner } from '../src/wallet.ts';
+import {
+  DEFAULT_TEST_BALANCE,
+  expectProgramError,
+  initTestSuite,
+  ONE_HOUR_IN_SECONDS,
+} from './setup.ts';
+
+describe('Subscription Security', () => {
+  test('revoke blocked during grace period, allowed after expiry', async () => {
+    const t = await initTestSuite();
+
+    const { planPda } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 1n,
+      mint: t.tokenMint,
+      amount: 500_000n,
+      periodHours: 1n,
+      endTs: 0n,
+      destinations: [],
+      pullers: [],
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    const subscriber = await t.createFundedKeypair();
+    const subscriberAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      subscriber.address,
+      DEFAULT_TEST_BALANCE,
+    );
+    await t.client.initMultiDelegate({
+      owner: subscriber,
+      tokenMint: t.tokenMint,
+      userAta: subscriberAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const { subscriptionPda } = await t.client.subscribe({
+      subscriber,
+      merchant: t.payerKeypair.address,
+      planId: 1n,
+      tokenMint: t.tokenMint,
+    });
+
+    await t.client.cancelSubscription({
+      subscriber,
+      planPda,
+      subscriptionPda,
+    });
+
+    const subAfterCancel = (
+      await fetchSubscriptionDelegation(t.rpc, subscriptionPda)
+    ).data;
+    expect(subAfterCancel.expiresAtTs).not.toBe(0n);
+
+    await expectProgramError(
+      t.client.revokeDelegation({
+        authority: subscriber,
+        delegationAccount: subscriptionPda,
+      }),
+      MULTI_DELEGATOR_ERROR__SUBSCRIPTION_NOT_CANCELLED,
+    );
+
+    await t.timeTravel(Number(subAfterCancel.expiresAtTs) + 60);
+
+    const { signature } = await t.client.revokeDelegation({
+      authority: subscriber,
+      delegationAccount: subscriptionPda,
+    });
+    expect(signature).toBeDefined();
+  });
+
+  test('unauthorized puller is rejected', async () => {
+    const t = await initTestSuite();
+    const authorizedPuller = await t.createFundedKeypair();
+    const attacker = await t.createFundedKeypair();
+
+    const { planPda } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 1n,
+      mint: t.tokenMint,
+      amount: 500_000n,
+      periodHours: 1n,
+      endTs: 0n,
+      destinations: [],
+      pullers: [authorizedPuller.address],
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    const subscriber = await t.createFundedKeypair();
+    const subscriberAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      subscriber.address,
+      DEFAULT_TEST_BALANCE,
+    );
+    await t.client.initMultiDelegate({
+      owner: subscriber,
+      tokenMint: t.tokenMint,
+      userAta: subscriberAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const { subscriptionPda } = await t.client.subscribe({
+      subscriber,
+      merchant: t.payerKeypair.address,
+      planId: 1n,
+      tokenMint: t.tokenMint,
+    });
+
+    const attackerAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      attacker.address,
+      0n,
+    );
+
+    await expectProgramError(
+      t.client.transferSubscription({
+        caller: attacker,
+        delegator: subscriber.address,
+        tokenMint: t.tokenMint,
+        subscriptionPda,
+        planPda,
+        amount: 100_000n,
+        receiverAta: attackerAta,
+        tokenProgram: t.tokenProgram,
+      }),
+      MULTI_DELEGATOR_ERROR__UNAUTHORIZED,
+    );
+
+    const pullerAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      authorizedPuller.address,
+      0n,
+    );
+    const { signature: pullerSig } = await t.client.transferSubscription({
+      caller: authorizedPuller,
+      delegator: subscriber.address,
+      tokenMint: t.tokenMint,
+      subscriptionPda,
+      planPda,
+      amount: 100_000n,
+      receiverAta: pullerAta,
+      tokenProgram: t.tokenProgram,
+    });
+    expect(pullerSig).toBeDefined();
+
+    const merchantAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      t.payerKeypair.address,
+      0n,
+    );
+    const { signature: merchantSig } = await t.client.transferSubscription({
+      caller: t.payerKeypair,
+      delegator: subscriber.address,
+      tokenMint: t.tokenMint,
+      subscriptionPda,
+      planPda,
+      amount: 100_000n,
+      receiverAta: merchantAta,
+      tokenProgram: t.tokenProgram,
+    });
+    expect(merchantSig).toBeDefined();
+  });
+
+  test('destination whitelist is enforced', async () => {
+    const t = await initTestSuite();
+
+    const allowedReceiver = await t.createFundedKeypair();
+    const allowedAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      allowedReceiver.address,
+      0n,
+    );
+
+    const unauthorizedReceiver = await t.createFundedKeypair();
+    const unauthorizedAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      unauthorizedReceiver.address,
+      0n,
+    );
+
+    const { planPda } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 1n,
+      mint: t.tokenMint,
+      amount: 500_000n,
+      periodHours: 1n,
+      endTs: 0n,
+      destinations: [allowedReceiver.address],
+      pullers: [],
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    const subscriber = await t.createFundedKeypair();
+    const subscriberAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      subscriber.address,
+      DEFAULT_TEST_BALANCE,
+    );
+    await t.client.initMultiDelegate({
+      owner: subscriber,
+      tokenMint: t.tokenMint,
+      userAta: subscriberAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const { subscriptionPda } = await t.client.subscribe({
+      subscriber,
+      merchant: t.payerKeypair.address,
+      planId: 1n,
+      tokenMint: t.tokenMint,
+    });
+
+    await expectProgramError(
+      t.client.transferSubscription({
+        caller: t.payerKeypair,
+        delegator: subscriber.address,
+        tokenMint: t.tokenMint,
+        subscriptionPda,
+        planPda,
+        amount: 100_000n,
+        receiverAta: unauthorizedAta,
+        tokenProgram: t.tokenProgram,
+      }),
+      MULTI_DELEGATOR_ERROR__UNAUTHORIZED_DESTINATION,
+    );
+
+    const { signature } = await t.client.transferSubscription({
+      caller: t.payerKeypair,
+      delegator: subscriber.address,
+      tokenMint: t.tokenMint,
+      subscriptionPda,
+      planPda,
+      amount: 100_000n,
+      receiverAta: allowedAta,
+      tokenProgram: t.tokenProgram,
+    });
+    expect(signature).toBeDefined();
+  });
+
+  test('double subscription is blocked', async () => {
+    const t = await initTestSuite();
+
+    await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 1n,
+      mint: t.tokenMint,
+      amount: 500_000n,
+      periodHours: 1n,
+      endTs: 0n,
+      destinations: [],
+      pullers: [],
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    const subscriber = await t.createFundedKeypair();
+    const subscriberAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      subscriber.address,
+      DEFAULT_TEST_BALANCE,
+    );
+    await t.client.initMultiDelegate({
+      owner: subscriber,
+      tokenMint: t.tokenMint,
+      userAta: subscriberAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    await t.client.subscribe({
+      subscriber,
+      merchant: t.payerKeypair.address,
+      planId: 1n,
+      tokenMint: t.tokenMint,
+    });
+
+    await expectProgramError(
+      t.client.subscribe({
+        subscriber,
+        merchant: t.payerKeypair.address,
+        planId: 1n,
+        tokenMint: t.tokenMint,
+      }),
+      MULTI_DELEGATOR_ERROR__ALREADY_SUBSCRIBED,
+    );
+  });
+
+  test('sunset plan blocks new subscriptions', async () => {
+    const t = await initTestSuite();
+    const periodHours = 1n;
+    const endTs = await t.minPlanEndTs(periodHours);
+
+    const { planPda } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 1n,
+      mint: t.tokenMint,
+      amount: 500_000n,
+      periodHours,
+      endTs: 0n,
+      destinations: [],
+      pullers: [],
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    await t.client.updatePlan({
+      owner: t.payerKeypair,
+      planPda,
+      status: PlanStatus.Sunset,
+      endTs,
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    const subscriber = await t.createFundedKeypair();
+    const subscriberAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      subscriber.address,
+      DEFAULT_TEST_BALANCE,
+    );
+    await t.client.initMultiDelegate({
+      owner: subscriber,
+      tokenMint: t.tokenMint,
+      userAta: subscriberAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    await expectProgramError(
+      t.client.subscribe({
+        subscriber,
+        merchant: t.payerKeypair.address,
+        planId: 1n,
+        tokenMint: t.tokenMint,
+      }),
+      MULTI_DELEGATOR_ERROR__PLAN_SUNSET,
+    );
+  });
+
+  test('grace period honored then blocked after expiry', async () => {
+    const t = await initTestSuite();
+
+    const { planPda } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 1n,
+      mint: t.tokenMint,
+      amount: 500_000n,
+      periodHours: 1n,
+      endTs: 0n,
+      destinations: [],
+      pullers: [],
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    const subscriber = await t.createFundedKeypair();
+    const subscriberAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      subscriber.address,
+      DEFAULT_TEST_BALANCE,
+    );
+    await t.client.initMultiDelegate({
+      owner: subscriber,
+      tokenMint: t.tokenMint,
+      userAta: subscriberAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const { subscriptionPda } = await t.client.subscribe({
+      subscriber,
+      merchant: t.payerKeypair.address,
+      planId: 1n,
+      tokenMint: t.tokenMint,
+    });
+
+    const merchantAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      t.payerKeypair.address,
+      0n,
+    );
+
+    await t.client.transferSubscription({
+      caller: t.payerKeypair,
+      delegator: subscriber.address,
+      tokenMint: t.tokenMint,
+      subscriptionPda,
+      planPda,
+      amount: 200_000n,
+      receiverAta: merchantAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    await t.client.cancelSubscription({
+      subscriber,
+      planPda,
+      subscriptionPda,
+    });
+
+    const { signature: graceSig } = await t.client.transferSubscription({
+      caller: t.payerKeypair,
+      delegator: subscriber.address,
+      tokenMint: t.tokenMint,
+      subscriptionPda,
+      planPda,
+      amount: 100_000n,
+      receiverAta: merchantAta,
+      tokenProgram: t.tokenProgram,
+    });
+    expect(graceSig).toBeDefined();
+
+    const subData = (await fetchSubscriptionDelegation(t.rpc, subscriptionPda))
+      .data;
+    await t.timeTravel(Number(subData.expiresAtTs) + 60);
+
+    await expectProgramError(
+      t.client.transferSubscription({
+        caller: t.payerKeypair,
+        delegator: subscriber.address,
+        tokenMint: t.tokenMint,
+        subscriptionPda,
+        planPda,
+        amount: 50_000n,
+        receiverAta: merchantAta,
+        tokenProgram: t.tokenProgram,
+      }),
+      MULTI_DELEGATOR_ERROR__SUBSCRIPTION_CANCELLED,
+    );
+  });
+
+  test('double cancel is blocked', async () => {
+    const t = await initTestSuite();
+
+    const { planPda } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 1n,
+      mint: t.tokenMint,
+      amount: 500_000n,
+      periodHours: 1n,
+      endTs: 0n,
+      destinations: [],
+      pullers: [],
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    const subscriber = await t.createFundedKeypair();
+    const subscriberAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      subscriber.address,
+      DEFAULT_TEST_BALANCE,
+    );
+    await t.client.initMultiDelegate({
+      owner: subscriber,
+      tokenMint: t.tokenMint,
+      userAta: subscriberAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const { subscriptionPda } = await t.client.subscribe({
+      subscriber,
+      merchant: t.payerKeypair.address,
+      planId: 1n,
+      tokenMint: t.tokenMint,
+    });
+
+    await t.client.cancelSubscription({
+      subscriber,
+      planPda,
+      subscriptionPda,
+    });
+
+    await expectProgramError(
+      t.client.cancelSubscription({
+        subscriber,
+        planPda,
+        subscriptionPda,
+      }),
+      MULTI_DELEGATOR_ERROR__SUBSCRIPTION_ALREADY_CANCELLED,
+    );
+  });
+
+  test('plan delete before expiry is blocked', async () => {
+    const t = await initTestSuite();
+    const periodHours = 1n;
+    const endTs = await t.minPlanEndTs(periodHours);
+
+    const { planPda } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 1n,
+      mint: t.tokenMint,
+      amount: 500_000n,
+      periodHours,
+      endTs,
+      destinations: [],
+      pullers: [],
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    await expectProgramError(
+      t.client.deletePlan({
+        owner: t.payerKeypair,
+        planPda,
+      }),
+      MULTI_DELEGATOR_ERROR__PLAN_NOT_EXPIRED,
+    );
+
+    await t.timeTravel(Number(endTs) + 60);
+
+    const { signature } = await t.client.deletePlan({
+      owner: t.payerKeypair,
+      planPda,
+    });
+    expect(signature).toBeDefined();
+
+    const planAfter = await fetchMaybePlan(t.rpc, planPda);
+    expect(planAfter.exists).toBe(false);
+  });
+
+  test('plan update after sunset is blocked', async () => {
+    const t = await initTestSuite();
+    const periodHours = 1n;
+    const endTs = await t.minPlanEndTs(periodHours);
+
+    const { planPda } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 1n,
+      mint: t.tokenMint,
+      amount: 500_000n,
+      periodHours,
+      endTs: 0n,
+      destinations: [],
+      pullers: [],
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    await t.client.updatePlan({
+      owner: t.payerKeypair,
+      planPda,
+      status: PlanStatus.Sunset,
+      endTs,
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    await expectProgramError(
+      t.client.updatePlan({
+        owner: t.payerKeypair,
+        planPda,
+        status: PlanStatus.Active,
+        endTs: 0n,
+        metadataUri: 'https://example.com/updated.json',
+      }),
+      MULTI_DELEGATOR_ERROR__PLAN_IMMUTABLE_AFTER_SUNSET,
+    );
+  });
+
+  test('subscribe, cancel, revoke, then re-subscribe', async () => {
+    const t = await initTestSuite();
+
+    const { planPda } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 1n,
+      mint: t.tokenMint,
+      amount: 500_000n,
+      periodHours: 1n,
+      endTs: 0n,
+      destinations: [],
+      pullers: [],
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    const subscriber = await t.createFundedKeypair();
+    const subscriberAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      subscriber.address,
+      DEFAULT_TEST_BALANCE,
+    );
+    await t.client.initMultiDelegate({
+      owner: subscriber,
+      tokenMint: t.tokenMint,
+      userAta: subscriberAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const { subscriptionPda } = await t.client.subscribe({
+      subscriber,
+      merchant: t.payerKeypair.address,
+      planId: 1n,
+      tokenMint: t.tokenMint,
+    });
+
+    await t.client.cancelSubscription({
+      subscriber,
+      planPda,
+      subscriptionPda,
+    });
+
+    const subData = (await fetchSubscriptionDelegation(t.rpc, subscriptionPda))
+      .data;
+    await t.timeTravel(Number(subData.expiresAtTs) + 60);
+
+    await t.client.revokeDelegation({
+      authority: subscriber,
+      delegationAccount: subscriptionPda,
+    });
+
+    const subAfterRevoke = await fetchMaybeSubscriptionDelegation(
+      t.rpc,
+      subscriptionPda,
+    );
+    expect(subAfterRevoke.exists).toBe(false);
+
+    const { subscriptionPda: newSubPda } = await t.client.subscribe({
+      subscriber,
+      merchant: t.payerKeypair.address,
+      planId: 1n,
+      tokenMint: t.tokenMint,
+    });
+
+    const newSub = (await fetchSubscriptionDelegation(t.rpc, newSubPda)).data;
+    expect(newSub.amountPulledInPeriod).toBe(0n);
+    expect(newSub.expiresAtTs).toBe(0n);
+    expect(newSub.header.delegator).toBe(subscriber.address);
+  });
+
+  test('re-init + stale subscription transfer is blocked', async () => {
+    const t = await initTestSuite();
+
+    const { planPda } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 1n,
+      mint: t.tokenMint,
+      amount: 500_000n,
+      periodHours: 1n,
+      endTs: 0n,
+      destinations: [],
+      pullers: [],
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    const subscriber = await t.createFundedKeypair();
+    const subscriberAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      subscriber.address,
+      DEFAULT_TEST_BALANCE,
+    );
+    await t.client.initMultiDelegate({
+      owner: subscriber,
+      tokenMint: t.tokenMint,
+      userAta: subscriberAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const { subscriptionPda } = await t.client.subscribe({
+      subscriber,
+      merchant: t.payerKeypair.address,
+      planId: 1n,
+      tokenMint: t.tokenMint,
+    });
+
+    const merchantAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      t.payerKeypair.address,
+      0n,
+    );
+
+    await t.client.closeMultiDelegate({
+      user: subscriber,
+      tokenMint: t.tokenMint,
+    });
+
+    await t.client.initMultiDelegate({
+      owner: subscriber,
+      tokenMint: t.tokenMint,
+      userAta: subscriberAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    await expectProgramError(
+      t.client.transferSubscription({
+        caller: t.payerKeypair,
+        delegator: subscriber.address,
+        tokenMint: t.tokenMint,
+        subscriptionPda,
+        planPda,
+        amount: 100_000n,
+        receiverAta: merchantAta,
+        tokenProgram: t.tokenProgram,
+      }),
+      MULTI_DELEGATOR_ERROR__STALE_MULTI_DELEGATE,
+    );
+  });
+
+  test('cancel and revoke when plan is already deleted', async () => {
+    const t = await initTestSuite();
+    const periodHours = 1n;
+    const endTs = await t.minPlanEndTs(periodHours);
+
+    const { planPda } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 1n,
+      mint: t.tokenMint,
+      amount: 500_000n,
+      periodHours,
+      endTs,
+      destinations: [],
+      pullers: [],
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    const subscriber = await t.createFundedKeypair();
+    const subscriberAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      subscriber.address,
+      DEFAULT_TEST_BALANCE,
+    );
+    await t.client.initMultiDelegate({
+      owner: subscriber,
+      tokenMint: t.tokenMint,
+      userAta: subscriberAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const { subscriptionPda } = await t.client.subscribe({
+      subscriber,
+      merchant: t.payerKeypair.address,
+      planId: 1n,
+      tokenMint: t.tokenMint,
+    });
+
+    await t.client.updatePlan({
+      owner: t.payerKeypair,
+      planPda,
+      status: PlanStatus.Sunset,
+      endTs,
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    await t.timeTravel(Number(endTs) + 60);
+
+    await t.client.deletePlan({
+      owner: t.payerKeypair,
+      planPda,
+    });
+
+    await t.client.cancelSubscription({
+      subscriber,
+      planPda,
+      subscriptionPda,
+    });
+
+    const subAfterCancel = (
+      await fetchSubscriptionDelegation(t.rpc, subscriptionPda)
+    ).data;
+    expect(subAfterCancel.expiresAtTs).not.toBe(0n);
+
+    const { signature } = await t.client.revokeDelegation({
+      authority: subscriber,
+      delegationAccount: subscriptionPda,
+    });
+    expect(signature).toBeDefined();
+
+    const subAfterRevoke = await fetchMaybeSubscriptionDelegation(
+      t.rpc,
+      subscriptionPda,
+    );
+    expect(subAfterRevoke.exists).toBe(false);
+  });
+
+  test('re-subscribe before revoke is blocked', async () => {
+    const t = await initTestSuite();
+
+    const { planPda } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 1n,
+      mint: t.tokenMint,
+      amount: 500_000n,
+      periodHours: 1n,
+      endTs: 0n,
+      destinations: [],
+      pullers: [],
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    const subscriber = await t.createFundedKeypair();
+    const subscriberAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      subscriber.address,
+      DEFAULT_TEST_BALANCE,
+    );
+    await t.client.initMultiDelegate({
+      owner: subscriber,
+      tokenMint: t.tokenMint,
+      userAta: subscriberAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const { subscriptionPda } = await t.client.subscribe({
+      subscriber,
+      merchant: t.payerKeypair.address,
+      planId: 1n,
+      tokenMint: t.tokenMint,
+    });
+
+    await t.client.cancelSubscription({
+      subscriber,
+      planPda,
+      subscriptionPda,
+    });
+
+    await expectProgramError(
+      t.client.subscribe({
+        subscriber,
+        merchant: t.payerKeypair.address,
+        planId: 1n,
+        tokenMint: t.tokenMint,
+      }),
+      MULTI_DELEGATOR_ERROR__ALREADY_SUBSCRIBED,
+    );
+  });
+
+  test('error precedence: PLAN_CLOSED when plan deleted and subscription cancelled', async () => {
+    const t = await initTestSuite();
+    const periodHours = 1n;
+    const endTs = await t.minPlanEndTs(periodHours);
+
+    const { planPda } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 1n,
+      mint: t.tokenMint,
+      amount: 500_000n,
+      periodHours,
+      endTs,
+      destinations: [],
+      pullers: [],
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    const subscriber = await t.createFundedKeypair();
+    const subscriberAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      subscriber.address,
+      DEFAULT_TEST_BALANCE,
+    );
+    await t.client.initMultiDelegate({
+      owner: subscriber,
+      tokenMint: t.tokenMint,
+      userAta: subscriberAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const { subscriptionPda } = await t.client.subscribe({
+      subscriber,
+      merchant: t.payerKeypair.address,
+      planId: 1n,
+      tokenMint: t.tokenMint,
+    });
+
+    await t.client.cancelSubscription({
+      subscriber,
+      planPda,
+      subscriptionPda,
+    });
+
+    await t.client.updatePlan({
+      owner: t.payerKeypair,
+      planPda,
+      status: PlanStatus.Sunset,
+      endTs,
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    await t.timeTravel(Number(endTs) + 60);
+
+    await t.client.deletePlan({
+      owner: t.payerKeypair,
+      planPda,
+    });
+
+    const merchantAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      t.payerKeypair.address,
+      0n,
+    );
+
+    await expectProgramError(
+      t.client.transferSubscription({
+        caller: t.payerKeypair,
+        delegator: subscriber.address,
+        tokenMint: t.tokenMint,
+        subscriptionPda,
+        planPda,
+        amount: 50_000n,
+        receiverAta: merchantAta,
+        tokenProgram: t.tokenProgram,
+      }),
+      MULTI_DELEGATOR_ERROR__PLAN_CLOSED,
+    );
+  });
+
+  test('dynamic puller removal blocks old puller', async () => {
+    const t = await initTestSuite();
+    const pullerA = await t.createFundedKeypair();
+    const pullerB = await t.createFundedKeypair();
+
+    const { planPda } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 1n,
+      mint: t.tokenMint,
+      amount: 500_000n,
+      periodHours: 1n,
+      endTs: 0n,
+      destinations: [],
+      pullers: [pullerA.address],
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    const subscriber = await t.createFundedKeypair();
+    const subscriberAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      subscriber.address,
+      DEFAULT_TEST_BALANCE,
+    );
+    await t.client.initMultiDelegate({
+      owner: subscriber,
+      tokenMint: t.tokenMint,
+      userAta: subscriberAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const { subscriptionPda } = await t.client.subscribe({
+      subscriber,
+      merchant: t.payerKeypair.address,
+      planId: 1n,
+      tokenMint: t.tokenMint,
+    });
+
+    const pullerAAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      pullerA.address,
+      0n,
+    );
+
+    const { signature: firstPull } = await t.client.transferSubscription({
+      caller: pullerA,
+      delegator: subscriber.address,
+      tokenMint: t.tokenMint,
+      subscriptionPda,
+      planPda,
+      amount: 50_000n,
+      receiverAta: pullerAAta,
+      tokenProgram: t.tokenProgram,
+    });
+    expect(firstPull).toBeDefined();
+
+    await t.client.updatePlan({
+      owner: t.payerKeypair,
+      planPda,
+      status: PlanStatus.Active,
+      endTs: 0n,
+      metadataUri: 'https://example.com/plan.json',
+      pullers: [pullerB.address],
+    });
+
+    await expectProgramError(
+      t.client.transferSubscription({
+        caller: pullerA,
+        delegator: subscriber.address,
+        tokenMint: t.tokenMint,
+        subscriptionPda,
+        planPda,
+        amount: 50_000n,
+        receiverAta: pullerAAta,
+        tokenProgram: t.tokenProgram,
+      }),
+      MULTI_DELEGATOR_ERROR__UNAUTHORIZED,
+    );
+
+    const pullerBAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      pullerB.address,
+      0n,
+    );
+    const { signature: newPull } = await t.client.transferSubscription({
+      caller: pullerB,
+      delegator: subscriber.address,
+      tokenMint: t.tokenMint,
+      subscriptionPda,
+      planPda,
+      amount: 50_000n,
+      receiverAta: pullerBAta,
+      tokenProgram: t.tokenProgram,
+    });
+    expect(newPull).toBeDefined();
+  });
+
+  test('cancel with wrong plan account fails', async () => {
+    const t = await initTestSuite();
+
+    const { planPda: planA } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 1n,
+      mint: t.tokenMint,
+      amount: 500_000n,
+      periodHours: 1n,
+      endTs: 0n,
+      destinations: [],
+      pullers: [],
+      metadataUri: 'https://example.com/planA.json',
+    });
+
+    await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 2n,
+      mint: t.tokenMint,
+      amount: 100_000n,
+      periodHours: 24n,
+      endTs: 0n,
+      destinations: [],
+      pullers: [],
+      metadataUri: 'https://example.com/planB.json',
+    });
+
+    const [planBPda] = await getPlanPDA(t.payerKeypair.address, 2n);
+
+    const subscriber = await t.createFundedKeypair();
+    const subscriberAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      subscriber.address,
+      DEFAULT_TEST_BALANCE,
+    );
+    await t.client.initMultiDelegate({
+      owner: subscriber,
+      tokenMint: t.tokenMint,
+      userAta: subscriberAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const { subscriptionPda } = await t.client.subscribe({
+      subscriber,
+      merchant: t.payerKeypair.address,
+      planId: 1n,
+      tokenMint: t.tokenMint,
+    });
+
+    await expectProgramError(
+      t.client.cancelSubscription({
+        subscriber,
+        planPda: planBPda,
+        subscriptionPda,
+      }),
+      MULTI_DELEGATOR_ERROR__SUBSCRIPTION_PLAN_MISMATCH,
+    );
+
+    const { signature } = await t.client.cancelSubscription({
+      subscriber,
+      planPda: planA,
+      subscriptionPda,
+    });
+    expect(signature).toBeDefined();
+  });
+
+  test('plan end_ts expiry blocks subscription transfer', async () => {
+    const t = await initTestSuite();
+    const periodHours = 1n;
+    const endTs = await t.minPlanEndTs(periodHours);
+
+    const { planPda } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 1n,
+      mint: t.tokenMint,
+      amount: 500_000n,
+      periodHours,
+      endTs,
+      destinations: [],
+      pullers: [],
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    const subscriber = await t.createFundedKeypair();
+    const subscriberAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      subscriber.address,
+      DEFAULT_TEST_BALANCE,
+    );
+    await t.client.initMultiDelegate({
+      owner: subscriber,
+      tokenMint: t.tokenMint,
+      userAta: subscriberAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const { subscriptionPda } = await t.client.subscribe({
+      subscriber,
+      merchant: t.payerKeypair.address,
+      planId: 1n,
+      tokenMint: t.tokenMint,
+    });
+
+    const merchantAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      t.payerKeypair.address,
+      0n,
+    );
+
+    const { signature } = await t.client.transferSubscription({
+      caller: t.payerKeypair,
+      delegator: subscriber.address,
+      tokenMint: t.tokenMint,
+      subscriptionPda,
+      planPda,
+      amount: 100_000n,
+      receiverAta: merchantAta,
+      tokenProgram: t.tokenProgram,
+    });
+    expect(signature).toBeDefined();
+
+    await t.timeTravel(Number(endTs) + 60);
+
+    await expectProgramError(
+      t.client.transferSubscription({
+        caller: t.payerKeypair,
+        delegator: subscriber.address,
+        tokenMint: t.tokenMint,
+        subscriptionPda,
+        planPda,
+        amount: 50_000n,
+        receiverAta: merchantAta,
+        tokenProgram: t.tokenProgram,
+      }),
+      MULTI_DELEGATOR_ERROR__PLAN_EXPIRED,
+    );
+  });
+
+  test('cancel on expired plan caps expires_at_ts, enabling immediate revoke', async () => {
+    const t = await initTestSuite();
+    const periodHours = 1n;
+    const endTs = await t.minPlanEndTs(periodHours);
+
+    const { planPda } = await t.client.createPlan({
+      owner: t.payerKeypair,
+      planId: 1n,
+      mint: t.tokenMint,
+      amount: 500_000n,
+      periodHours,
+      endTs,
+      destinations: [],
+      pullers: [],
+      metadataUri: 'https://example.com/plan.json',
+    });
+
+    const subscriber = await t.createFundedKeypair();
+    const subscriberAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      subscriber.address,
+      DEFAULT_TEST_BALANCE,
+    );
+    await t.client.initMultiDelegate({
+      owner: subscriber,
+      tokenMint: t.tokenMint,
+      userAta: subscriberAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const { subscriptionPda } = await t.client.subscribe({
+      subscriber,
+      merchant: t.payerKeypair.address,
+      planId: 1n,
+      tokenMint: t.tokenMint,
+    });
+
+    await t.timeTravel(Number(endTs) + 120);
+
+    await t.client.cancelSubscription({
+      subscriber,
+      planPda,
+      subscriptionPda,
+    });
+
+    const subData = (await fetchSubscriptionDelegation(t.rpc, subscriptionPda))
+      .data;
+    expect(subData.expiresAtTs).toBeLessThanOrEqual(endTs);
+
+    const { signature } = await t.client.revokeDelegation({
+      authority: subscriber,
+      delegationAccount: subscriptionPda,
+    });
+    expect(signature).toBeDefined();
+
+    const subAfterRevoke = await fetchMaybeSubscriptionDelegation(
+      t.rpc,
+      subscriptionPda,
+    );
+    expect(subAfterRevoke.exists).toBe(false);
+  });
+});
