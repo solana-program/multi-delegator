@@ -1,4 +1,9 @@
-import type { Address, Instruction, TransactionSigner } from 'gill';
+import {
+  AccountRole,
+  type Address,
+  type Instruction,
+  type TransactionSigner,
+} from 'gill';
 import { ValidationError } from '../errors/types.js';
 import {
   getCloseMultiDelegateInstruction,
@@ -66,6 +71,7 @@ export async function buildCreateFixedDelegation(params: {
   nonce: number | bigint;
   amount: number | bigint;
   expiryTs: number | bigint;
+  payer?: TransactionSigner;
   programAddress?: Address;
 }): Promise<{ instructions: Instruction[]; delegationPda: Address }> {
   const {
@@ -75,6 +81,7 @@ export async function buildCreateFixedDelegation(params: {
     nonce,
     amount,
     expiryTs,
+    payer,
     programAddress,
   } = params;
   const config = programAddress ? { programAddress } : undefined;
@@ -106,6 +113,21 @@ export async function buildCreateFixedDelegation(params: {
     config,
   );
 
+  if (payer) {
+    const accounts = [
+      ...instruction.accounts,
+      {
+        address: payer.address,
+        role: AccountRole.WRITABLE_SIGNER,
+        signer: payer,
+      },
+    ];
+    return {
+      instructions: [{ ...instruction, accounts }],
+      delegationPda,
+    };
+  }
+
   return { instructions: [instruction], delegationPda };
 }
 
@@ -132,6 +154,7 @@ export async function buildCreateRecurringDelegation(params: {
   periodLengthS: number | bigint;
   startTs: number | bigint;
   expiryTs: number | bigint;
+  payer?: TransactionSigner;
   programAddress?: Address;
 }): Promise<{ instructions: Instruction[]; delegationPda: Address }> {
   const {
@@ -143,6 +166,7 @@ export async function buildCreateRecurringDelegation(params: {
     periodLengthS,
     startTs,
     expiryTs,
+    payer,
     programAddress,
   } = params;
   const config = programAddress ? { programAddress } : undefined;
@@ -182,19 +206,36 @@ export async function buildCreateRecurringDelegation(params: {
     config,
   );
 
+  if (payer) {
+    const accounts = [
+      ...instruction.accounts,
+      {
+        address: payer.address,
+        role: AccountRole.WRITABLE_SIGNER,
+        signer: payer,
+      },
+    ];
+    return {
+      instructions: [{ ...instruction, accounts }],
+      delegationPda,
+    };
+  }
+
   return { instructions: [instruction], delegationPda };
 }
 
 /**
  * Builds a `revokeDelegation` instruction that permanently closes a delegation account.
  *
- * @param params.authority - The delegator or delegatee authorized to revoke.
+ * @param params.authority - The delegator or sponsor authorized to revoke.
  * @param params.delegationAccount - Address of the delegation PDA to revoke.
+ * @param params.receiver - Rent destination when payer differs from authority (e.g., delegator revoking a sponsor-funded delegation).
  * @returns The instruction array.
  */
 export function buildRevokeDelegation(params: {
   authority: TransactionSigner;
   delegationAccount: Address;
+  receiver?: Address;
   programAddress?: Address;
 }): { instructions: Instruction[] } {
   const config = params.programAddress
@@ -207,6 +248,15 @@ export function buildRevokeDelegation(params: {
     },
     config,
   );
+
+  if (params.receiver) {
+    const accounts = [
+      ...instruction.accounts,
+      { address: params.receiver, role: AccountRole.WRITABLE },
+    ];
+    return { instructions: [{ ...instruction, accounts }] };
+  }
+
   return { instructions: [instruction] };
 }
 

@@ -6,7 +6,10 @@ use pinocchio::{
 
 use crate::{
     check_and_update_version,
-    state::{common::AccountDiscriminator, subscription_delegation::SubscriptionDelegation},
+    state::{
+        common::AccountDiscriminator, fixed_delegation::FixedDelegation,
+        recurring_delegation::RecurringDelegation, subscription_delegation::SubscriptionDelegation,
+    },
     AccountCheck, AccountClose, Header, MultiDelegatorError, ProgramAccount, SignerAccount,
     WritableAccount, DELEGATEE_OFFSET, DELEGATOR_OFFSET, DISCRIMINATOR_OFFSET, PAYER_OFFSET,
 };
@@ -49,57 +52,94 @@ pub const DISCRIMINATOR: &u8 = &3;
 /// Revokes a delegation by closing the delegation PDA.
 /// The rent lamports are returned to the original payer.
 ///
-/// For Fixed/Recurring delegations: closes immediately.
+/// For Fixed/Recurring delegations: the delegator can close at any time;
+/// a third-party sponsor (original payer) can close only after expiry.
 /// For Subscriptions: requires cancellation first (expires_at_ts != 0) and expiration in the past.
 pub fn process(accounts: &[AccountView]) -> ProgramResult {
     let accounts = RevokeDelegationAccounts::try_from(accounts)?;
 
-    let mut data = accounts.delegation_account.try_borrow_mut()?;
+    let destination = {
+        let mut data = accounts.delegation_account.try_borrow_mut()?;
 
-    if data.len() < Header::LEN {
-        return Err(MultiDelegatorError::InvalidHeaderData.into());
-    }
-
-    let kind = data[DISCRIMINATOR_OFFSET];
-
-    // For subscriptions, validate cancellation before closing
-    if kind == AccountDiscriminator::SubscriptionDelegation as u8 {
-        check_and_update_version(&mut data)?;
-        let subscription = SubscriptionDelegation::load_with_min_size(&data)?;
-
-        if subscription.header.delegator != *accounts.authority.address() {
-            return Err(MultiDelegatorError::Unauthorized.into());
+        if data.len() < Header::LEN {
+            return Err(MultiDelegatorError::InvalidHeaderData.into());
         }
 
-        // Subscription must be cancelled (expires_at_ts != 0) and expired
-        let current_ts = Clock::get()?.unix_timestamp;
-        if subscription.expires_at_ts == 0 || subscription.expires_at_ts > current_ts {
-            return Err(MultiDelegatorError::SubscriptionNotCancelled.into());
-        }
-    } else if kind != AccountDiscriminator::FixedDelegation as u8
-        && kind != AccountDiscriminator::RecurringDelegation as u8
-    {
-        return Err(MultiDelegatorError::InvalidAccountDiscriminator.into());
-    }
+        let kind = AccountDiscriminator::try_from(data[DISCRIMINATOR_OFFSET])?;
 
-    let destination = resolve_destination(&data, &accounts)?;
-    drop(data);
+        match kind {
+            AccountDiscriminator::SubscriptionDelegation => {
+                check_and_update_version(&mut data)?;
+                let subscription = SubscriptionDelegation::load_with_min_size(&data)?;
+
+                if subscription.header.delegator != *accounts.authority.address() {
+                    return Err(MultiDelegatorError::Unauthorized.into());
+                }
+
+                // Subscription must be cancelled (expires_at_ts != 0) and expired
+                let current_ts = Clock::get()?.unix_timestamp;
+                if subscription.expires_at_ts == 0 || subscription.expires_at_ts > current_ts {
+                    return Err(MultiDelegatorError::SubscriptionNotCancelled.into());
+                }
+            }
+            AccountDiscriminator::FixedDelegation | AccountDiscriminator::RecurringDelegation => {
+                let is_sponsor = check_is_sponsor(&data, accounts.authority)?;
+
+                // Sponsor can only revoke expired delegations
+                if is_sponsor {
+                    let expiry_ts = match kind {
+                        AccountDiscriminator::FixedDelegation => {
+                            FixedDelegation::load_with_min_size(&data)?.expiry_ts
+                        }
+                        _ => RecurringDelegation::load_with_min_size(&data)?.expiry_ts,
+                    };
+                    if expiry_ts == 0 {
+                        return Err(MultiDelegatorError::Unauthorized.into());
+                    }
+                    let current_ts = Clock::get()?.unix_timestamp;
+                    if expiry_ts > current_ts {
+                        return Err(MultiDelegatorError::Unauthorized.into());
+                    }
+                }
+            }
+            _ => return Err(MultiDelegatorError::InvalidAccountDiscriminator.into()),
+        }
+
+        resolve_destination(&data, &accounts)?
+    };
 
     ProgramAccount::close(accounts.delegation_account, destination)
 }
 
+/// Checks whether the caller is the sponsor (payer) rather than the delegator.
+/// Returns `Unauthorized` if the caller is neither.
+fn check_is_sponsor(data: &[u8], authority: &AccountView) -> Result<bool, ProgramError> {
+    let delegator_bytes: &[u8; 32] = data[DELEGATOR_OFFSET..DELEGATEE_OFFSET]
+        .try_into()
+        .map_err(|_| MultiDelegatorError::InvalidHeaderData)?;
+
+    if delegator_bytes == authority.address().as_ref() {
+        return Ok(false);
+    }
+
+    let payer_bytes: &[u8; 32] = data[PAYER_OFFSET..PAYER_OFFSET + 32]
+        .try_into()
+        .map_err(|_| MultiDelegatorError::InvalidPayerData)?;
+
+    if payer_bytes == authority.address().as_ref() {
+        return Ok(true);
+    }
+
+    Err(MultiDelegatorError::Unauthorized.into())
+}
+
 /// Resolves the rent destination from the payer field in the header.
+/// Rent always goes back to the original payer: if payer == authority, return
+/// authority directly; otherwise require a receiver account matching payer.
 fn resolve_destination<'a>(
     data: &[u8],
     accounts: &RevokeDelegationAccounts<'a>,
 ) -> Result<&'a AccountView, ProgramError> {
-    let delegator_bytes: &[u8; 32] = data[DELEGATOR_OFFSET..DELEGATEE_OFFSET]
-        .try_into()
-        .map_err(|_| MultiDelegatorError::InvalidHeaderData)?;
-    if delegator_bytes != accounts.authority.address().as_ref() {
-        return Err(MultiDelegatorError::Unauthorized.into());
-    }
-
     let payer_bytes: &[u8; 32] = data[PAYER_OFFSET..PAYER_OFFSET + 32]
         .try_into()
         .map_err(|_| MultiDelegatorError::InvalidPayerData)?;
@@ -666,6 +706,303 @@ mod tests {
         RevokeSubscription::new(&mut litesvm, &alice, subscription_pda)
             .execute()
             .assert_err(MultiDelegatorError::MigrationRequired);
+    }
+
+    #[test]
+    fn sponsor_can_revoke_expired_fixed_delegation() {
+        let (litesvm, user) = &mut setup();
+        let delegator = user;
+        let sponsor = init_wallet(litesvm, 10_000_000_000);
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(delegator.pubkey()),
+            &[],
+        );
+        let _user_ata = init_ata(litesvm, mint, delegator.pubkey(), 1_000_000);
+
+        initialize_multidelegate_action(litesvm, delegator, mint)
+            .0
+            .assert_ok();
+
+        let delegatee = Pubkey::new_unique();
+        let nonce: u64 = 0;
+        let expiry_ts = current_ts() + hours(1) as i64;
+
+        let (res, delegation_pda) = CreateDelegation::new(litesvm, delegator, mint, delegatee)
+            .payer(&sponsor)
+            .nonce(nonce)
+            .fixed(100, expiry_ts);
+        res.assert_ok();
+
+        let delegation_rent = litesvm.get_account(&delegation_pda).unwrap().lamports;
+
+        move_clock_forward(litesvm, hours(2));
+
+        let sponsor_balance_before = litesvm.get_account(&sponsor.pubkey()).unwrap().lamports;
+
+        RevokeDelegation::new(litesvm, delegator, mint, delegatee, nonce)
+            .signer(&sponsor)
+            .execute()
+            .assert_ok();
+
+        let account_after = litesvm.get_account(&delegation_pda);
+        assert!(
+            account_after.is_none() || account_after.as_ref().map(|a| a.lamports).unwrap_or(0) == 0
+        );
+
+        let sponsor_balance_after = litesvm.get_account(&sponsor.pubkey()).unwrap().lamports;
+        assert!(sponsor_balance_after >= sponsor_balance_before + delegation_rent - 10000);
+    }
+
+    #[test]
+    fn sponsor_can_revoke_expired_recurring_delegation() {
+        let (litesvm, user) = &mut setup();
+        let delegator = user;
+        let sponsor = init_wallet(litesvm, 10_000_000_000);
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(delegator.pubkey()),
+            &[],
+        );
+        let _user_ata = init_ata(litesvm, mint, delegator.pubkey(), 1_000_000);
+
+        initialize_multidelegate_action(litesvm, delegator, mint)
+            .0
+            .assert_ok();
+
+        let delegatee = Pubkey::new_unique();
+        let nonce: u64 = 0;
+        let expiry_ts = current_ts() + days(2) as i64;
+
+        let (res, delegation_pda) = CreateDelegation::new(litesvm, delegator, mint, delegatee)
+            .payer(&sponsor)
+            .nonce(nonce)
+            .recurring(100, days(1), current_ts(), expiry_ts);
+        res.assert_ok();
+
+        let delegation_rent = litesvm.get_account(&delegation_pda).unwrap().lamports;
+
+        move_clock_forward(litesvm, days(3));
+
+        let sponsor_balance_before = litesvm.get_account(&sponsor.pubkey()).unwrap().lamports;
+
+        RevokeDelegation::new(litesvm, delegator, mint, delegatee, nonce)
+            .signer(&sponsor)
+            .execute()
+            .assert_ok();
+
+        let account_after = litesvm.get_account(&delegation_pda);
+        assert!(
+            account_after.is_none() || account_after.as_ref().map(|a| a.lamports).unwrap_or(0) == 0
+        );
+
+        let sponsor_balance_after = litesvm.get_account(&sponsor.pubkey()).unwrap().lamports;
+        assert!(sponsor_balance_after >= sponsor_balance_before + delegation_rent - 10000);
+    }
+
+    #[test]
+    fn sponsor_cannot_revoke_non_expired_fixed_delegation() {
+        let (litesvm, user) = &mut setup();
+        let delegator = user;
+        let sponsor = init_wallet(litesvm, 10_000_000_000);
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(delegator.pubkey()),
+            &[],
+        );
+        let _user_ata = init_ata(litesvm, mint, delegator.pubkey(), 1_000_000);
+
+        initialize_multidelegate_action(litesvm, delegator, mint)
+            .0
+            .assert_ok();
+
+        let delegatee = Pubkey::new_unique();
+        let nonce: u64 = 0;
+        let expiry_ts = current_ts() + hours(2) as i64;
+
+        let (res, _) = CreateDelegation::new(litesvm, delegator, mint, delegatee)
+            .payer(&sponsor)
+            .nonce(nonce)
+            .fixed(100, expiry_ts);
+        res.assert_ok();
+
+        RevokeDelegation::new(litesvm, delegator, mint, delegatee, nonce)
+            .signer(&sponsor)
+            .execute()
+            .assert_err(MultiDelegatorError::Unauthorized);
+    }
+
+    #[test]
+    fn sponsor_cannot_revoke_non_expired_recurring_delegation() {
+        let (litesvm, user) = &mut setup();
+        let delegator = user;
+        let sponsor = init_wallet(litesvm, 10_000_000_000);
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(delegator.pubkey()),
+            &[],
+        );
+        let _user_ata = init_ata(litesvm, mint, delegator.pubkey(), 1_000_000);
+
+        initialize_multidelegate_action(litesvm, delegator, mint)
+            .0
+            .assert_ok();
+
+        let delegatee = Pubkey::new_unique();
+        let nonce: u64 = 0;
+        let expiry_ts = current_ts() + days(2) as i64;
+
+        let (res, _) = CreateDelegation::new(litesvm, delegator, mint, delegatee)
+            .payer(&sponsor)
+            .nonce(nonce)
+            .recurring(100, days(1), current_ts(), expiry_ts);
+        res.assert_ok();
+
+        RevokeDelegation::new(litesvm, delegator, mint, delegatee, nonce)
+            .signer(&sponsor)
+            .execute()
+            .assert_err(MultiDelegatorError::Unauthorized);
+    }
+
+    #[test]
+    fn sponsor_cannot_revoke_no_expiry_delegation() {
+        let (litesvm, user) = &mut setup();
+        let delegator = user;
+        let sponsor = init_wallet(litesvm, 10_000_000_000);
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(delegator.pubkey()),
+            &[],
+        );
+        let _user_ata = init_ata(litesvm, mint, delegator.pubkey(), 1_000_000);
+
+        initialize_multidelegate_action(litesvm, delegator, mint)
+            .0
+            .assert_ok();
+
+        let delegatee = Pubkey::new_unique();
+        let nonce: u64 = 0;
+
+        let (res, _) = CreateDelegation::new(litesvm, delegator, mint, delegatee)
+            .payer(&sponsor)
+            .nonce(nonce)
+            .fixed(100, 0);
+        res.assert_ok();
+
+        move_clock_forward(litesvm, days(365));
+
+        RevokeDelegation::new(litesvm, delegator, mint, delegatee, nonce)
+            .signer(&sponsor)
+            .execute()
+            .assert_err(MultiDelegatorError::Unauthorized);
+    }
+
+    #[test]
+    fn delegator_can_revoke_sponsor_funded_before_expiry() {
+        let (litesvm, user) = &mut setup();
+        let delegator = user;
+        let sponsor = init_wallet(litesvm, 10_000_000_000);
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(delegator.pubkey()),
+            &[],
+        );
+        let _user_ata = init_ata(litesvm, mint, delegator.pubkey(), 1_000_000);
+
+        initialize_multidelegate_action(litesvm, delegator, mint)
+            .0
+            .assert_ok();
+
+        let delegatee = Pubkey::new_unique();
+        let nonce: u64 = 0;
+        let expiry_ts = current_ts() + hours(2) as i64;
+
+        let (res, delegation_pda) = CreateDelegation::new(litesvm, delegator, mint, delegatee)
+            .payer(&sponsor)
+            .nonce(nonce)
+            .fixed(100, expiry_ts);
+        res.assert_ok();
+
+        let delegation_rent = litesvm.get_account(&delegation_pda).unwrap().lamports;
+        let sponsor_balance_before = litesvm.get_account(&sponsor.pubkey()).unwrap().lamports;
+
+        RevokeDelegation::new(litesvm, delegator, mint, delegatee, nonce)
+            .receiver(sponsor.pubkey())
+            .execute()
+            .assert_ok();
+
+        let account_after = litesvm.get_account(&delegation_pda);
+        assert!(
+            account_after.is_none() || account_after.as_ref().map(|a| a.lamports).unwrap_or(0) == 0
+        );
+
+        let sponsor_balance_after = litesvm.get_account(&sponsor.pubkey()).unwrap().lamports;
+        assert!(sponsor_balance_after >= sponsor_balance_before + delegation_rent - 10000);
+    }
+
+    #[test]
+    fn attacker_cannot_revoke_sponsor_funded_delegation() {
+        let (litesvm, user) = &mut setup();
+        let delegator = user;
+        let sponsor = init_wallet(litesvm, 10_000_000_000);
+        let attacker = init_wallet(litesvm, 10_000_000_000);
+
+        let mint = init_mint(
+            litesvm,
+            TOKEN_PROGRAM_ID,
+            MINT_DECIMALS,
+            1_000_000_000,
+            Some(delegator.pubkey()),
+            &[],
+        );
+        let _user_ata = init_ata(litesvm, mint, delegator.pubkey(), 1_000_000);
+
+        initialize_multidelegate_action(litesvm, delegator, mint)
+            .0
+            .assert_ok();
+
+        let delegatee = Pubkey::new_unique();
+        let nonce: u64 = 0;
+        let expiry_ts = current_ts() + hours(1) as i64;
+
+        let (res, _) = CreateDelegation::new(litesvm, delegator, mint, delegatee)
+            .payer(&sponsor)
+            .nonce(nonce)
+            .fixed(100, expiry_ts);
+        res.assert_ok();
+
+        move_clock_forward(litesvm, hours(2));
+
+        // Attacker passes sponsor as receiver to try to close the account
+        RevokeDelegation::new(litesvm, delegator, mint, delegatee, nonce)
+            .signer(&attacker)
+            .receiver(sponsor.pubkey())
+            .execute()
+            .assert_err(MultiDelegatorError::Unauthorized);
     }
 
     #[allow(clippy::result_large_err)]
