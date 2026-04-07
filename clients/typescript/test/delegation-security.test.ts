@@ -8,7 +8,12 @@ import {
   MULTI_DELEGATOR_ERROR__STALE_MULTI_DELEGATE,
   MULTI_DELEGATOR_ERROR__UNAUTHORIZED,
 } from '../src/generated/errors/multiDelegator.ts';
-import { buildCloseMultiDelegate } from '../src/instructions/delegation.ts';
+import {
+  buildCloseMultiDelegate,
+  buildCreateFixedDelegation,
+  buildCreateRecurringDelegation,
+  buildRevokeDelegation,
+} from '../src/instructions/delegation.ts';
 import { getDelegationPDA, getMultiDelegatePDA } from '../src/pdas.ts';
 import { addressAsSigner } from '../src/wallet.ts';
 import {
@@ -992,5 +997,281 @@ describe('Delegation Security', () => {
       expiryTs: currentTs + BigInt(ONE_HOUR_IN_SECONDS),
     });
     expect(signature).toBeDefined();
+  });
+});
+
+describe('Sponsor Revoke', () => {
+  test('sponsor can revoke expired fixed delegation', async () => {
+    const t = await initTestSuite();
+    const sponsor = await t.createFundedKeypair(5_000_000_000n);
+    const sponsorWallet = await t.createFundedWallet(5_000_000_000n);
+
+    const userAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      t.payerKeypair.address,
+      DEFAULT_TEST_BALANCE,
+    );
+
+    await t.client.initMultiDelegate({
+      owner: t.payerKeypair,
+      tokenMint: t.tokenMint,
+      userAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const delegatee = await t.createFundedKeypair();
+    const currentTs = await t.getValidatorTime();
+    const expiryTs = currentTs + BigInt(ONE_HOUR_IN_SECONDS);
+
+    const { instructions: createIxs, delegationPda } =
+      await buildCreateFixedDelegation({
+        delegator: t.payerKeypair,
+        tokenMint: t.tokenMint,
+        delegatee: delegatee.address,
+        nonce: 0n,
+        amount: 500_000n,
+        expiryTs,
+        payer: sponsor,
+      });
+    await t.payer.sendInstructions(createIxs);
+
+    await t.timeTravel(Number(expiryTs) + 200);
+
+    const { instructions: revokeIxs } = buildRevokeDelegation({
+      authority: sponsor,
+      delegationAccount: delegationPda,
+    });
+    await sponsorWallet.sendInstructions(revokeIxs);
+
+    const { fetchMaybeFixedDelegation } = await import(
+      '../src/generated/index.ts'
+    );
+    const account = await fetchMaybeFixedDelegation(t.rpc, delegationPda);
+    expect(account.exists).toBe(false);
+  });
+
+  test('sponsor can revoke expired recurring delegation', async () => {
+    const t = await initTestSuite();
+    const sponsor = await t.createFundedKeypair(5_000_000_000n);
+    const sponsorWallet = await t.createFundedWallet(5_000_000_000n);
+
+    const userAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      t.payerKeypair.address,
+      DEFAULT_TEST_BALANCE,
+    );
+
+    await t.client.initMultiDelegate({
+      owner: t.payerKeypair,
+      tokenMint: t.tokenMint,
+      userAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const delegatee = await t.createFundedKeypair();
+    const currentTs = await t.getValidatorTime();
+    const expiryTs = currentTs + BigInt(2 * ONE_DAY_IN_SECONDS);
+
+    const { instructions: createIxs, delegationPda } =
+      await buildCreateRecurringDelegation({
+        delegator: t.payerKeypair,
+        tokenMint: t.tokenMint,
+        delegatee: delegatee.address,
+        nonce: 0n,
+        amountPerPeriod: 100_000n,
+        periodLengthS: BigInt(ONE_DAY_IN_SECONDS),
+        startTs: currentTs,
+        expiryTs,
+        payer: sponsor,
+      });
+    await t.payer.sendInstructions(createIxs);
+
+    await t.timeTravel(Number(expiryTs) + 200);
+
+    const { instructions: revokeIxs } = buildRevokeDelegation({
+      authority: sponsor,
+      delegationAccount: delegationPda,
+    });
+    await sponsorWallet.sendInstructions(revokeIxs);
+
+    const { fetchMaybeRecurringDelegation } = await import(
+      '../src/generated/index.ts'
+    );
+    const account = await fetchMaybeRecurringDelegation(t.rpc, delegationPda);
+    expect(account.exists).toBe(false);
+  });
+
+  test('sponsor cannot revoke non-expired delegation', async () => {
+    const t = await initTestSuite();
+    const sponsor = await t.createFundedKeypair(5_000_000_000n);
+
+    const userAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      t.payerKeypair.address,
+      DEFAULT_TEST_BALANCE,
+    );
+
+    await t.client.initMultiDelegate({
+      owner: t.payerKeypair,
+      tokenMint: t.tokenMint,
+      userAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const delegatee = await t.createFundedKeypair();
+    const currentTs = await t.getValidatorTime();
+    const expiryTs = currentTs + BigInt(2 * ONE_HOUR_IN_SECONDS);
+
+    const { instructions: createIxs, delegationPda } =
+      await buildCreateFixedDelegation({
+        delegator: t.payerKeypair,
+        tokenMint: t.tokenMint,
+        delegatee: delegatee.address,
+        nonce: 0n,
+        amount: 500_000n,
+        expiryTs,
+        payer: sponsor,
+      });
+    await t.payer.sendInstructions(createIxs);
+
+    await expectProgramError(
+      t.client.revokeDelegation({
+        authority: sponsor,
+        delegationAccount: delegationPda,
+      }),
+      MULTI_DELEGATOR_ERROR__UNAUTHORIZED,
+    );
+  });
+
+  test('sponsor cannot revoke delegation with no expiry', async () => {
+    const t = await initTestSuite();
+    const sponsor = await t.createFundedKeypair(5_000_000_000n);
+
+    const userAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      t.payerKeypair.address,
+      DEFAULT_TEST_BALANCE,
+    );
+
+    await t.client.initMultiDelegate({
+      owner: t.payerKeypair,
+      tokenMint: t.tokenMint,
+      userAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const delegatee = await t.createFundedKeypair();
+
+    const { instructions: createIxs, delegationPda } =
+      await buildCreateFixedDelegation({
+        delegator: t.payerKeypair,
+        tokenMint: t.tokenMint,
+        delegatee: delegatee.address,
+        nonce: 0n,
+        amount: 500_000n,
+        expiryTs: 0n,
+        payer: sponsor,
+      });
+    await t.payer.sendInstructions(createIxs);
+
+    await expectProgramError(
+      t.client.revokeDelegation({
+        authority: sponsor,
+        delegationAccount: delegationPda,
+      }),
+      MULTI_DELEGATOR_ERROR__UNAUTHORIZED,
+    );
+  });
+
+  test('delegator can revoke sponsor-funded delegation before expiry', async () => {
+    const t = await initTestSuite();
+    const sponsor = await t.createFundedKeypair(5_000_000_000n);
+
+    const userAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      t.payerKeypair.address,
+      DEFAULT_TEST_BALANCE,
+    );
+
+    await t.client.initMultiDelegate({
+      owner: t.payerKeypair,
+      tokenMint: t.tokenMint,
+      userAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const delegatee = await t.createFundedKeypair();
+    const currentTs = await t.getValidatorTime();
+    const expiryTs = currentTs + BigInt(2 * ONE_HOUR_IN_SECONDS);
+
+    const { instructions: createIxs, delegationPda } =
+      await buildCreateFixedDelegation({
+        delegator: t.payerKeypair,
+        tokenMint: t.tokenMint,
+        delegatee: delegatee.address,
+        nonce: 0n,
+        amount: 500_000n,
+        expiryTs,
+        payer: sponsor,
+      });
+    await t.payer.sendInstructions(createIxs);
+
+    const { instructions: revokeIxs } = buildRevokeDelegation({
+      authority: t.payerKeypair,
+      delegationAccount: delegationPda,
+      receiver: sponsor.address,
+    });
+    await t.payer.sendInstructions(revokeIxs);
+
+    const { fetchMaybeFixedDelegation } = await import(
+      '../src/generated/index.ts'
+    );
+    const account = await fetchMaybeFixedDelegation(t.rpc, delegationPda);
+    expect(account.exists).toBe(false);
+  });
+
+  test('random account cannot revoke delegation', async () => {
+    const t = await initTestSuite();
+    const sponsor = await t.createFundedKeypair(5_000_000_000n);
+    const attacker = await t.createFundedKeypair(5_000_000_000n);
+
+    const userAta = await t.createAtaWithBalance(
+      t.tokenMint,
+      t.payerKeypair.address,
+      DEFAULT_TEST_BALANCE,
+    );
+
+    await t.client.initMultiDelegate({
+      owner: t.payerKeypair,
+      tokenMint: t.tokenMint,
+      userAta,
+      tokenProgram: t.tokenProgram,
+    });
+
+    const delegatee = await t.createFundedKeypair();
+    const currentTs = await t.getValidatorTime();
+    const expiryTs = currentTs + BigInt(ONE_HOUR_IN_SECONDS);
+
+    const { instructions: createIxs, delegationPda } =
+      await buildCreateFixedDelegation({
+        delegator: t.payerKeypair,
+        tokenMint: t.tokenMint,
+        delegatee: delegatee.address,
+        nonce: 0n,
+        amount: 500_000n,
+        expiryTs,
+        payer: sponsor,
+      });
+    await t.payer.sendInstructions(createIxs);
+
+    await t.timeTravel(Number(expiryTs) + 200);
+
+    await expectProgramError(
+      t.client.revokeDelegation({
+        authority: attacker,
+        delegationAccount: delegationPda,
+      }),
+      MULTI_DELEGATOR_ERROR__UNAUTHORIZED,
+    );
   });
 });

@@ -145,10 +145,11 @@ export class MultiDelegatorClient {
     return { signature };
   }
 
-  /** Revoke (close) a delegation account, returning rent to the delegator. */
+  /** Revoke (close) a delegation account, returning rent to the original payer. */
   async revokeDelegation(params: {
     authority: TransactionSigner;
     delegationAccount: Address;
+    receiver?: Address;
   }): Promise<TransactionResult> {
     const { instructions } = buildRevokeDelegation(params);
     const signature = await this.buildAndSendTransaction(

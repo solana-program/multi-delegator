@@ -125,7 +125,7 @@ sequenceDiagram
     end
 ```
 
-### Revocation: Alice Closes Delegation
+### Revocation: Closing a Delegation
 
 ```mermaid
 sequenceDiagram
@@ -133,19 +133,16 @@ sequenceDiagram
     participant P as Program
     participant S as Sponsor (if payer != delegator)
 
-    Note over A,S: Only delegator can revoke,<br/>rent returns to original payer
-
-    A->>P: revoke_delegation(delegation_pda[, sponsor])
-    Note over P: Validate Alice is delegator
-
-    alt Alice is the payer
-        P->>P: Close delegation PDA
-        P->>A: Rent returned to Alice
-    else Sponsor paid for delegation
-        P->>P: Close delegation PDA
-        P->>S: Rent returned to sponsor
+    alt Delegator revokes (any time)
+        A->>P: revoke_delegation(delegation_pda[, sponsor_receiver])
+        P->>P: Close PDA, rent to original payer
+    else Sponsor revokes (only after expiry)
+        S->>P: revoke_delegation(delegation_pda)
+        P->>P: Close PDA, rent to sponsor
     end
 ```
+
+> **Note:** Sponsors of delegations with `expiry_ts == 0` (no expiry) cannot independently reclaim rent.
 
 ---
 
@@ -183,7 +180,7 @@ getProgramAccounts(PROGRAM_ID, {
 | ----------------------------- | --------- | ----------------------------------------------------------------------------------- |
 | `create_fixed_delegation`     | Delegator | Create one-time delegation with nonce, amount, and expiry (payer can be sponsor)     |
 | `create_recurring_delegation` | Delegator | Create recurring delegation with period limits (payer can be sponsor)              |
-| `revoke_delegation`           | Delegator | Close a delegation account and return rent to the original payer (delegator/sponsor) |
+| `revoke_delegation`           | Delegator / Sponsor | Close a delegation account and return rent to the original payer. Sponsor can only revoke after expiry. |
 
 ### Transfer
 
@@ -401,16 +398,14 @@ Revokes a delegation by closing the delegation PDA and returning rent to the ori
 
 | Account | Type     | Description                                                                 |
 | ------- | -------- | --------------------------------------------------------------------------- |
-| 0       | signer, writable | The delegator (authority)                                        |
+| 0       | signer, writable | The delegator or sponsor (authority)                             |
 | 1       | writable | Delegation PDA to close                                                    |
-| 2       | writable | Receiver account (required only if payer != delegator)                     |
+| 2       | writable | Receiver account (required only when delegator revokes a sponsor-funded delegation) |
 
 **Process:**
 
-1. Validate that the signer matches the `delegator` field in the delegation header
-2. Determine rent destination: if payer == delegator, use delegator account; otherwise, use provided receiver account
-3. Close the delegation account
-4. Transfer rent lamports back to the original payer (delegator or sponsor)
+1. Authorize caller: must be the `delegator` or the `payer` (sponsor). Sponsor requires `expiry_ts != 0 && expiry_ts < current_ts`.
+2. Close the delegation account and return rent to the original payer.
 
 ### `close_multidelegate` (Discriminator: 6)
 

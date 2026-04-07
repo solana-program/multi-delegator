@@ -507,6 +507,7 @@ impl<'a> TransferDelegation<'a> {
 pub struct RevokeDelegation<'a> {
     litesvm: &'a mut LiteSVM,
     delegator: &'a Keypair,
+    signer: Option<&'a Keypair>,
     mint: Pubkey,
     delegatee: Pubkey,
     nonce: u64,
@@ -525,12 +526,18 @@ impl<'a> RevokeDelegation<'a> {
         Self {
             litesvm,
             delegator,
+            signer: None,
             mint,
             delegatee,
             nonce,
             receiver: None,
             custom_pda: None,
         }
+    }
+
+    pub fn signer(mut self, signer: &'a Keypair) -> Self {
+        self.signer = Some(signer);
+        self
     }
 
     pub fn receiver(mut self, receiver: Pubkey) -> Self {
@@ -554,8 +561,10 @@ impl<'a> RevokeDelegation<'a> {
         );
         let delegation_pda = self.custom_pda.unwrap_or(derived_pda);
 
+        let authority = self.signer.unwrap_or(self.delegator);
+
         let mut accounts = vec![
-            AccountMeta::new(self.delegator.pubkey(), true),
+            AccountMeta::new(authority.pubkey(), true),
             AccountMeta::new(delegation_pda, false),
         ];
 
@@ -569,12 +578,7 @@ impl<'a> RevokeDelegation<'a> {
             data: vec![*revoke_delegation::DISCRIMINATOR],
         };
 
-        build_and_send_transaction(
-            self.litesvm,
-            &[self.delegator],
-            &self.delegator.pubkey(),
-            &ix,
-        )
+        build_and_send_transaction(self.litesvm, &[authority], &authority.pubkey(), &ix)
     }
 }
 
