@@ -2,8 +2,6 @@
 
 Solana program and clients for managed token delegations on SPL Token and Token-2022.
 
-> **SECURITY NOTICE**: This program has not been audited. Use at your own risk. Not recommended for production use with real funds without a thorough security review.
-
 ## Overview
 
 For each `(user, mint)` pair, the program creates a **Multi Delegate Authority (MDA)** PDA and sets it as the single delegate on the user's token account with `u64::MAX` approval. The MDA can only transfer tokens when a Delegation PDA authorizes it, making the system as secure as traditional approval-based delegations while enabling multiple simultaneous delegations from a single token account.
@@ -258,6 +256,12 @@ Stop local processes:
 just kill-validator
 just webapp-clean     # also removes generated state
 ```
+
+## Security Audit
+
+`multi-delegator` has been audited by [Cantina](https://cantina.xyz). View the [audit report](audits/report-cli-cantina-db2ffeea-c85c-4f35-b188-e861cdcd785d-solana-multi-delegator.pdf).
+
+Audit status, audited-through commit, and the current unaudited delta are tracked in [audits/AUDIT_STATUS.md](audits/AUDIT_STATUS.md).
 
 ## CI Pipeline
 
