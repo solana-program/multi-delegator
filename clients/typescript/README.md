@@ -97,7 +97,7 @@ Each `build*` helper returns `{ instructions: IInstruction[] }`. You provide sig
 
 ## API Reference
 
-Full API documentation is generated from source with [TypeDoc](https://typedoc.org/). Run `pnpm docs` to generate locally, or browse `./docs/`.
+Full API documentation is generated from source with [TypeDoc](https://typedoc.org/). Run `npx typedoc` to generate locally, or browse `./docs/`.
 
 ## Development
 
