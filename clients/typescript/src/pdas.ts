@@ -22,6 +22,14 @@ function encodeU64Le(value: number | bigint): Uint8Array {
   return bytes;
 }
 
+/**
+ * Derives the MultiDelegate PDA for a user and token mint.
+ *
+ * @param user - Wallet address of the delegate owner.
+ * @param tokenMint - SPL token mint address.
+ * @param programId - Program address override (defaults to {@link PROGRAM_ID}).
+ * @returns A tuple of `[pda, bump]`.
+ */
 export async function getMultiDelegatePDA(
   user: Address,
   tokenMint: Address,
@@ -40,6 +48,16 @@ export async function getMultiDelegatePDA(
   return [pda, bump];
 }
 
+/**
+ * Derives the delegation PDA for fixed or recurring delegations.
+ *
+ * @param multiDelegate - The MultiDelegate PDA address.
+ * @param delegator - Wallet address of the delegator.
+ * @param delegatee - Wallet address of the delegatee.
+ * @param nonce - Unique nonce allowing multiple delegations between the same pair.
+ * @param programId - Program address override (defaults to {@link PROGRAM_ID}).
+ * @returns A tuple of `[pda, bump]`.
+ */
 export async function getDelegationPDA(
   multiDelegate: Address,
   delegator: Address,
@@ -62,6 +80,14 @@ export async function getDelegationPDA(
   return [pda, bump];
 }
 
+/**
+ * Derives the Plan PDA for a merchant and plan identifier.
+ *
+ * @param owner - Wallet address of the plan owner (merchant).
+ * @param planId - Unique plan identifier.
+ * @param programId - Program address override (defaults to {@link PROGRAM_ID}).
+ * @returns A tuple of `[pda, bump]`.
+ */
 export async function getPlanPDA(
   owner: Address,
   planId: number | bigint,
@@ -80,6 +106,12 @@ export async function getPlanPDA(
   return [pda, bump];
 }
 
+/**
+ * Derives the event authority PDA used for self-CPI event emission.
+ *
+ * @param programId - Program address override (defaults to {@link PROGRAM_ID}).
+ * @returns A tuple of `[pda, bump]`.
+ */
 export async function getEventAuthorityPDA(
   programId?: Address,
 ): Promise<[Address, number]> {
@@ -92,6 +124,14 @@ export async function getEventAuthorityPDA(
   return [pda, bump];
 }
 
+/**
+ * Derives the SubscriptionDelegation PDA for a plan and subscriber.
+ *
+ * @param planPda - The Plan PDA address.
+ * @param subscriber - Wallet address of the subscriber.
+ * @param programId - Program address override (defaults to {@link PROGRAM_ID}).
+ * @returns A tuple of `[pda, bump]`.
+ */
 export async function getSubscriptionPDA(
   planPda: Address,
   subscriber: Address,

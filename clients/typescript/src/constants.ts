@@ -1,51 +1,54 @@
 import { MULTI_DELEGATOR_PROGRAM_ADDRESS } from './generated/index.js';
 
-// Program ID declared via `declare_id!` macro
-// See: programs/multi_delegator/src/lib.rs
+/** Deployed program address, sourced from Codama-generated bindings. */
 export const PROGRAM_ID = MULTI_DELEGATOR_PROGRAM_ADDRESS;
 
-// See: programs/multi_delegator/src/state/header.rs
+/** Current on-chain account schema version. */
 export const CURRENT_PROGRAM_VERSION = 1;
 
-// Default zero address used for padding arrays
+/** Default zero address used for padding arrays (e.g. empty puller/destination slots). */
 export const ZERO_ADDRESS =
   '11111111111111111111111111111111' as import('gill').Address<'11111111111111111111111111111111'>;
 
-// Header struct layout offsets
-// Layout: discriminator (1) + version (1) + bump (1) + delegator (32) + delegatee (32) + payer (32) + init_id (8) = 107 bytes
-// See: programs/multi_delegator/src/state/header.rs
+/** Byte offset of the account discriminator in the Header struct. */
 export const DISCRIMINATOR_OFFSET = 0;
+/** Byte offset of the delegator pubkey in the Header struct. */
 export const DELEGATOR_OFFSET = 3;
+/** Byte offset of the delegatee pubkey in the Header struct. */
 export const DELEGATEE_OFFSET = 35;
 
-// Byte size for u64 values (used in nonce encoding)
+/** Byte size of a u64 value (used in nonce encoding). */
 export const U64_BYTE_SIZE = 8;
 
-// PDA seed for MultiDelegate account
-// See: programs/multi_delegator/src/state/multi_delegate.rs (MultiDelegate::SEED)
+/** PDA seed for MultiDelegate accounts. */
 export const MULTI_DELEGATE_SEED = 'MultiDelegate';
 
-// PDA seed for delegation accounts (FixedDelegation, RecurringDelegation)
-// See: programs/multi_delegator/src/state/common.rs (DELEGATE_BASE_SEED)
+/** PDA seed for delegation accounts (FixedDelegation, RecurringDelegation). */
 export const DELEGATION_SEED = 'delegation';
 
+/** PDA seed for Plan accounts. */
 export const PLAN_SEED = 'plan';
+/** PDA seed for SubscriptionDelegation accounts. */
 export const SUBSCRIPTION_SEED = 'subscription';
+/** PDA seed for the event authority (self-CPI). */
 export const EVENT_AUTHORITY_SEED = 'event_authority';
 
-// Plan: discriminator(1) + owner(32) + bump(1) + status(1) + planData(456)
+/** On-chain Plan account size in bytes: discriminator(1) + owner(32) + bump(1) + status(1) + planData(456). */
 export const PLAN_SIZE = 491;
-// Subscription: header(107) + terms(24) + amountPulledInPeriod(8) + currentPeriodStartTs(8) + expiresAtTs(8)
+/** On-chain SubscriptionDelegation account size in bytes: header(107) + terms(24) + pulled(8) + periodStart(8) + expiresAt(8). */
 export const SUBSCRIPTION_SIZE = 155;
 
+/** Byte offset of the owner pubkey in a Plan account. */
 export const PLAN_OWNER_OFFSET = 1;
 
+/** Maximum number of destination addresses in a Plan. */
 export const MAX_PLAN_DESTINATIONS = 4;
+/** Maximum number of puller addresses in a Plan. */
 export const MAX_PLAN_PULLERS = 4;
+/** Maximum byte length of a Plan's metadata URI. */
 export const METADATA_URI_LEN = 128;
 
-// Delegation kinds with metadata for UI display
-// Maps to AccountDiscriminator enum in programs/multi_delegator/src/state/common.rs
+/** Delegation kind metadata for UI display. Maps to the on-chain AccountDiscriminator enum. */
 export const DELEGATION_KINDS = {
   fixed: {
     id: 'fixed',

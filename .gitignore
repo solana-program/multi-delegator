@@ -35,6 +35,9 @@ apps/web/test-results/
 # TypeScript incremental build cache
 apps/web/tsconfig.tsbuildinfo
 
+# TypeDoc generated API docs
+clients/typescript/docs/
+
 # Vercel project config
 .vercel
 

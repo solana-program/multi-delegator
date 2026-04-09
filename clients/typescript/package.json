@@ -19,7 +19,8 @@
     "format": "biome check --write",
     "format:check": "biome check",
     "lint": "biome lint --write",
-    "lint:check": "biome lint"
+    "lint:check": "biome lint",
+    "docs": "typedoc"
   },
   "dependencies": {
     "@solana/kit": "latest",
@@ -35,6 +36,7 @@
     "@types/node": "^25.0.10",
     "tsup": "^8.3.0",
     "tweetnacl": "^1.0.3",
+    "typedoc": "^0.28.18",
     "typescript": "^5.7.0",
     "vitest": "^2.1.8"
   }
