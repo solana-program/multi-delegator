@@ -66,8 +66,8 @@ After an upgrade, anyone can verify the on-chain program matches the public sour
 
 ```bash
 solana-verify verify-from-repo \
-    --program-id 3PuMsYqaLY4Sy1DR8np3aAiHravZXCeyMYDUECLqfswY \
-    --url https://github.com/Moonsong-Labs/multi-delegator
+    --program-id <PROGRAM_ID> \
+    --url https://github.com/solana-program/multi-delegator
 ```
 
 ## References

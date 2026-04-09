@@ -11,6 +11,7 @@ import {
 import type { Delegation } from '../types/delegation.js';
 import type { PlanWithAddress } from '../types/plan.js';
 
+/** Raw account shape returned by `getProgramAccounts` RPC calls. */
 export type RawProgramAccount = {
   pubkey: Address;
   account: {
@@ -22,6 +23,13 @@ export type RawProgramAccount = {
   };
 };
 
+/**
+ * Converts a {@link RawProgramAccount} into Gill's `EncodedAccount` format for use with Codama decoders.
+ *
+ * @param raw - The raw account as returned by `getProgramAccounts`.
+ * @param programAddress - The program address that owns the account.
+ * @returns An `EncodedAccount` with base64-decoded data.
+ */
 export function toEncodedAccount(
   raw: RawProgramAccount,
   programAddress: Address,

@@ -256,13 +256,13 @@ The `destinations` array controls where pulled funds can be sent. If the array i
 
 Per-subscriber billing state linked to a Plan:
 
-- `header`: 99 bytes - shared `Header` (delegator = subscriber, delegatee = plan_pda, payer = subscriber)
+- `header`: 107 bytes - shared `Header` (delegator = subscriber, delegatee = plan_pda, payer = subscriber)
 - `terms`: 24 bytes (`PlanTerms`) - snapshot of the plan's billing terms at subscribe time
 - `amount_pulled_in_period`: 8 bytes (`u64`) - tokens transferred in the current billing period
 - `current_period_start_ts`: 8 bytes (`i64`) - start of the current billing period
 - `expires_at_ts`: 8 bytes (`i64`) - cancellation timestamp (0 = active, non-zero = cancelled)
 
-**Total size**: 147 bytes
+**Total size**: 155 bytes
 
 **PDA seeds**: `["subscription", plan_pda, subscriber]`
 
@@ -327,8 +327,9 @@ Plan owner updates mutable admin fields (status, end_ts, pullers, metadata_uri).
 3. Reject if plan is already in Sunset status (else `PlanImmutableAfterSunset`) - Sunset is a terminal state
 4. Reject if status=Sunset and end_ts=0 (else `SunsetRequiresEndTs`) - sunsetting requires a finite expiration
 5. Validate input data: `PlanStatus::try_from(status)` must succeed (else `InvalidPlanStatus`), `end_ts == 0` or `end_ts > current_time` (else `InvalidEndTs`)
-6. Reject if plan has expired: `plan.end_ts != 0 && current_ts > plan.end_ts` (else `PlanExpired`)
-7. Write status, end_ts, pullers, and metadata_uri from input data
+6. Validate end_ts is at least one billing period in the future: `end_ts == 0` or `end_ts >= current_time + (terms.period_hours * 3600)` (else `InvalidEndTs`)
+7. Reject if plan has expired: `plan.end_ts != 0 && current_ts > plan.end_ts` (else `PlanExpired`)
+8. Write status, end_ts, pullers, and metadata_uri from input data
 
 **Immutable fields (never modified by update_plan):**
 `plan_id`, `owner`, `bump`, `mint`, `terms` (amount, period_hours, created_at), `destinations`
@@ -454,7 +455,7 @@ After `expires_at_ts` passes, pulls are blocked. The subscriber can then call `r
 3. Verify subscription's delegatee matches the plan PDA (else `SubscriptionPlanMismatch`)
 
 **Process:**
-1. If plan is valid (program-owned) and `check_plan_terms()` passes: compute `expires_at_ts = current_period_start + (periods_elapsed + 1) * period_length` using subscription's snapshotted `terms.period_hours`
+1. If plan is valid (program-owned) and `check_plan_terms()` passes: compute `expires_at_ts = current_period_start + (periods_elapsed + 1) * period_length` using subscription's snapshotted `terms.period_hours`, then cap at `plan.end_ts` if `end_ts != 0` (so a cancelled subscription cannot outlive the plan itself)
 2. If plan is valid but `check_plan_terms()` fails (ghost plan): set `expires_at_ts = current_ts` (immediate, no grace period)
 3. If plan is closed (not program-owned): set `expires_at_ts = current_ts`
 4. Emit `SubscriptionCancelled` event via self-CPI

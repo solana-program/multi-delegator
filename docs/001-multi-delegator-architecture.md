@@ -277,13 +277,13 @@ One-time delegation with explicit amount and expiry:
 ```rust
 #[repr(C, packed)]
 pub struct FixedDelegation {
-    pub header: Header,     // 99 bytes
+    pub header: Header,     // 107 bytes
     pub amount: u64,        // 8 bytes - remaining pullable amount
     pub expiry_ts: i64,     // 8 bytes - Unix timestamp (0 = no expiry)
 }
 
 impl FixedDelegation {
-    pub const LEN: usize = 115;
+    pub const LEN: usize = 123;
 }
 ```
 
@@ -298,7 +298,7 @@ Recurring delegation with period tracking:
 ```rust
 #[repr(C, packed)]
 pub struct RecurringDelegation {
-    pub header: Header,              // 99 bytes
+    pub header: Header,              // 107 bytes
     pub current_period_start_ts: i64, // 8 bytes - start of current period
     pub period_length_s: u64,         // 8 bytes - seconds per period
     pub expiry_ts: i64,               // 8 bytes - delegation expiry (0 = no expiry)
@@ -307,7 +307,7 @@ pub struct RecurringDelegation {
 }
 
 impl RecurringDelegation {
-    pub const LEN: usize = 139;
+    pub const LEN: usize = 147;
 }
 ```
 

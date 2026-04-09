@@ -1,13 +1,6 @@
-# Multi-Delegator Client
+# @multidelegator/client
 
-TypeScript/JavaScript SDK for interacting with the Multi-Delegator Solana program.
-
-This package exports:
-
-- A high-level `MultiDelegatorClient` class in `src/client.ts`
-- PDA helpers in `src/pdas.ts`
-- Constants in `src/constants.ts`
-- Codama-generated instruction/account bindings re-exported from `src/generated`
+TypeScript SDK for the Multi-Delegator Solana program: token delegation, recurring payments, and subscriptions.
 
 ## Installation
 
@@ -17,198 +10,101 @@ npm install @multidelegator/client
 
 ## Quick Start
 
-```typescript
-import { createSolanaClient } from "gill";
-import { MultiDelegatorClient } from "@multidelegator/client";
-
-const solanaClient = createSolanaClient({ urlOrMoniker: "localnet" });
-const client = new MultiDelegatorClient(solanaClient);
-```
-
-## Usage
+The SDK exports `build*` helpers that return Solana instructions. You sign and send them with your wallet adapter.
 
 ```typescript
+import { address } from "gill";
 import {
-  MultiDelegatorClient,
-  getDelegationPDA,
-  getMultiDelegatePDA,
+  buildInitMultiDelegate,
+  buildCreateFixedDelegation,
 } from "@multidelegator/client";
-import { createSolanaClient } from "gill";
 
-const solanaClient = createSolanaClient({ urlOrMoniker: "localnet" });
-const client = new MultiDelegatorClient(solanaClient);
+// 1. Initialize the MultiDelegate for a user's token account (once per mint)
+const { instructions: initIxs } = await buildInitMultiDelegate({
+  owner: walletSigner,
+  tokenMint: address("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
+  userAta: address("..."),
+  tokenProgram: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+});
+await signAndSendTransaction(initIxs, walletSigner);
 
-// Provided by your app/wallet flow:
-// - owner: TransactionSigner
-// - tokenMint: Address
-// - userAta: Address
-// - delegatee: Address
-
-// 1) Initialize the MultiDelegate account for (owner, tokenMint)
-const initResult = await client.initMultiDelegate(owner, tokenMint, userAta);
-console.log(initResult.signature);
-
-// 2) Create a fixed delegation
-const fixedResult = await client.createFixedDelegation(
-  owner,
-  tokenMint,
-  delegatee,
-  0n, // nonce
-  1_000_000n, // amount
-  BigInt(Math.floor(Date.now() / 1000) + 3600), // expiryTs
-);
-console.log(fixedResult.signature);
-
-// 3) Derive delegation PDA (used by transfer/revoke flows)
-const [multiDelegate] = await getMultiDelegatePDA(owner.address, tokenMint);
-const [delegationPda] = await getDelegationPDA(
-  multiDelegate,
-  owner.address,
-  delegatee,
-  0n,
-);
-console.log(delegationPda);
+// 2. Create a fixed delegation (e.g., allow spending 1,000,000 tokens)
+const { instructions: delegateIxs } = await buildCreateFixedDelegation({
+  delegator: walletSigner,
+  tokenMint: address("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
+  delegatee: address("DelegateeAddress..."),
+  nonce: 0n,
+  amount: 1_000_000n,
+  expiryTs: BigInt(Math.floor(Date.now() / 1000) + 3600), // 1 hour
+});
+await signAndSendTransaction(delegateIxs, walletSigner);
 ```
 
-## API Reference
+Each `build*` helper returns `{ instructions: IInstruction[] }`. You provide signing/sending, so it works with any wallet adapter or backend signer.
 
-### `MultiDelegatorClient`
+> For Node.js/backend usage, `MultiDelegatorClient` wraps all `build*` helpers with automatic transaction signing and sending via a [Gill](https://github.com/solana-foundation/gill)-compatible RPC client. It also provides query methods like `getDelegationsForWallet` and `getActiveDelegationSummary`.
 
-#### `constructor(client)`
-Creates a client using an object compatible with Gill's `createSolanaClient(...)` result:
+## Capabilities
 
-- `client.rpc`
-- `client.sendAndConfirmTransaction(...)`
+### Delegation Management
 
-#### `initMultiDelegate(owner, tokenMint, userAta, tokenProgram?)`
-Initializes the per-`(user, mint)` MultiDelegate PDA and configures token delegation.
+| Helper | Description |
+|--------|-------------|
+| `buildInitMultiDelegate` | Set up the per-mint MultiDelegate PDA and token approval |
+| `buildCloseMultiDelegate` | Tear down MultiDelegate, invalidating all delegations (kill switch) |
+| `buildCreateFixedDelegation` | One-time token allowance with optional expiry |
+| `buildCreateRecurringDelegation` | Periodic allowance (amount per time period) |
+| `buildRevokeDelegation` | Permanently close any delegation and reclaim rent |
 
-- `owner`: `TransactionSigner`
-- `tokenMint`: `Address`
-- `userAta`: `Address`
-- `tokenProgram?`: `Address`
-- Returns: `Promise<{ signature: string }>`
+### Transfers
 
-#### `createFixedDelegation(delegator, tokenMint, delegatee, nonce, amount, expiryTs)`
-Creates a fixed delegation.
+| Helper | Description |
+|--------|-------------|
+| `buildTransferFixed` | Pull tokens from a fixed delegation |
+| `buildTransferRecurring` | Pull tokens from a recurring delegation |
+| `buildTransferSubscription` | Pull tokens from a subscription delegation |
 
-- `delegator`: `TransactionSigner`
-- `tokenMint`: `Address`
-- `delegatee`: `Address`
-- `nonce`: `number | bigint`
-- `amount`: `number | bigint`
-- `expiryTs`: `number | bigint`
-- Returns: `Promise<{ signature: string }>`
+### Subscription Plans
 
-#### `createRecurringDelegation(delegator, tokenMint, delegatee, nonce, amountPerPeriod, periodLengthS, startTs, expiryTs)`
-Creates a recurring delegation.
+| Helper | Description |
+|--------|-------------|
+| `buildCreatePlan` | Publish a subscription plan with billing terms |
+| `buildUpdatePlan` | Update plan status, end date, pullers, or metadata |
+| `buildDeletePlan` | Delete an expired plan and reclaim rent |
+| `buildSubscribe` | Subscribe to a plan |
+| `buildCancelSubscription` | Cancel a subscription (grace period until end of billing period) |
 
-- `delegator`: `TransactionSigner`
-- `tokenMint`: `Address`
-- `delegatee`: `Address`
-- `nonce`: `number | bigint`
-- `amountPerPeriod`: `number | bigint`
-- `periodLengthS`: `number | bigint`
-- `startTs`: `number | bigint`
-- `expiryTs`: `number | bigint`
-- Returns: `Promise<{ signature: string }>`
+### Account Queries
 
-#### `revokeDelegation(delegator, delegationAccount)`
-Closes an existing delegation account.
-
-- `delegator`: `TransactionSigner`
-- `delegationAccount`: `Address`
-- Returns: `Promise<{ signature: string }>`
-
-#### `transferFixed(delegatee, delegator, delegatorAta, tokenMint, delegationPda, amount, receiverAta)`
-Transfers tokens through a fixed delegation.
-
-- `delegatee`: `TransactionSigner`
-- `delegator`: `Address`
-- `delegatorAta`: `Address`
-- `tokenMint`: `Address`
-- `delegationPda`: `Address`
-- `amount`: `number | bigint`
-- `receiverAta`: `Address`
-- Returns: `Promise<{ signature: string }>`
-
-#### `transferRecurring(delegatee, delegator, delegatorAta, tokenMint, delegationPda, amount, receiverAta)`
-Transfers tokens through a recurring delegation.
-
-- Same parameters as `transferFixed(...)`
-- Returns: `Promise<{ signature: string }>`
-
-#### `getDelegationsForWallet(wallet)`
-Returns decoded fixed/recurring delegation accounts for a delegator wallet.
-
-- `wallet`: `Address`
-- Returns: `Promise<Delegation[]>`
-
-#### `isMultiDelegateInitialized(user, tokenMint)`
-Checks whether the MultiDelegate PDA exists for `(user, tokenMint)`.
-
-- `user`: `Address`
-- `tokenMint`: `Address`
-- Returns: `Promise<{ initialized: boolean; pda: Address }>`
-
-### Exported Types
-
-- `Delegation`:
-  - `{ kind: "fixed"; address: Address; data: FixedDelegation }`
-  - `{ kind: "recurring"; address: Address; data: RecurringDelegation }`
+| Function | Description |
+|----------|-------------|
+| `fetchDelegationsByDelegator` | All delegations where wallet is the delegator |
+| `fetchDelegationsByDelegatee` | All delegations where wallet is the delegatee |
+| `fetchPlansForOwner` | All plans owned by an address |
+| `fetchSubscriptionsForUser` | All subscriptions for a user |
+| `decodeDelegationAccount` / `decodePlanAccount` | Decode raw RPC responses |
 
 ### PDA Helpers
 
-#### `getMultiDelegatePDA(user, tokenMint)`
-Derives the MultiDelegate PDA.
+`getMultiDelegatePDA`, `getDelegationPDA`, `getPlanPDA`, `getSubscriptionPDA`, `getEventAuthorityPDA`
 
-#### `getDelegationPDA(multiDelegate, delegator, delegatee, nonce)`
-Derives the delegation PDA for fixed or recurring delegations.
+### Types
 
-### Constants
+- `Delegation` - discriminated union: `{ kind: "fixed" | "recurring" | "subscription"; address; data }`
+- Type guards: `isFixedDelegation`, `isRecurringDelegation`, `isSubscriptionDelegation`
+- `PlanWithAddress`, `DelegationKindId`, `TransferParams`
+- Error handling: `parseProgramError`, `ProgramError`, `ValidationError`
 
-From `src/constants.ts`:
+## API Reference
 
-- `PROGRAM_ID`
-- `KIND_DISCRIMINATOR_OFFSET`
-- `DELEGATOR_OFFSET`
-- `DELEGATEE_OFFSET`
-- `U64_BYTE_SIZE`
-- `MULTI_DELEGATE_SEED`
-- `DELEGATION_SEED`
-- `DELEGATION_KINDS`
-- `DelegationKindId`
+Full API documentation is generated from source with [TypeDoc](https://typedoc.org/). Run `npx typedoc` to generate locally, or browse `./docs/`.
 
-## Generated Bindings (Codama)
+## Development
 
-The package re-exports generated program bindings from `src/generated`, including instruction builders and account helpers used by the high-level client, such as:
-
-- Instruction builders:
-  - `getInitMultiDelegateInstruction`
-  - `getCreateFixedDelegationInstruction`
-  - `getCreateRecurringDelegationInstruction`
-  - `getRevokeDelegationInstruction`
-  - `getTransferFixedInstruction`
-  - `getTransferRecurringInstruction`
-- Account helpers:
-  - `fetchMultiDelegate`
-  - `fetchFixedDelegation`
-  - `fetchRecurringDelegation`
-
-## Contributor Note
-
-Generated bindings are produced by Codama and are gitignored in this repository (`clients/typescript/src/generated`).
-
-To regenerate from the repo root:
+Generated bindings in `src/generated/` are produced by [Codama](https://github.com/codama-idl/codama) and gitignored. Regenerate from the repo root:
 
 ```bash
 just generate-client
-```
-
-Or directly:
-
-```bash
-bun run generate
 ```
 
 ## License

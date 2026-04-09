@@ -91,6 +91,7 @@ common `Header` where:
 - Bytes 3--34: `delegator`
 - Bytes 35--66: `delegatee`
 - Bytes 67--98: `payer`
+- Bytes 99--106: `init_id`
 
 The version check reads `data[VERSION_OFFSET]` (byte 1), not byte 0.
 `MultiDelegate` and `Plan` accounts have their own layouts but also store a discriminator at
