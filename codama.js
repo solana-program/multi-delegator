@@ -1,5 +1,12 @@
 import { GILL_EXTERNAL_MODULE_MAP } from 'gill';
 
+const GILL_CODAMA_MODULE_MAP = {
+  ...GILL_EXTERNAL_MODULE_MAP,
+  solanaErrors: '@solana/kit',
+  solanaPrograms: '@solana/kit',
+  solanaProgramClientCore: '@solana/kit/program-client-core',
+};
+
 export default {
   idl: './programs/multi_delegator/idl/multi_delegator.json',
   before: [
@@ -12,8 +19,10 @@ export default {
       args: [
         './clients/typescript/src/generated',
         {
-          dependencyMap: GILL_EXTERNAL_MODULE_MAP,
+          generatedFolder: '.',
+          dependencyMap: GILL_CODAMA_MODULE_MAP,
           dependencyVersions: {
+            '@solana/kit/program-client-core': '^5.5.1',
             gill: '^0.14.0',
           },
         },
