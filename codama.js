@@ -9,7 +9,15 @@ export default {
   scripts: {
     js: {
       from: '@codama/renderers-js',
-      args: ['./clients/typescript/src/generated', { dependencyMap: GILL_EXTERNAL_MODULE_MAP }],
+      args: [
+        './clients/typescript/src/generated',
+        {
+          dependencyMap: GILL_EXTERNAL_MODULE_MAP,
+          dependencyVersions: {
+            gill: '^0.14.0',
+          },
+        },
+      ],
     },
     rust: {
       from: '@codama/renderers-rust',
