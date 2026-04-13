@@ -277,6 +277,10 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) runs on PRs and pushes 
 | **integration-test** | Start Surfpool, run TypeScript integration tests |
 | **benchmark** | (PRs only) Generate CU report and post as PR comment |
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for fork workflow, tests, and pull request expectations.
+
 ## Architecture Docs
 
 | Document | Description |
