@@ -2711,6 +2711,16 @@
             "isWritable": false,
             "kind": "instructionAccountNode",
             "name": "tokenProgram"
+          },
+          {
+            "docs": [
+              "Optional sponsor that funds the plan rent. Defaults to the merchant/signer when omitted; delete_plan refunds the owner, not the payer."
+            ],
+            "isOptional": true,
+            "isSigner": true,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "payer"
           }
         ],
         "arguments": [
@@ -2745,7 +2755,8 @@
           }
         ],
         "kind": "instructionNode",
-        "name": "createPlan"
+        "name": "createPlan",
+        "optionalAccountStrategy": "omitted"
       },
       {
         "accounts": [

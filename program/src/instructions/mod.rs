@@ -193,6 +193,14 @@ pub enum SubscriptionsInstruction {
         docs = "The token program",
         default_value = program("token")
     ))]
+    #[codama(account(
+        name = "payer",
+        signer,
+        writable,
+        optional,
+        docs = "Optional sponsor that funds the plan rent. Defaults to the merchant/signer when omitted; delete_plan refunds the owner, not the payer."
+    ))]
+    #[codama(optional_account_strategy = omitted)]
     CreatePlan(#[codama(name = "plan_data")] PlanData) = 7,
 
     #[codama(account(name = "owner", signer, docs = "The plan owner updating the plan"))]
