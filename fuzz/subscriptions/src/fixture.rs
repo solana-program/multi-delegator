@@ -62,6 +62,11 @@ impl SubscriptionsFixture {
         let account = self.ctx.get_account(&self.subscription_pda(subscriber)).ok()?;
         SubscriptionDelegation::from_bytes(&account.data).ok()
     }
+
+    pub fn recurring_delegation_pda(&self, subscriber: &Pubkey, nonce: u64) -> Pubkey {
+        let (authority_pda, _) = SubscriptionAuthority::find_pda(subscriber, &self.mint);
+        delegation_pda_address(&authority_pda, subscriber, &self.merchant.pubkey(), nonce).0
+    }
 }
 
 #[fuzz_fixture]
