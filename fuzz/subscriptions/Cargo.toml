@@ -1,0 +1,27 @@
+[package]
+name = "subscriptions_fuzz"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+crucible-fuzzer = { git = "https://github.com/asymmetric-research/crucible", rev = "812cd55434c297c422dc165a43d731c592762ca9" }
+crucible-test-context = { git = "https://github.com/asymmetric-research/crucible", rev = "812cd55434c297c422dc165a43d731c592762ca9" }
+subscriptions = { path = "../../clients/rust" }
+arbitrary = { version = "1", features = ["derive"] }
+ctrlc = "3.4"
+libafl = { version = "0.15.1", features = ["std", "cli", "prelude"] }
+libafl_bolts = { version = "0.15.1", features = ["std"] }
+solana-clock = "3.0"
+solana-keypair = "3.0"
+solana-pubkey = "3.0"
+solana-signer = "3.0"
+
+[[bin]]
+name = "invariant_test"
+path = "src/main.rs"
+
+[features]
+invariant_subscriptions = []

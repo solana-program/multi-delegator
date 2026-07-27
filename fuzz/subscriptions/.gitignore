@@ -1,0 +1,4 @@
+target/
+crashes/
+corpus/
+.fuzz-cache/
