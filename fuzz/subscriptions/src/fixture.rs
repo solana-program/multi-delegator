@@ -6,10 +6,10 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use subscriptions::accounts::{EventAuthority, Plan, SubscriptionAuthority, SubscriptionDelegation};
 use subscriptions::instructions::{
-    CancelSubscriptionBuilder, CreatePlanBuilder, InitSubscriptionAuthorityBuilder, SubscribeBuilder,
-    TransferSubscriptionBuilder,
+    CancelSubscriptionBuilder, CancelSubscriptionNowBuilder, CreatePlanBuilder, InitSubscriptionAuthorityBuilder,
+    ResumeSubscriptionBuilder, SubscribeBuilder, TransferSubscriptionBuilder,
 };
-use subscriptions::types::{PlanData, PlanTerms, SubscribeData, TransferData};
+use subscriptions::types::{CancelSubscriptionNowData, PlanData, PlanTerms, ResumeData, SubscribeData, TransferData};
 use subscriptions::SUBSCRIPTIONS_ID;
 
 use crate::constants::{
@@ -48,6 +48,11 @@ impl SubscriptionsFixture {
 
     pub fn subscription_pda(&self, subscriber: &Pubkey) -> Pubkey {
         SubscriptionDelegation::find_pda(&self.plan_pda, subscriber).0
+    }
+
+    fn read_subscription(&self, subscriber: &Pubkey) -> Option<SubscriptionDelegation> {
+        let account = self.ctx.get_account(&self.subscription_pda(subscriber)).ok()?;
+        SubscriptionDelegation::from_bytes(&account.data).ok()
     }
 }
 
@@ -183,5 +188,41 @@ impl SubscriptionsFixture {
             .event_authority(EventAuthority::find_pda().0)
             .instruction();
         self.ctx.raw_call(ix).signers(&[&subscriber]).send().map(|outcome| outcome.is_success()).unwrap_or(false)
+    }
+
+    pub fn action_resume_subscription(&mut self, #[range(0..3)] subscriber_idx: usize) -> bool {
+        let subscriber = self.subscribers[subscriber_idx].clone();
+        let Some(subscription) = self.read_subscription(&subscriber.pubkey()) else { return false };
+        let (authority_pda, _) = SubscriptionAuthority::find_pda(&subscriber.pubkey(), &self.mint);
+        let ix = ResumeSubscriptionBuilder::new()
+            .subscriber(subscriber.pubkey())
+            .plan_pda(self.plan_pda)
+            .subscription_pda(self.subscription_pda(&subscriber.pubkey()))
+            .subscription_authority(authority_pda)
+            .event_authority(EventAuthority::find_pda().0)
+            .resume_data(ResumeData { expected_expires_at_ts: subscription.expires_at_ts })
+            .instruction();
+        self.ctx.raw_call(ix).signers(&[&subscriber]).send().map(|outcome| outcome.is_success()).unwrap_or(false)
+    }
+
+    pub fn action_cancel_subscription_now(&mut self, #[range(0..3)] subscriber_idx: usize) -> bool {
+        let subscriber = self.subscribers[subscriber_idx].clone();
+        let Some(subscription) = self.read_subscription(&subscriber.pubkey()) else { return false };
+        let ix = CancelSubscriptionNowBuilder::new()
+            .subscriber(subscriber.pubkey())
+            .merchant(self.merchant.pubkey())
+            .plan_pda(self.plan_pda)
+            .subscription_pda(self.subscription_pda(&subscriber.pubkey()))
+            .event_authority(EventAuthority::find_pda().0)
+            .cancel_subscription_now_data(CancelSubscriptionNowData {
+                expected_current_period_start_ts: subscription.current_period_start_ts,
+            })
+            .instruction();
+        self.ctx
+            .raw_call(ix)
+            .signers(&[&subscriber, &self.merchant.clone()])
+            .send()
+            .map(|outcome| outcome.is_success())
+            .unwrap_or(false)
     }
 }
