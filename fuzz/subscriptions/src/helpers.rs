@@ -55,3 +55,12 @@ pub fn create_ata(ctx: &mut TestContext, owner: &Pubkey, mint: &Pubkey, amount: 
 pub fn plan_pda_address(owner: &Pubkey, plan_id: u64) -> (Pubkey, u8) {
     Pubkey::find_program_address(&[Plan::PREFIX, owner.as_ref(), &plan_id.to_le_bytes()], &SUBSCRIPTIONS_ID)
 }
+
+// FixedDelegation::find_pda in the generated client encodes nonce as a string; the program
+// derives the PDA with to_le_bytes.
+pub fn delegation_pda_address(authority: &Pubkey, delegator: &Pubkey, delegatee: &Pubkey, nonce: u64) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[b"delegation", authority.as_ref(), delegator.as_ref(), delegatee.as_ref(), &nonce.to_le_bytes()],
+        &SUBSCRIPTIONS_ID,
+    )
+}

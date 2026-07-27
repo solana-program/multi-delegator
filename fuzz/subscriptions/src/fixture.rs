@@ -6,16 +6,24 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use subscriptions::accounts::{EventAuthority, Plan, SubscriptionAuthority, SubscriptionDelegation};
 use subscriptions::instructions::{
-    CancelSubscriptionBuilder, CancelSubscriptionNowBuilder, CreatePlanBuilder, InitSubscriptionAuthorityBuilder,
-    ResumeSubscriptionBuilder, SubscribeBuilder, TransferSubscriptionBuilder,
+    CancelSubscriptionBuilder, CancelSubscriptionNowBuilder, CloseSubscriptionAuthorityBuilder,
+    CreateFixedDelegationBuilder, CreatePlanBuilder, CreateRecurringDelegationBuilder, DeletePlanBuilder,
+    InitSubscriptionAuthorityBuilder, ResumeSubscriptionBuilder, RevokeAbandonedDelegationBuilder,
+    RevokeDelegationBuilder, RevokeSubscriptionAuthorityBuilder, SubscribeBuilder, TransferFixedBuilder,
+    TransferSubscriptionBuilder, UpdatePlanBuilder,
 };
-use subscriptions::types::{CancelSubscriptionNowData, PlanData, PlanTerms, ResumeData, SubscribeData, TransferData};
+use subscriptions::types::{
+    CancelSubscriptionNowData, CreateFixedDelegationData, CreateRecurringDelegationData, PlanData, PlanStatus,
+    PlanTerms, ResumeData, SubscribeData, TransferData, UpdatePlanData,
+};
 use subscriptions::SUBSCRIPTIONS_ID;
 
 use crate::constants::{
     GENESIS_TS, INITIAL_TOKENS, MINT_DECIMALS, PLAN_AMOUNT, PLAN_ID, PLAN_PERIOD_HOURS, SUBSCRIBER_COUNT,
 };
-use crate::helpers::{ata_address, create_ata, create_funded_wallet, plan_pda_address, set_clock};
+use crate::helpers::{
+    ata_address, create_ata, create_funded_wallet, delegation_pda_address, plan_pda_address, set_clock,
+};
 
 #[derive(Clone)]
 pub struct SubscriptionsFixture {
@@ -224,5 +232,179 @@ impl SubscriptionsFixture {
             .send()
             .map(|outcome| outcome.is_success())
             .unwrap_or(false)
+    }
+
+    pub fn action_create_fixed_delegation(
+        &mut self,
+        #[range(0..3)] subscriber_idx: usize,
+        #[range(0..3)] nonce: u64,
+        #[range(0..2_000_001)] amount: u64,
+        #[range(1..73)] expiry_hours: i64,
+    ) -> bool {
+        let subscriber = self.subscribers[subscriber_idx].clone();
+        let Some(authority) = self.read_authority(&subscriber.pubkey()) else { return false };
+        let (authority_pda, _) = SubscriptionAuthority::find_pda(&subscriber.pubkey(), &self.mint);
+        let delegatee = self.merchant.pubkey();
+        let (delegation, _) = delegation_pda_address(&authority_pda, &subscriber.pubkey(), &delegatee, nonce);
+        let ix = CreateFixedDelegationBuilder::new()
+            .delegator(subscriber.pubkey())
+            .subscription_authority(authority_pda)
+            .delegation_account(delegation)
+            .delegatee(delegatee)
+            .fixed_delegation(CreateFixedDelegationData {
+                nonce,
+                amount,
+                expiry_ts: self.now_ts + expiry_hours * 3600,
+                expected_subscription_authority_init_id: authority.init_id,
+            })
+            .instruction();
+        self.ctx.raw_call(ix).signers(&[&subscriber]).send().map(|outcome| outcome.is_success()).unwrap_or(false)
+    }
+
+    pub fn action_create_recurring_delegation(
+        &mut self,
+        #[range(0..3)] subscriber_idx: usize,
+        #[range(3..6)] nonce: u64,
+        #[range(0..2_000_001)] amount_per_period: u64,
+        #[range(1..73)] period_hours: u64,
+        #[range(1..73)] expiry_hours: i64,
+    ) -> bool {
+        let subscriber = self.subscribers[subscriber_idx].clone();
+        let Some(authority) = self.read_authority(&subscriber.pubkey()) else { return false };
+        let (authority_pda, _) = SubscriptionAuthority::find_pda(&subscriber.pubkey(), &self.mint);
+        let delegatee = self.merchant.pubkey();
+        let (delegation, _) = delegation_pda_address(&authority_pda, &subscriber.pubkey(), &delegatee, nonce);
+        let ix = CreateRecurringDelegationBuilder::new()
+            .delegator(subscriber.pubkey())
+            .subscription_authority(authority_pda)
+            .delegation_account(delegation)
+            .delegatee(delegatee)
+            .recurring_delegation(CreateRecurringDelegationData {
+                nonce,
+                amount_per_period,
+                period_length_s: period_hours * 3600,
+                start_ts: self.now_ts,
+                expiry_ts: self.now_ts + expiry_hours * 3600,
+                expected_subscription_authority_init_id: authority.init_id,
+            })
+            .instruction();
+        self.ctx.raw_call(ix).signers(&[&subscriber]).send().map(|outcome| outcome.is_success()).unwrap_or(false)
+    }
+
+    pub fn action_transfer_fixed(
+        &mut self,
+        #[range(0..3)] subscriber_idx: usize,
+        #[range(0..3)] nonce: u64,
+        #[range(0..2_000_001)] amount: u64,
+    ) -> bool {
+        let subscriber = self.subscribers[subscriber_idx].clone();
+        let (authority_pda, _) = SubscriptionAuthority::find_pda(&subscriber.pubkey(), &self.mint);
+        let delegatee = self.merchant.pubkey();
+        let (delegation, _) = delegation_pda_address(&authority_pda, &subscriber.pubkey(), &delegatee, nonce);
+        if !self.ctx.account_has_data(&delegation, 1) {
+            return false;
+        }
+        let ix = TransferFixedBuilder::new()
+            .delegation_pda(delegation)
+            .subscription_authority(authority_pda)
+            .delegator_ata(ata_address(&subscriber.pubkey(), &self.mint))
+            .receiver_ata(self.merchant_ata)
+            .token_mint(self.mint)
+            .token_program(spl_token_interface::ID)
+            .delegatee(delegatee)
+            .event_authority(EventAuthority::find_pda().0)
+            .transfer_data(TransferData { amount, delegator: subscriber.pubkey(), mint: self.mint })
+            .instruction();
+        self.ctx
+            .raw_call(ix)
+            .signers(&[&self.merchant.clone()])
+            .send()
+            .map(|outcome| outcome.is_success())
+            .unwrap_or(false)
+    }
+
+    pub fn action_revoke_delegation(
+        &mut self,
+        #[range(0..3)] subscriber_idx: usize,
+        #[range(0..6)] nonce: u64,
+    ) -> bool {
+        let subscriber = self.subscribers[subscriber_idx].clone();
+        let (authority_pda, _) = SubscriptionAuthority::find_pda(&subscriber.pubkey(), &self.mint);
+        let delegatee = self.merchant.pubkey();
+        let (delegation, _) = delegation_pda_address(&authority_pda, &subscriber.pubkey(), &delegatee, nonce);
+        let ix =
+            RevokeDelegationBuilder::new().authority(subscriber.pubkey()).delegation_account(delegation).instruction();
+        self.ctx.raw_call(ix).signers(&[&subscriber]).send().map(|outcome| outcome.is_success()).unwrap_or(false)
+    }
+
+    pub fn action_revoke_abandoned_delegation(
+        &mut self,
+        #[range(0..3)] subscriber_idx: usize,
+        #[range(0..6)] nonce: u64,
+    ) -> bool {
+        let subscriber = self.subscribers[subscriber_idx].clone();
+        let (authority_pda, _) = SubscriptionAuthority::find_pda(&subscriber.pubkey(), &self.mint);
+        let delegatee = self.merchant.pubkey();
+        let (delegation, _) = delegation_pda_address(&authority_pda, &subscriber.pubkey(), &delegatee, nonce);
+        let ix = RevokeAbandonedDelegationBuilder::new()
+            .payer(subscriber.pubkey())
+            .delegation_account(delegation)
+            .subscription_authority(authority_pda)
+            .instruction();
+        self.ctx.raw_call(ix).signers(&[&subscriber]).send().map(|outcome| outcome.is_success()).unwrap_or(false)
+    }
+
+    pub fn action_update_plan(&mut self, #[range(0..2)] status: u8, #[range(0..73)] end_hours: i64) -> bool {
+        let status = if status == 0 { PlanStatus::Sunset } else { PlanStatus::Active };
+        let ix = UpdatePlanBuilder::new()
+            .owner(self.merchant.pubkey())
+            .plan_pda(self.plan_pda)
+            .event_authority(EventAuthority::find_pda().0)
+            .update_plan_data(UpdatePlanData {
+                status: status as u8,
+                end_ts: if end_hours == 0 { 0 } else { self.now_ts + end_hours * 3600 },
+                pullers: [self.merchant.pubkey(), Pubkey::default(), Pubkey::default(), Pubkey::default()],
+                metadata_uri: [0u8; 128],
+            })
+            .instruction();
+        self.ctx
+            .raw_call(ix)
+            .signers(&[&self.merchant.clone()])
+            .send()
+            .map(|outcome| outcome.is_success())
+            .unwrap_or(false)
+    }
+
+    pub fn action_delete_plan(&mut self) -> bool {
+        let ix = DeletePlanBuilder::new().owner(self.merchant.pubkey()).plan_pda(self.plan_pda).instruction();
+        self.ctx
+            .raw_call(ix)
+            .signers(&[&self.merchant.clone()])
+            .send()
+            .map(|outcome| outcome.is_success())
+            .unwrap_or(false)
+    }
+
+    pub fn action_revoke_subscription_authority(&mut self, #[range(0..3)] subscriber_idx: usize) -> bool {
+        let subscriber = self.subscribers[subscriber_idx].clone();
+        let (authority_pda, _) = SubscriptionAuthority::find_pda(&subscriber.pubkey(), &self.mint);
+        let ix = RevokeSubscriptionAuthorityBuilder::new()
+            .user(subscriber.pubkey())
+            .user_ata(ata_address(&subscriber.pubkey(), &self.mint))
+            .token_mint(self.mint)
+            .token_program(spl_token_interface::ID)
+            .subscription_authority(authority_pda)
+            .instruction();
+        self.ctx.raw_call(ix).signers(&[&subscriber]).send().map(|outcome| outcome.is_success()).unwrap_or(false)
+    }
+
+    pub fn action_close_subscription_authority(&mut self, #[range(0..3)] subscriber_idx: usize) -> bool {
+        let subscriber = self.subscribers[subscriber_idx].clone();
+        let (authority_pda, _) = SubscriptionAuthority::find_pda(&subscriber.pubkey(), &self.mint);
+        let ix = CloseSubscriptionAuthorityBuilder::new()
+            .user(subscriber.pubkey())
+            .subscription_authority(authority_pda)
+            .instruction();
+        self.ctx.raw_call(ix).signers(&[&subscriber]).send().map(|outcome| outcome.is_success()).unwrap_or(false)
     }
 }
