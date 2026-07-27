@@ -8,6 +8,7 @@ set shell := ["bash", "-uc"]
 program_dir := "program"
 ts_client_dir := "clients/typescript"
 webapp_dir := "webapp"
+crucible_rev := "812cd55434c297c422dc165a43d731c592762ca9"
 idl_file := "idl/subscriptions.json"
 generated_paths := "idl clients/typescript/src/generated clients/rust/src/generated"
 
@@ -133,6 +134,19 @@ test-client: build-program build-test-hook generate-clients
     just kill-validator
     just _start-surfpool offline
     ( cd {{ts_client_dir}} && pnpm run test:offline )
+
+# ============================================
+# Fuzzing recipes
+# ============================================
+
+# Install the crucible fuzzing CLI at the pinned revision
+install-fuzzer:
+    cargo install --git https://github.com/asymmetric-research/crucible --rev {{crucible_rev}} crucible-fuzz-cli
+    @echo "✓ crucible CLI installed"
+
+# Fuzz a harness test; args pass through to `crucible run` (e.g. --release --stateful -j 4)
+fuzz test='invariant_subscriptions' timeout='60' *args: build-program generate-clients
+    crucible run subscriptions {{test}} --timeout {{timeout}} {{args}}
 
 # ============================================
 # Validator management
