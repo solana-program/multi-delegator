@@ -1102,6 +1102,8 @@ pub struct UpdatePlan<'a> {
     owner: &'a Keypair,
     plan_pda: Pubkey,
     pullers_vec: Vec<Pubkey>,
+    expected_created_at_override: Option<i64>,
+    expected_pullers_override: Option<Vec<Pubkey>>,
     data: UpdatePlanData,
 }
 
@@ -1113,11 +1115,17 @@ impl<'a> UpdatePlan<'a> {
             owner,
             plan_pda,
             pullers_vec: vec![],
+            expected_created_at_override: None,
+            expected_pullers_override: None,
             data: UpdatePlanData {
                 status: PlanStatus::Active as u8,
                 end_ts: 0,
                 pullers: [zero_addr; MAX_PULLERS],
                 metadata_uri: [0u8; 128],
+                expected_created_at: 0,
+                expected_end_ts: 0,
+                expected_pullers: [zero_addr; MAX_PULLERS],
+                expected_metadata_uri: [0u8; 128],
             },
         }
     }
@@ -1150,6 +1158,43 @@ impl<'a> UpdatePlan<'a> {
         self
     }
 
+    pub fn expected_created_at(mut self, created_at: i64) -> Self {
+        self.expected_created_at_override = Some(created_at);
+        self
+    }
+
+    pub fn expected_pullers(mut self, pullers: Vec<Pubkey>) -> Self {
+        self.expected_pullers_override = Some(pullers);
+        self
+    }
+
+    /// Defaults the observed-plan-state fields from the live plan; overrides simulate stale approvals.
+    fn resolve_expected_plan_state(&mut self) {
+        let live = self.litesvm.get_account(&self.plan_pda).and_then(|account| {
+            Plan::load(&account.data)
+                .ok()
+                .map(|plan| (plan.data.terms.created_at, plan.data.end_ts, plan.data.pullers, plan.data.metadata_uri))
+        });
+
+        if let Some((created_at, end_ts, pullers, metadata_uri)) = live {
+            self.data.expected_created_at = created_at;
+            self.data.expected_end_ts = end_ts;
+            self.data.expected_pullers = pullers;
+            self.data.expected_metadata_uri = metadata_uri;
+        }
+
+        if let Some(created_at) = self.expected_created_at_override {
+            self.data.expected_created_at = created_at;
+        }
+        if let Some(pullers_vec) = &self.expected_pullers_override {
+            let mut pullers = [[0u8; 32]; MAX_PULLERS];
+            for (i, p) in pullers_vec.iter().enumerate() {
+                pullers[i] = p.to_bytes();
+            }
+            self.data.expected_pullers = pullers.map(|p| p.into());
+        }
+    }
+
     #[allow(clippy::result_large_err)]
     pub fn execute(mut self) -> TransactionResult {
         assert!(self.pullers_vec.len() <= MAX_PULLERS, "max {MAX_PULLERS} pullers");
@@ -1158,6 +1203,7 @@ impl<'a> UpdatePlan<'a> {
             pullers[i] = p.to_bytes();
         }
         self.data.pullers = pullers.map(|p| p.into());
+        self.resolve_expected_plan_state();
 
         let data_bytes = unsafe {
             std::slice::from_raw_parts(&self.data as *const UpdatePlanData as *const u8, UpdatePlanData::LEN)

@@ -90,6 +90,7 @@ impl TryFrom<u32> for SubscriptionsError {
             519 => Ok(Self::PlanTermsMismatch),
             520 => Ok(Self::PlanEndTsCannotExtend),
             521 => Ok(Self::StaleSubscriptionApproval),
+            522 => Ok(Self::StalePlanApproval),
             // Event errors (600-699)
             600 => Ok(Self::InvalidEventAuthority),
             601 => Ok(Self::InvalidEventData),
@@ -273,6 +274,8 @@ pub enum SubscriptionsError {
     PlanEndTsCannotExtend,
     #[error("Subscription approval does not match the current subscription")]
     StaleSubscriptionApproval,
+    #[error("Plan update approval does not match the current plan state")]
+    StalePlanApproval,
 
     // --- Event errors (600--699) ---
     #[error("Invalid event authority PDA")]

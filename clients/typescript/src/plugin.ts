@@ -247,6 +247,14 @@ export type CreatePlanInput = WithProgramAddress & {
 
 export type UpdatePlanInput = WithProgramAddress & {
     endTs: bigint | number;
+    /**
+     * Live plan state observed at signing. If omitted, use the plugin
+     * client's `updatePlan`, which fetches it via rpc.
+     */
+    expectedCreatedAt?: bigint | number;
+    expectedEndTs?: bigint | number;
+    expectedMetadataUri?: string;
+    expectedPullers?: Address[];
     metadataUri: string;
     owner: TransactionSigner;
     planPda: Address;
@@ -605,8 +613,19 @@ export async function getCreatePlanOverlayInstructionAsync(input: CreatePlanInpu
 }
 
 export async function getUpdatePlanOverlayInstruction(input: UpdatePlanInput): Promise<Instruction> {
+    if (
+        input.expectedCreatedAt === undefined ||
+        input.expectedEndTs === undefined ||
+        input.expectedPullers === undefined ||
+        input.expectedMetadataUri === undefined
+    ) {
+        throw new Error(
+            'getUpdatePlanOverlayInstruction requires expectedCreatedAt, expectedEndTs, expectedPullers, and expectedMetadataUri. Use the plugin client `subscriptions.instructions.updatePlan(...)` to auto-fetch from the live plan.',
+        );
+    }
     assertMetadataUri(input.metadataUri);
     const pullers = padPlanPullers(input.pullers);
+    const expectedPullers = padPlanPullers(input.expectedPullers);
     return getUpdatePlanInstruction(
         {
             ...(await eventAccounts(input.programAddress)),
@@ -614,6 +633,10 @@ export async function getUpdatePlanOverlayInstruction(input: UpdatePlanInput): P
             planPda: input.planPda,
             updatePlanData: {
                 endTs: input.endTs,
+                expectedCreatedAt: input.expectedCreatedAt,
+                expectedEndTs: input.expectedEndTs,
+                expectedMetadataUri: input.expectedMetadataUri,
+                expectedPullers,
                 metadataUri: input.metadataUri,
                 pullers,
                 status: input.status,
@@ -1082,10 +1105,29 @@ export function subscriptionsProgram() {
                 updatePlan: input =>
                     addSelfPlanAndSendFunctions(
                         client,
-                        getUpdatePlanOverlayInstruction({
-                            ...input,
-                            owner: input.owner ?? client.identity,
-                        }),
+                        (async () => {
+                            let { expectedCreatedAt, expectedEndTs, expectedMetadataUri, expectedPullers } = input;
+                            if (
+                                expectedCreatedAt === undefined ||
+                                expectedEndTs === undefined ||
+                                expectedPullers === undefined ||
+                                expectedMetadataUri === undefined
+                            ) {
+                                const plan = await fetchPlan(c.rpc, input.planPda);
+                                expectedCreatedAt = expectedCreatedAt ?? plan.data.data.terms.createdAt;
+                                expectedEndTs = expectedEndTs ?? plan.data.data.endTs;
+                                expectedMetadataUri = expectedMetadataUri ?? plan.data.data.metadataUri;
+                                expectedPullers = expectedPullers ?? [...plan.data.data.pullers];
+                            }
+                            return await getUpdatePlanOverlayInstruction({
+                                ...input,
+                                expectedCreatedAt,
+                                expectedEndTs,
+                                expectedMetadataUri,
+                                expectedPullers,
+                                owner: input.owner ?? client.identity,
+                            });
+                        })(),
                     ),
             };
 

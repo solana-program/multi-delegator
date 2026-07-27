@@ -30,6 +30,17 @@ pub struct UpdatePlanData {
     /// Updated metadata URI.
     #[codama(type = fixed_size(string(utf8), 128))]
     pub metadata_uri: [u8; 128],
+    /// Observed `terms.created_at`; rejects approvals from a prior plan
+    /// lifecycle recreated at the same PDA.
+    pub expected_created_at: i64,
+    /// Observed `end_ts`.
+    pub expected_end_ts: i64,
+    /// Observed puller whitelist; a stale update cannot restore a puller
+    /// removed since signing.
+    pub expected_pullers: [Address; 4],
+    /// Observed metadata URI.
+    #[codama(type = fixed_size(string(utf8), 128))]
+    pub expected_metadata_uri: [u8; 128],
 }
 
 impl UpdatePlanData {
@@ -106,8 +117,11 @@ fn assert_sunset_puller_reduction(plan: &Plan, data: &UpdatePlanData) -> Result<
 
 /// Updates the mutable fields of an existing [`Plan`].
 ///
-/// Only the plan owner may call this. A `Sunset` plan is immutable except for
-/// removing pullers (see [`assert_sunset_puller_reduction`]).
+/// Only the plan owner may call this. The `expected_*` fields must match the
+/// live plan, else the update is rejected as
+/// [`StalePlanApproval`](SubscriptionsError::StalePlanApproval). A `Sunset`
+/// plan is immutable except for removing pullers (see
+/// [`assert_sunset_puller_reduction`]).
 pub fn process(accounts: &mut [AccountView], data: &UpdatePlanData) -> ProgramResult {
     let accounts = UpdatePlanAccounts::try_from(accounts)?;
 
@@ -117,6 +131,20 @@ pub fn process(accounts: &mut [AccountView], data: &UpdatePlanData) -> ProgramRe
 
         if &plan.owner != accounts.owner.address() {
             return Err(SubscriptionsError::NotPlanOwner.into());
+        }
+
+        let live_created_at = plan.data.terms.created_at;
+        let live_end_ts = plan.data.end_ts;
+        let live_pullers = plan.data.pullers;
+        let live_metadata_uri = plan.data.metadata_uri;
+        let expected_pullers = data.expected_pullers;
+        let expected_metadata_uri = data.expected_metadata_uri;
+        if live_created_at != data.expected_created_at
+            || live_end_ts != data.expected_end_ts
+            || live_pullers != expected_pullers
+            || live_metadata_uri != expected_metadata_uri
+        {
+            return Err(SubscriptionsError::StalePlanApproval.into());
         }
 
         if plan.status == PlanStatus::Sunset as u8 {

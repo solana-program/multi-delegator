@@ -463,8 +463,16 @@ export function useSubscriptionsMutations() {
             endTs,
             metadataUri,
             pullers,
+            expectedCreatedAt,
+            expectedEndTs,
+            expectedMetadataUri,
+            expectedPullers,
         }: {
             endTs: number;
+            expectedCreatedAt: bigint;
+            expectedEndTs: bigint;
+            expectedMetadataUri: string;
+            expectedPullers: string[];
             metadataUri: string;
             planPda: string;
             pullers: string[];
@@ -474,6 +482,10 @@ export function useSubscriptionsMutations() {
 
             const instruction = await getUpdatePlanOverlayInstruction({
                 endTs: BigInt(endTs),
+                expectedCreatedAt,
+                expectedEndTs,
+                expectedMetadataUri,
+                expectedPullers: expectedPullers.map(p => address(p)),
                 metadataUri,
                 owner: signer,
                 planPda: address(planPda),
