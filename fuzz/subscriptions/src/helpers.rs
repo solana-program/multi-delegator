@@ -34,8 +34,12 @@ pub fn create_funded_wallet(ctx: &mut TestContext) -> Rc<Keypair> {
     wallet
 }
 
+pub fn ata_address(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
+    get_associated_token_address_with_program_id(owner, mint, &spl_token_interface::ID)
+}
+
 pub fn create_ata(ctx: &mut TestContext, owner: &Pubkey, mint: &Pubkey, amount: u64) -> Pubkey {
-    let ata = get_associated_token_address_with_program_id(owner, mint, &spl_token_interface::ID);
+    let ata = ata_address(owner, mint);
     ctx.create_token_account()
         .pubkey(ata)
         .mint(*mint)

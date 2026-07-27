@@ -7,14 +7,15 @@ use solana_signer::Signer;
 use subscriptions::accounts::{EventAuthority, Plan, SubscriptionAuthority, SubscriptionDelegation};
 use subscriptions::instructions::{
     CancelSubscriptionBuilder, CreatePlanBuilder, InitSubscriptionAuthorityBuilder, SubscribeBuilder,
+    TransferSubscriptionBuilder,
 };
-use subscriptions::types::{PlanData, PlanTerms, SubscribeData};
+use subscriptions::types::{PlanData, PlanTerms, SubscribeData, TransferData};
 use subscriptions::SUBSCRIPTIONS_ID;
 
 use crate::constants::{
     GENESIS_TS, INITIAL_TOKENS, MINT_DECIMALS, PLAN_AMOUNT, PLAN_ID, PLAN_PERIOD_HOURS, SUBSCRIBER_COUNT,
 };
-use crate::helpers::{create_ata, create_funded_wallet, plan_pda_address, set_clock};
+use crate::helpers::{ata_address, create_ata, create_funded_wallet, plan_pda_address, set_clock};
 
 #[derive(Clone)]
 pub struct SubscriptionsFixture {
@@ -92,7 +93,7 @@ impl SubscriptionsFixture {
 
         let (plan_pda, plan_bump) = plan_pda_address(&merchant.pubkey(), PLAN_ID);
         let mut destinations = [Pubkey::default(); 4];
-        destinations[0] = merchant_ata;
+        destinations[0] = merchant.pubkey();
         let mut pullers = [Pubkey::default(); 4];
         pullers[0] = merchant.pubkey();
         let ix = CreatePlanBuilder::new()
@@ -141,6 +142,36 @@ impl SubscriptionsFixture {
             })
             .instruction();
         self.ctx.raw_call(ix).signers(&[&subscriber]).send().map(|outcome| outcome.is_success()).unwrap_or(false)
+    }
+
+    pub fn action_pull_payment(
+        &mut self,
+        #[range(0..3)] subscriber_idx: usize,
+        #[range(0..2_000_001)] amount: u64,
+    ) -> bool {
+        let subscriber = self.subscribers[subscriber_idx].clone();
+        if !self.ctx.account_has_data(&self.subscription_pda(&subscriber.pubkey()), 1) {
+            return false;
+        }
+        let (authority_pda, _) = SubscriptionAuthority::find_pda(&subscriber.pubkey(), &self.mint);
+        let ix = TransferSubscriptionBuilder::new()
+            .subscription_pda(self.subscription_pda(&subscriber.pubkey()))
+            .plan_pda(self.plan_pda)
+            .subscription_authority(authority_pda)
+            .delegator_ata(ata_address(&subscriber.pubkey(), &self.mint))
+            .receiver_ata(self.merchant_ata)
+            .caller(self.merchant.pubkey())
+            .token_mint(self.mint)
+            .token_program(spl_token_interface::ID)
+            .event_authority(EventAuthority::find_pda().0)
+            .transfer_data(TransferData { amount, delegator: subscriber.pubkey(), mint: self.mint })
+            .instruction();
+        self.ctx
+            .raw_call(ix)
+            .signers(&[&self.merchant.clone()])
+            .send()
+            .map(|outcome| outcome.is_success())
+            .unwrap_or(false)
     }
 
     pub fn action_cancel_subscription(&mut self, #[range(0..3)] subscriber_idx: usize) -> bool {

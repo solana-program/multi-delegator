@@ -2,7 +2,20 @@ use crucible_fuzzer::*;
 use solana_signer::Signer;
 use subscriptions::accounts::SubscriptionDelegation;
 
+use crate::constants::{INITIAL_TOKENS, SUBSCRIBER_COUNT};
 use crate::fixture::SubscriptionsFixture;
+use crate::helpers::ata_address;
+
+pub fn check_token_conservation(fixture: &SubscriptionsFixture) {
+    let subscriber_total: u64 =
+        fixture.subscribers.iter().map(|s| fixture.ctx.token_balance(&ata_address(&s.pubkey(), &fixture.mint))).sum();
+    let merchant_balance = fixture.ctx.token_balance(&fixture.merchant_ata);
+    fuzz_assert_eq!(
+        subscriber_total + merchant_balance,
+        INITIAL_TOKENS * SUBSCRIBER_COUNT as u64,
+        "token supply not conserved across pulls"
+    );
+}
 
 pub fn check_subscriptions_decodable_and_capped(fixture: &SubscriptionsFixture) {
     for subscriber in &fixture.subscribers {
