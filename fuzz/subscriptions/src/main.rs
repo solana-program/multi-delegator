@@ -1,7 +1,9 @@
+mod constants;
+mod helpers;
+
 use std::rc::Rc;
 
 use crucible_fuzzer::*;
-use solana_clock::Clock;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
@@ -12,25 +14,10 @@ use subscriptions::instructions::{
 use subscriptions::types::{PlanData, PlanTerms, SubscribeData};
 use subscriptions::SUBSCRIPTIONS_ID;
 
-const TOKEN_PROGRAM_ID: Pubkey = Pubkey::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-const ATA_PROGRAM_ID: Pubkey = Pubkey::from_str_const("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
-
-const GENESIS_TS: i64 = 1_753_000_000;
-const SLOTS_PER_SECOND: i64 = 2;
-const INITIAL_LAMPORTS: u64 = 10_000_000_000;
-const INITIAL_TOKENS: u64 = 1_000_000_000;
-const PLAN_ID: u64 = 1;
-const PLAN_AMOUNT: u64 = 1_000_000;
-const PLAN_PERIOD_HOURS: u64 = 24;
-const SUBSCRIBER_COUNT: usize = 3;
-
-fn ata_address(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
-    Pubkey::find_program_address(&[owner.as_ref(), TOKEN_PROGRAM_ID.as_ref(), mint.as_ref()], &ATA_PROGRAM_ID).0
-}
-
-fn plan_pda_address(owner: &Pubkey, plan_id: u64) -> (Pubkey, u8) {
-    Pubkey::find_program_address(&[Plan::PREFIX, owner.as_ref(), &plan_id.to_le_bytes()], &SUBSCRIPTIONS_ID)
-}
+use crate::constants::{
+    GENESIS_TS, INITIAL_TOKENS, MINT_DECIMALS, PLAN_AMOUNT, PLAN_ID, PLAN_PERIOD_HOURS, SUBSCRIBER_COUNT,
+};
+use crate::helpers::{create_ata, create_funded_wallet, plan_pda_address, set_clock};
 
 #[derive(Clone)]
 struct SubscriptionsFixture {
@@ -62,41 +49,6 @@ impl SubscriptionsFixture {
     }
 }
 
-fn set_clock(ctx: &mut TestContext, ts: i64) {
-    let slot = ((ts - GENESIS_TS).max(0) * SLOTS_PER_SECOND) as u64 + 1;
-    ctx.warp_to_slot(slot);
-    ctx.set_sysvar(&Clock {
-        slot,
-        epoch_start_timestamp: GENESIS_TS,
-        epoch: 0,
-        leader_schedule_epoch: 0,
-        unix_timestamp: ts,
-    });
-}
-
-fn create_funded_wallet(ctx: &mut TestContext) -> Rc<Keypair> {
-    let wallet = Rc::new(Keypair::new());
-    ctx.create_account()
-        .pubkey(wallet.pubkey())
-        .lamports(INITIAL_LAMPORTS)
-        .owner(anchor_lang::system_program::ID)
-        .create()
-        .expect("create wallet");
-    wallet
-}
-
-fn create_ata(ctx: &mut TestContext, owner: &Pubkey, mint: &Pubkey, amount: u64) -> Pubkey {
-    let ata = ata_address(owner, mint);
-    ctx.create_token_account()
-        .pubkey(ata)
-        .mint(*mint)
-        .token_owner(*owner)
-        .amount(amount)
-        .create()
-        .expect("create token account");
-    ata
-}
-
 #[fuzz_fixture]
 impl SubscriptionsFixture {
     pub fn setup() -> Self {
@@ -107,14 +59,14 @@ impl SubscriptionsFixture {
         // litesvm 0.9 (pinned by crucible) serves feature-gated rent (exemption_threshold 1.0)
         // through the Rent::get() syscall but validates rent exemption against this sysvar
         // account, which defaults to 2.0. Align the sysvar so program-funded PDAs pass.
-        ctx.set_sysvar(&anchor_lang::prelude::Rent { exemption_threshold: 1.0, ..Default::default() });
+        ctx.set_sysvar(&solana_rent::Rent { exemption_threshold: 1.0, ..Default::default() });
 
         let mint_authority = Keypair::new();
         let mint = Pubkey::new_unique();
         ctx.create_mint()
             .pubkey(mint)
             .mint_authority(mint_authority.pubkey())
-            .decimals(6)
+            .decimals(MINT_DECIMALS)
             .create()
             .expect("create mint");
 
@@ -131,7 +83,7 @@ impl SubscriptionsFixture {
                 .subscription_authority(authority_pda)
                 .token_mint(mint)
                 .user_ata(user_ata)
-                .token_program(TOKEN_PROGRAM_ID)
+                .token_program(spl_token_interface::ID)
                 .instruction();
             ctx.raw_call(ix).signers(&[&subscriber]).send().expect("send init authority").unwrap();
             subscribers.push(subscriber);

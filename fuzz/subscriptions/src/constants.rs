@@ -1,0 +1,9 @@
+pub const GENESIS_TS: i64 = 1_753_000_000;
+pub const SLOTS_PER_SECOND: i64 = 2;
+pub const INITIAL_LAMPORTS: u64 = 10_000_000_000;
+pub const INITIAL_TOKENS: u64 = 1_000_000_000;
+pub const PLAN_ID: u64 = 1;
+pub const PLAN_AMOUNT: u64 = 1_000_000;
+pub const PLAN_PERIOD_HOURS: u64 = 24;
+pub const SUBSCRIBER_COUNT: usize = 3;
+pub const MINT_DECIMALS: u8 = 6;
