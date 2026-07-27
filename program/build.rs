@@ -5,13 +5,11 @@ use {
     std::{env, fs, path::Path},
 };
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=src/");
     println!("cargo:rerun-if-env-changed=GENERATE_IDL");
 
-    if let Err(e) = generate_idl() {
-        println!("cargo:warning=Failed to generate IDL: {}", e)
-    }
+    generate_idl()
 }
 
 fn generate_idl() -> Result<(), Box<dyn std::error::Error>> {
