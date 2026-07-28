@@ -7,13 +7,14 @@ use crucible_fuzzer::*;
 
 use crate::fixture::{SubscriptionsFixture, __subscriptions_fixture_fuzz};
 use crate::invariants::{
-    check_dead_authority_inert, check_recurring_delegation_caps, check_subscriptions_decodable_and_capped,
-    check_token_conservation,
+    check_dead_authority_inert, check_fixed_delegation_cap, check_recurring_delegation_caps,
+    check_subscriptions_decodable_and_capped, check_token_conservation,
 };
 
 fn check_all(fixture: &mut SubscriptionsFixture) {
     check_subscriptions_decodable_and_capped(fixture);
     check_recurring_delegation_caps(fixture);
+    check_fixed_delegation_cap(fixture);
     check_token_conservation(fixture);
     check_dead_authority_inert(fixture);
 }
