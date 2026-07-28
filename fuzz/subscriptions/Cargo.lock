@@ -4919,6 +4919,7 @@ dependencies = [
  "solana-sdk-ids",
  "solana-signer",
  "spl-associated-token-account-interface",
+ "spl-token-2022-interface",
  "spl-token-interface 3.0.0",
  "subscriptions",
 ]

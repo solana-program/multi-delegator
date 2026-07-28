@@ -14,7 +14,7 @@ use crate::constants::{GENESIS_TS, INITIAL_LAMPORTS, SLOTS_PER_SECOND};
 #[cfg(not(feature = "invariant_subscriptions_t22"))]
 pub const TOKEN_PROGRAM: Pubkey = spl_token_interface::ID;
 #[cfg(feature = "invariant_subscriptions_t22")]
-pub const TOKEN_PROGRAM: Pubkey = Pubkey::from_str_const("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+pub const TOKEN_PROGRAM: Pubkey = spl_token_2022_interface::ID;
 
 pub fn set_clock(ctx: &mut TestContext, ts: i64) {
     let slot = ((ts - GENESIS_TS).max(0) * SLOTS_PER_SECOND) as u64 + 1;
@@ -60,7 +60,7 @@ pub fn create_ata(ctx: &mut TestContext, owner: &Pubkey, mint: &Pubkey, amount: 
 #[cfg(feature = "invariant_subscriptions_t22")]
 pub fn create_mint(ctx: &mut TestContext, mint: &Pubkey, authority: &Pubkey, decimals: u8) {
     use solana_program_pack::Pack;
-    use spl_token_interface::state::Mint;
+    use spl_token_2022_interface::state::Mint;
 
     let mut data = vec![0u8; Mint::LEN];
     Mint {
@@ -83,7 +83,7 @@ pub fn create_mint(ctx: &mut TestContext, mint: &Pubkey, authority: &Pubkey, dec
 #[cfg(feature = "invariant_subscriptions_t22")]
 pub fn create_ata(ctx: &mut TestContext, owner: &Pubkey, mint: &Pubkey, amount: u64) -> Pubkey {
     use solana_program_pack::Pack;
-    use spl_token_interface::state::{Account, AccountState};
+    use spl_token_2022_interface::state::{Account, AccountState};
 
     let ata = ata_address(owner, mint);
     let mut data = vec![0u8; Account::LEN];

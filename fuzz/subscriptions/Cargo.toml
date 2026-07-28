@@ -23,6 +23,7 @@ solana-program-pack = "3.0"
 solana-signer = "3.0"
 spl-associated-token-account-interface = "2.0.0"
 spl-token-interface = "3.0.0"
+spl-token-2022-interface = "2.1"
 
 [[bin]]
 name = "invariant_test"
