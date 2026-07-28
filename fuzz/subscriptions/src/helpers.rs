@@ -7,9 +7,15 @@ use solana_program_pack::Pack;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use spl_associated_token_account_interface::address::get_associated_token_address_with_program_id;
+#[cfg(feature = "invariant_subscriptions_hook")]
+use spl_tlv_account_resolution::account::ExtraAccountMeta;
+#[cfg(feature = "invariant_subscriptions_hook")]
+use spl_tlv_account_resolution::state::ExtraAccountMetaList;
 use spl_token_2022_interface::extension::transfer_hook::{TransferHook, TransferHookAccount};
 use spl_token_2022_interface::extension::{BaseStateWithExtensionsMut, ExtensionType, StateWithExtensionsMut};
 use spl_token_2022_interface::state::{Account, AccountState, Mint};
+#[cfg(feature = "invariant_subscriptions_hook")]
+use spl_transfer_hook_interface::instruction::ExecuteInstruction;
 use subscriptions::accounts::Plan;
 use subscriptions::SUBSCRIPTIONS_ID;
 
@@ -162,10 +168,6 @@ pub fn create_ata(ctx: &mut TestContext, owner: &Pubkey, mint: &Pubkey, amount: 
 // counter account it increments on each transfer. Returns (validation_pda, counter).
 #[cfg(feature = "invariant_subscriptions_hook")]
 pub fn setup_hook(ctx: &mut TestContext, mint: &Pubkey) -> (Pubkey, Pubkey) {
-    use spl_tlv_account_resolution::account::ExtraAccountMeta;
-    use spl_tlv_account_resolution::state::ExtraAccountMetaList;
-    use spl_transfer_hook_interface::instruction::ExecuteInstruction;
-
     ctx.add_program(&HOOK_PROGRAM, "../../tests/transfer-hook-example/target/deploy/transfer_hook_example.so")
         .expect("load hook program");
 
