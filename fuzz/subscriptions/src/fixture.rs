@@ -148,6 +148,52 @@ impl SubscriptionsFixture {
         self.set_time(self.now_ts + hours * 3600);
     }
 
+    // Create plans with fuzzed shapes to reach the CreatePlan validation branches that the single
+    // fixed setup plan never touches: zero amount, out-of-range periods, end_ts bounds, and
+    // varied destination/puller counts. plan_id 1 collides with the setup plan (already-exists
+    // path); 2..5 are fresh.
+    pub fn action_create_plan(
+        &mut self,
+        #[range(1..5)] plan_id: u64,
+        #[range(0..2_000_001)] amount: u64,
+        #[range(0..8762)] period_hours: u64,
+        #[range(0..5)] destination_count: usize,
+        #[range(0..5)] puller_count: usize,
+        #[range(0..100)] end_hours: i64,
+    ) -> bool {
+        let candidates = [
+            self.merchant.pubkey(),
+            self.subscribers[0].pubkey(),
+            self.subscribers[1].pubkey(),
+            self.subscribers[2].pubkey(),
+        ];
+        let mut destinations = [Pubkey::default(); 4];
+        let mut pullers = [Pubkey::default(); 4];
+        for (i, slot) in destinations.iter_mut().enumerate().take(destination_count) {
+            *slot = candidates[i];
+        }
+        for (i, slot) in pullers.iter_mut().enumerate().take(puller_count) {
+            *slot = candidates[i];
+        }
+        let (plan_pda, _) = plan_pda_address(&self.merchant.pubkey(), plan_id);
+        let ix = CreatePlanBuilder::new()
+            .merchant(self.merchant.pubkey())
+            .plan_pda(plan_pda)
+            .token_mint(self.mint)
+            .token_program(TOKEN_PROGRAM)
+            .plan_data(PlanData {
+                plan_id,
+                mint: self.mint,
+                terms: PlanTerms { amount, period_hours, created_at: 0 },
+                end_ts: if end_hours == 0 { 0 } else { self.now_ts + end_hours * 3600 },
+                destinations,
+                pullers,
+                metadata_uri: [0u8; 128],
+            })
+            .instruction();
+        self.ctx.raw_call(ix).signers(&[&self.merchant.clone()]).send().map(|o| o.is_success()).unwrap_or(false)
+    }
+
     fn current_subscribe_data(&self, subscriber: &Pubkey) -> Option<SubscribeData> {
         let plan = self.read_plan()?;
         let authority = self.read_authority(subscriber)?;
