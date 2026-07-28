@@ -4,7 +4,7 @@ use subscriptions::accounts::{RecurringDelegation, SubscriptionDelegation};
 
 use crate::constants::{INITIAL_TOKENS, SUBSCRIBER_COUNT};
 use crate::fixture::SubscriptionsFixture;
-use crate::helpers::ata_address;
+use crate::helpers::{ata_address, token_amount};
 
 const RECURRING_NONCES: [u64; 3] = [3, 4, 5];
 
@@ -47,7 +47,7 @@ pub fn check_recurring_delegation_caps(fixture: &SubscriptionsFixture) {
 pub fn check_dead_authority_inert(fixture: &mut SubscriptionsFixture) {
     for idx in 0..fixture.subscribers.len() {
         let subscriber = fixture.subscribers[idx].pubkey();
-        let balance = fixture.ctx.token_balance(&ata_address(&subscriber, &fixture.mint));
+        let balance = token_amount(&fixture.ctx, &ata_address(&subscriber, &fixture.mint));
         let alive = fixture.read_authority(&subscriber).is_some();
         let (prev_balance, prev_alive) = fixture.prev_spend_state[idx];
         if !prev_alive {
@@ -63,8 +63,8 @@ pub fn check_dead_authority_inert(fixture: &mut SubscriptionsFixture) {
 
 pub fn check_token_conservation(fixture: &SubscriptionsFixture) {
     let subscriber_total: u64 =
-        fixture.subscribers.iter().map(|s| fixture.ctx.token_balance(&ata_address(&s.pubkey(), &fixture.mint))).sum();
-    let merchant_balance = fixture.ctx.token_balance(&fixture.merchant_ata);
+        fixture.subscribers.iter().map(|s| token_amount(&fixture.ctx, &ata_address(&s.pubkey(), &fixture.mint))).sum();
+    let merchant_balance = token_amount(&fixture.ctx, &fixture.merchant_ata);
     fuzz_assert_eq!(
         subscriber_total + merchant_balance,
         INITIAL_TOKENS * SUBSCRIBER_COUNT as u64,

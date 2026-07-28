@@ -40,6 +40,9 @@ pub struct SubscriptionsFixture {
     // action runs between checks, so a balance drop observed while the flag was false means
     // tokens moved through a closed authority.
     pub prev_spend_state: Vec<(u64, bool)>,
+    // (hook program, extra-account-metas PDA, counter) when the mint carries a transfer hook;
+    // appended as remaining accounts on transfers so the Token-2022 hook CPI can resolve.
+    pub hook_accounts: Option<(Pubkey, Pubkey, Pubkey)>,
 }
 
 impl SubscriptionsFixture {
@@ -89,6 +92,14 @@ impl SubscriptionsFixture {
         let mint_authority = Keypair::new();
         let mint = Pubkey::new_unique();
         create_mint(&mut ctx, &mint, &mint_authority.pubkey(), MINT_DECIMALS);
+
+        #[cfg(feature = "invariant_subscriptions_hook")]
+        let hook_accounts = {
+            let (validation_pda, counter) = crate::helpers::setup_hook(&mut ctx, &mint);
+            Some((crate::helpers::HOOK_PROGRAM, validation_pda, counter))
+        };
+        #[cfg(not(feature = "invariant_subscriptions_hook"))]
+        let hook_accounts = None;
 
         let merchant = create_funded_wallet(&mut ctx);
         let merchant_ata = create_ata(&mut ctx, &merchant.pubkey(), &mint, 0);
@@ -141,6 +152,15 @@ impl SubscriptionsFixture {
             plan_bump,
             now_ts: GENESIS_TS,
             prev_spend_state: vec![(INITIAL_TOKENS, true); SUBSCRIBER_COUNT],
+            hook_accounts,
+        }
+    }
+
+    fn append_hook_accounts(&self, ix: &mut solana_instruction::Instruction) {
+        if let Some((program, validation, counter)) = self.hook_accounts {
+            ix.accounts.push(solana_instruction::AccountMeta::new_readonly(program, false));
+            ix.accounts.push(solana_instruction::AccountMeta::new_readonly(validation, false));
+            ix.accounts.push(solana_instruction::AccountMeta::new(counter, false));
         }
     }
 
@@ -274,6 +294,8 @@ impl SubscriptionsFixture {
             .event_authority(EventAuthority::find_pda().0)
             .transfer_data(TransferData { amount, delegator: subscriber.pubkey(), mint: self.mint })
             .instruction();
+        let mut ix = ix;
+        self.append_hook_accounts(&mut ix);
         self.ctx
             .raw_call(ix)
             .signers(&[&self.merchant.clone()])
@@ -410,6 +432,8 @@ impl SubscriptionsFixture {
             .event_authority(EventAuthority::find_pda().0)
             .transfer_data(TransferData { amount, delegator: subscriber.pubkey(), mint: self.mint })
             .instruction();
+        let mut ix = ix;
+        self.append_hook_accounts(&mut ix);
         self.ctx
             .raw_call(ix)
             .signers(&[&self.merchant.clone()])
