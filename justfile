@@ -141,7 +141,7 @@ test-client: build-program build-test-hook generate-clients
 
 # Install the crucible fuzzing CLI at the pinned revision
 install-fuzzer:
-    cargo install --git https://github.com/asymmetric-research/crucible --rev {{crucible_rev}} crucible-fuzz-cli
+    cargo install --force --git https://github.com/asymmetric-research/crucible --rev {{crucible_rev}} crucible-fuzz-cli
     @echo "✓ crucible CLI installed"
 
 # Fuzz a harness test; args pass through to `crucible run` (e.g. --release --stateful -j 4)

@@ -48,7 +48,7 @@ jobs:
           key: crucible-cli-${{ env.CRUCIBLE_REV }}
 
       - name: Install crucible CLI
-        run: just install-fuzzer
+        run: command -v crucible >/dev/null || just install-fuzzer
 
       - name: Fuzz (smoke)
         run: just fuzz invariant_subscriptions 60
@@ -94,7 +94,7 @@ jobs:
           key: crucible-cli-${{ env.CRUCIBLE_REV }}
 
       - name: Install crucible CLI
-        run: just install-fuzzer
+        run: command -v crucible >/dev/null || just install-fuzzer
 
       - name: Restore corpus
         uses: actions/cache@v4
