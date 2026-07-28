@@ -3,9 +3,11 @@ use std::rc::Rc;
 use crucible_fuzzer::{AccountBuilderBase, TestContext};
 use solana_clock::Clock;
 use solana_keypair::Keypair;
+use solana_program_pack::Pack;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use spl_associated_token_account_interface::address::get_associated_token_address_with_program_id;
+use spl_token_2022_interface::state::{Account, AccountState, Mint};
 use subscriptions::accounts::Plan;
 use subscriptions::SUBSCRIPTIONS_ID;
 
@@ -43,25 +45,9 @@ pub fn ata_address(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
     get_associated_token_address_with_program_id(owner, mint, &TOKEN_PROGRAM)
 }
 
-#[cfg(not(feature = "invariant_subscriptions_t22"))]
+// The base mint (82 bytes) and token-account (165 bytes) layouts are identical for classic SPL
+// and Token-2022, so both mints are packed the same way and differ only in the owning program.
 pub fn create_mint(ctx: &mut TestContext, mint: &Pubkey, authority: &Pubkey, decimals: u8) {
-    ctx.create_mint().pubkey(*mint).mint_authority(*authority).decimals(decimals).create().expect("create mint");
-}
-
-#[cfg(not(feature = "invariant_subscriptions_t22"))]
-pub fn create_ata(ctx: &mut TestContext, owner: &Pubkey, mint: &Pubkey, amount: u64) -> Pubkey {
-    let ata = ata_address(owner, mint);
-    ctx.create_token_account().pubkey(ata).mint(*mint).token_owner(*owner).amount(amount).create().expect("create ata");
-    ata
-}
-
-// Token-2022 base accounts share the classic SPL layout (82-byte mint, 165-byte token account) and
-// are accepted by the program without an account-type discriminator, so they are packed directly.
-#[cfg(feature = "invariant_subscriptions_t22")]
-pub fn create_mint(ctx: &mut TestContext, mint: &Pubkey, authority: &Pubkey, decimals: u8) {
-    use solana_program_pack::Pack;
-    use spl_token_2022_interface::state::Mint;
-
     let mut data = vec![0u8; Mint::LEN];
     Mint {
         mint_authority: Some(*authority).into(),
@@ -77,14 +63,10 @@ pub fn create_mint(ctx: &mut TestContext, mint: &Pubkey, authority: &Pubkey, dec
         .owner(TOKEN_PROGRAM)
         .data(&data)
         .create()
-        .expect("create token-2022 mint");
+        .expect("create mint");
 }
 
-#[cfg(feature = "invariant_subscriptions_t22")]
 pub fn create_ata(ctx: &mut TestContext, owner: &Pubkey, mint: &Pubkey, amount: u64) -> Pubkey {
-    use solana_program_pack::Pack;
-    use spl_token_2022_interface::state::{Account, AccountState};
-
     let ata = ata_address(owner, mint);
     let mut data = vec![0u8; Account::LEN];
     Account {
@@ -104,7 +86,7 @@ pub fn create_ata(ctx: &mut TestContext, owner: &Pubkey, mint: &Pubkey, amount: 
         .owner(TOKEN_PROGRAM)
         .data(&data)
         .create()
-        .expect("create token-2022 ata");
+        .expect("create ata");
     ata
 }
 
