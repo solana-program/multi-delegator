@@ -3,11 +3,12 @@ use std::rc::Rc;
 use crucible_fuzzer::{AccountBuilderBase, TestContext};
 use solana_clock::Clock;
 use solana_keypair::Keypair;
-#[cfg(not(feature = "invariant_subscriptions_hook"))]
 use solana_program_pack::Pack;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use spl_associated_token_account_interface::address::get_associated_token_address_with_program_id;
+use spl_token_2022_interface::extension::transfer_hook::{TransferHook, TransferHookAccount};
+use spl_token_2022_interface::extension::{BaseStateWithExtensionsMut, ExtensionType, StateWithExtensionsMut};
 use spl_token_2022_interface::state::{Account, AccountState, Mint};
 use subscriptions::accounts::Plan;
 use subscriptions::SUBSCRIPTIONS_ID;
@@ -19,8 +20,18 @@ pub const TOKEN_PROGRAM: Pubkey = spl_token_interface::ID;
 #[cfg(any(feature = "invariant_subscriptions_t22", feature = "invariant_subscriptions_hook"))]
 pub const TOKEN_PROGRAM: Pubkey = spl_token_2022_interface::ID;
 
-#[cfg(feature = "invariant_subscriptions_hook")]
 pub const HOOK_PROGRAM: Pubkey = Pubkey::new_from_array([42u8; 32]);
+
+// Mint / token-account extensions applied per feature. Empty for classic and plain Token-2022;
+// the hook variant carries the paired TransferHook / TransferHookAccount extensions.
+#[cfg(feature = "invariant_subscriptions_hook")]
+const MINT_EXTENSIONS: &[ExtensionType] = &[ExtensionType::TransferHook];
+#[cfg(not(feature = "invariant_subscriptions_hook"))]
+const MINT_EXTENSIONS: &[ExtensionType] = &[];
+#[cfg(feature = "invariant_subscriptions_hook")]
+const ATA_EXTENSIONS: &[ExtensionType] = &[ExtensionType::TransferHookAccount];
+#[cfg(not(feature = "invariant_subscriptions_hook"))]
+const ATA_EXTENSIONS: &[ExtensionType] = &[];
 
 pub fn set_clock(ctx: &mut TestContext, ts: i64) {
     let slot = ((ts - GENESIS_TS).max(0) * SLOTS_PER_SECOND) as u64 + 1;
@@ -59,19 +70,41 @@ pub fn token_amount(ctx: &TestContext, ata: &Pubkey) -> u64 {
     }
 }
 
-// The base mint (82 bytes) and token-account (165 bytes) layouts are identical for classic SPL
-// and Token-2022, so both mints are packed the same way and differ only in the owning program.
-#[cfg(not(feature = "invariant_subscriptions_hook"))]
+// One mint/token-account builder for all variants: the base 82/165-byte layout when no
+// extensions apply, otherwise the extension-packed layout. MINT_EXTENSIONS/ATA_EXTENSIONS select
+// the shape per feature, so classic, plain Token-2022, and the hook variant share this path.
 pub fn create_mint(ctx: &mut TestContext, mint: &Pubkey, authority: &Pubkey, decimals: u8) {
-    let mut data = vec![0u8; Mint::LEN];
-    Mint {
+    let base = Mint {
         mint_authority: Some(*authority).into(),
         supply: 0,
         decimals,
         is_initialized: true,
         freeze_authority: None.into(),
-    }
-    .pack_into_slice(&mut data);
+    };
+    let data = if MINT_EXTENSIONS.is_empty() {
+        let mut data = vec![0u8; Mint::LEN];
+        base.pack_into_slice(&mut data);
+        data
+    } else {
+        let space = ExtensionType::try_calculate_account_len::<Mint>(MINT_EXTENSIONS).unwrap();
+        let mut data = vec![0u8; space];
+        let mut state = StateWithExtensionsMut::<Mint>::unpack_uninitialized(&mut data).unwrap();
+        state.base = base;
+        state.pack_base();
+        state.init_account_type().unwrap();
+        for ext in MINT_EXTENSIONS {
+            match ext {
+                ExtensionType::TransferHook => {
+                    let hook = state.init_extension::<TransferHook>(true).unwrap();
+                    hook.authority = Some(*authority).try_into().unwrap();
+                    hook.program_id = Some(HOOK_PROGRAM).try_into().unwrap();
+                }
+                other => panic!("unsupported mint extension: {other:?}"),
+            }
+        }
+        drop(state);
+        data
+    };
     ctx.create_account()
         .pubkey(*mint)
         .lamports(INITIAL_LAMPORTS)
@@ -81,11 +114,9 @@ pub fn create_mint(ctx: &mut TestContext, mint: &Pubkey, authority: &Pubkey, dec
         .expect("create mint");
 }
 
-#[cfg(not(feature = "invariant_subscriptions_hook"))]
 pub fn create_ata(ctx: &mut TestContext, owner: &Pubkey, mint: &Pubkey, amount: u64) -> Pubkey {
     let ata = ata_address(owner, mint);
-    let mut data = vec![0u8; Account::LEN];
-    Account {
+    let base = Account {
         mint: *mint,
         owner: *owner,
         amount,
@@ -94,8 +125,29 @@ pub fn create_ata(ctx: &mut TestContext, owner: &Pubkey, mint: &Pubkey, amount: 
         is_native: None.into(),
         delegated_amount: 0,
         close_authority: None.into(),
-    }
-    .pack_into_slice(&mut data);
+    };
+    let data = if ATA_EXTENSIONS.is_empty() {
+        let mut data = vec![0u8; Account::LEN];
+        base.pack_into_slice(&mut data);
+        data
+    } else {
+        let space = ExtensionType::try_calculate_account_len::<Account>(ATA_EXTENSIONS).unwrap();
+        let mut data = vec![0u8; space];
+        let mut state = StateWithExtensionsMut::<Account>::unpack_uninitialized(&mut data).unwrap();
+        state.base = base;
+        state.pack_base();
+        state.init_account_type().unwrap();
+        for ext in ATA_EXTENSIONS {
+            match ext {
+                ExtensionType::TransferHookAccount => {
+                    state.init_extension::<TransferHookAccount>(true).unwrap();
+                }
+                other => panic!("unsupported account extension: {other:?}"),
+            }
+        }
+        drop(state);
+        data
+    };
     ctx.create_account()
         .pubkey(ata)
         .lamports(INITIAL_LAMPORTS)
@@ -103,73 +155,6 @@ pub fn create_ata(ctx: &mut TestContext, owner: &Pubkey, mint: &Pubkey, amount: 
         .data(&data)
         .create()
         .expect("create ata");
-    ata
-}
-
-// Token-2022 mint carrying the TransferHook extension pointed at HOOK_PROGRAM.
-#[cfg(feature = "invariant_subscriptions_hook")]
-pub fn create_mint(ctx: &mut TestContext, mint: &Pubkey, authority: &Pubkey, decimals: u8) {
-    use spl_token_2022_interface::extension::transfer_hook::TransferHook;
-    use spl_token_2022_interface::extension::{BaseStateWithExtensionsMut, ExtensionType, StateWithExtensionsMut};
-
-    let space = ExtensionType::try_calculate_account_len::<Mint>(&[ExtensionType::TransferHook]).unwrap();
-    let mut data = vec![0u8; space];
-    {
-        let mut state = StateWithExtensionsMut::<Mint>::unpack_uninitialized(&mut data).unwrap();
-        state.base = Mint {
-            mint_authority: Some(*authority).into(),
-            supply: 0,
-            decimals,
-            is_initialized: true,
-            freeze_authority: None.into(),
-        };
-        state.pack_base();
-        state.init_account_type().unwrap();
-        let ext = state.init_extension::<TransferHook>(true).unwrap();
-        ext.authority = Some(*authority).try_into().unwrap();
-        ext.program_id = Some(HOOK_PROGRAM).try_into().unwrap();
-    }
-    ctx.create_account()
-        .pubkey(*mint)
-        .lamports(INITIAL_LAMPORTS)
-        .owner(TOKEN_PROGRAM)
-        .data(&data)
-        .create()
-        .expect("create hook mint");
-}
-
-// Token account carrying the TransferHookAccount extension required by a hook mint.
-#[cfg(feature = "invariant_subscriptions_hook")]
-pub fn create_ata(ctx: &mut TestContext, owner: &Pubkey, mint: &Pubkey, amount: u64) -> Pubkey {
-    use spl_token_2022_interface::extension::transfer_hook::TransferHookAccount;
-    use spl_token_2022_interface::extension::{BaseStateWithExtensionsMut, ExtensionType, StateWithExtensionsMut};
-
-    let ata = ata_address(owner, mint);
-    let space = ExtensionType::try_calculate_account_len::<Account>(&[ExtensionType::TransferHookAccount]).unwrap();
-    let mut data = vec![0u8; space];
-    {
-        let mut state = StateWithExtensionsMut::<Account>::unpack_uninitialized(&mut data).unwrap();
-        state.base = Account {
-            mint: *mint,
-            owner: *owner,
-            amount,
-            delegate: None.into(),
-            state: AccountState::Initialized,
-            is_native: None.into(),
-            delegated_amount: 0,
-            close_authority: None.into(),
-        };
-        state.pack_base();
-        state.init_account_type().unwrap();
-        state.init_extension::<TransferHookAccount>(true).unwrap();
-    }
-    ctx.create_account()
-        .pubkey(ata)
-        .lamports(INITIAL_LAMPORTS)
-        .owner(TOKEN_PROGRAM)
-        .data(&data)
-        .create()
-        .expect("create hook ata");
     ata
 }
 
