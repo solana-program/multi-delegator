@@ -35,6 +35,10 @@ pub struct SubscriptionsFixture {
     pub plan_pda: Pubkey,
     pub plan_bump: u8,
     pub now_ts: i64,
+    // (ATA balance, authority alive) per subscriber at the last invariant check. Exactly one
+    // action runs between checks, so a balance drop observed while the flag was false means
+    // tokens moved through a closed authority.
+    pub prev_spend_state: Vec<(u64, bool)>,
 }
 
 impl SubscriptionsFixture {
@@ -48,7 +52,7 @@ impl SubscriptionsFixture {
         Plan::from_bytes(&account.data).ok()
     }
 
-    fn read_authority(&self, subscriber: &Pubkey) -> Option<SubscriptionAuthority> {
+    pub fn read_authority(&self, subscriber: &Pubkey) -> Option<SubscriptionAuthority> {
         let (authority_pda, _) = SubscriptionAuthority::find_pda(subscriber, &self.mint);
         let account = self.ctx.get_account(&authority_pda).ok()?;
         SubscriptionAuthority::from_bytes(&account.data).ok()
@@ -130,7 +134,17 @@ impl SubscriptionsFixture {
             .instruction();
         ctx.raw_call(ix).signers(&[&merchant]).send().expect("send create plan").unwrap();
 
-        Self { ctx, mint, merchant, merchant_ata, subscribers, plan_pda, plan_bump, now_ts: GENESIS_TS }
+        Self {
+            ctx,
+            mint,
+            merchant,
+            merchant_ata,
+            subscribers,
+            plan_pda,
+            plan_bump,
+            now_ts: GENESIS_TS,
+            prev_spend_state: vec![(INITIAL_TOKENS, true); SUBSCRIBER_COUNT],
+        }
     }
 
     pub fn action_advance_time(&mut self, #[range(1..73)] hours: i64) {
@@ -409,6 +423,19 @@ impl SubscriptionsFixture {
         let ix = CloseSubscriptionAuthorityBuilder::new()
             .user(subscriber.pubkey())
             .subscription_authority(authority_pda)
+            .instruction();
+        self.ctx.raw_call(ix).signers(&[&subscriber]).send().map(|outcome| outcome.is_success()).unwrap_or(false)
+    }
+
+    pub fn action_reinit_authority(&mut self, #[range(0..3)] subscriber_idx: usize) -> bool {
+        let subscriber = self.subscribers[subscriber_idx].clone();
+        let (authority_pda, _) = SubscriptionAuthority::find_pda(&subscriber.pubkey(), &self.mint);
+        let ix = InitSubscriptionAuthorityBuilder::new()
+            .owner(subscriber.pubkey())
+            .subscription_authority(authority_pda)
+            .token_mint(self.mint)
+            .user_ata(ata_address(&subscriber.pubkey(), &self.mint))
+            .token_program(spl_token_interface::ID)
             .instruction();
         self.ctx.raw_call(ix).signers(&[&subscriber]).send().map(|outcome| outcome.is_success()).unwrap_or(false)
     }
