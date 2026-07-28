@@ -29,3 +29,11 @@ fn invariant_subscriptions(fixture: &mut SubscriptionsFixture) {
 fn invariant_subscriptions_t22(fixture: &mut SubscriptionsFixture) {
     check_all(fixture);
 }
+
+// Against a Token-2022 mint with a TransferHook extension: transfers forward the hook program
+// and its extra accounts, exercising the program's hook-forwarding path. The hook only bumps a
+// counter, so token conservation still holds and all invariants apply unchanged.
+#[invariant_test]
+fn invariant_subscriptions_hook(fixture: &mut SubscriptionsFixture) {
+    check_all(fixture);
+}

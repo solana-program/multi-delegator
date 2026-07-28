@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [invariant_subscriptions, invariant_subscriptions_t22]
+        test: [invariant_subscriptions, invariant_subscriptions_t22, invariant_subscriptions_hook]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -53,6 +53,9 @@ jobs:
 
       - name: Install crucible CLI
         run: command -v crucible >/dev/null || just install-fuzzer
+
+      - name: Build transfer-hook program
+        run: just build-test-hook
 
       - name: Fuzz (smoke)
         run: just fuzz ${{ matrix.test }} 60
@@ -84,7 +87,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [invariant_subscriptions, invariant_subscriptions_t22]
+        test: [invariant_subscriptions, invariant_subscriptions_t22, invariant_subscriptions_hook]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -112,7 +115,7 @@ jobs:
           restore-keys: fuzz-corpus-${{ matrix.test }}-
 
       - name: Build program and clients
-        run: just build-program && just generate-clients
+        run: just build-program && just generate-clients && just build-test-hook
 
       - name: Fuzz (deep)
         run: |
