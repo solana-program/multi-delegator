@@ -22,7 +22,8 @@ use crate::constants::{
     GENESIS_TS, INITIAL_TOKENS, MINT_DECIMALS, PLAN_AMOUNT, PLAN_ID, PLAN_PERIOD_HOURS, SUBSCRIBER_COUNT,
 };
 use crate::helpers::{
-    ata_address, create_ata, create_funded_wallet, delegation_pda_address, plan_pda_address, set_clock,
+    ata_address, create_ata, create_funded_wallet, create_mint, delegation_pda_address, plan_pda_address, set_clock,
+    TOKEN_PROGRAM,
 };
 
 #[derive(Clone)]
@@ -87,12 +88,7 @@ impl SubscriptionsFixture {
 
         let mint_authority = Keypair::new();
         let mint = Pubkey::new_unique();
-        ctx.create_mint()
-            .pubkey(mint)
-            .mint_authority(mint_authority.pubkey())
-            .decimals(MINT_DECIMALS)
-            .create()
-            .expect("create mint");
+        create_mint(&mut ctx, &mint, &mint_authority.pubkey(), MINT_DECIMALS);
 
         let merchant = create_funded_wallet(&mut ctx);
         let merchant_ata = create_ata(&mut ctx, &merchant.pubkey(), &mint, 0);
@@ -107,7 +103,7 @@ impl SubscriptionsFixture {
                 .subscription_authority(authority_pda)
                 .token_mint(mint)
                 .user_ata(user_ata)
-                .token_program(spl_token_interface::ID)
+                .token_program(TOKEN_PROGRAM)
                 .instruction();
             ctx.raw_call(ix).signers(&[&subscriber]).send().expect("send init authority").unwrap();
             subscribers.push(subscriber);
@@ -122,6 +118,7 @@ impl SubscriptionsFixture {
             .merchant(merchant.pubkey())
             .plan_pda(plan_pda)
             .token_mint(mint)
+            .token_program(TOKEN_PROGRAM)
             .plan_data(PlanData {
                 plan_id: PLAN_ID,
                 mint,
@@ -194,7 +191,7 @@ impl SubscriptionsFixture {
             .receiver_ata(self.merchant_ata)
             .caller(self.merchant.pubkey())
             .token_mint(self.mint)
-            .token_program(spl_token_interface::ID)
+            .token_program(TOKEN_PROGRAM)
             .event_authority(EventAuthority::find_pda().0)
             .transfer_data(TransferData { amount, delegator: subscriber.pubkey(), mint: self.mint })
             .instruction();
@@ -329,7 +326,7 @@ impl SubscriptionsFixture {
             .delegator_ata(ata_address(&subscriber.pubkey(), &self.mint))
             .receiver_ata(self.merchant_ata)
             .token_mint(self.mint)
-            .token_program(spl_token_interface::ID)
+            .token_program(TOKEN_PROGRAM)
             .delegatee(delegatee)
             .event_authority(EventAuthority::find_pda().0)
             .transfer_data(TransferData { amount, delegator: subscriber.pubkey(), mint: self.mint })
@@ -411,7 +408,7 @@ impl SubscriptionsFixture {
             .user(subscriber.pubkey())
             .user_ata(ata_address(&subscriber.pubkey(), &self.mint))
             .token_mint(self.mint)
-            .token_program(spl_token_interface::ID)
+            .token_program(TOKEN_PROGRAM)
             .subscription_authority(authority_pda)
             .instruction();
         self.ctx.raw_call(ix).signers(&[&subscriber]).send().map(|outcome| outcome.is_success()).unwrap_or(false)
@@ -435,7 +432,7 @@ impl SubscriptionsFixture {
             .subscription_authority(authority_pda)
             .token_mint(self.mint)
             .user_ata(ata_address(&subscriber.pubkey(), &self.mint))
-            .token_program(spl_token_interface::ID)
+            .token_program(TOKEN_PROGRAM)
             .instruction();
         self.ctx.raw_call(ix).signers(&[&subscriber]).send().map(|outcome| outcome.is_success()).unwrap_or(false)
     }

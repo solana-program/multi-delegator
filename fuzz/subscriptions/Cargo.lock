@@ -4913,6 +4913,7 @@ dependencies = [
  "libafl_bolts",
  "solana-clock",
  "solana-keypair",
+ "solana-program-pack",
  "solana-pubkey 3.0.0",
  "solana-rent",
  "solana-sdk-ids",

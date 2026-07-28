@@ -11,6 +11,11 @@ use subscriptions::SUBSCRIPTIONS_ID;
 
 use crate::constants::{GENESIS_TS, INITIAL_LAMPORTS, SLOTS_PER_SECOND};
 
+#[cfg(not(feature = "invariant_subscriptions_t22"))]
+pub const TOKEN_PROGRAM: Pubkey = spl_token_interface::ID;
+#[cfg(feature = "invariant_subscriptions_t22")]
+pub const TOKEN_PROGRAM: Pubkey = Pubkey::from_str_const("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+
 pub fn set_clock(ctx: &mut TestContext, ts: i64) {
     let slot = ((ts - GENESIS_TS).max(0) * SLOTS_PER_SECOND) as u64 + 1;
     ctx.warp_to_slot(slot);
@@ -35,18 +40,71 @@ pub fn create_funded_wallet(ctx: &mut TestContext) -> Rc<Keypair> {
 }
 
 pub fn ata_address(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
-    get_associated_token_address_with_program_id(owner, mint, &spl_token_interface::ID)
+    get_associated_token_address_with_program_id(owner, mint, &TOKEN_PROGRAM)
 }
 
+#[cfg(not(feature = "invariant_subscriptions_t22"))]
+pub fn create_mint(ctx: &mut TestContext, mint: &Pubkey, authority: &Pubkey, decimals: u8) {
+    ctx.create_mint().pubkey(*mint).mint_authority(*authority).decimals(decimals).create().expect("create mint");
+}
+
+#[cfg(not(feature = "invariant_subscriptions_t22"))]
 pub fn create_ata(ctx: &mut TestContext, owner: &Pubkey, mint: &Pubkey, amount: u64) -> Pubkey {
     let ata = ata_address(owner, mint);
-    ctx.create_token_account()
-        .pubkey(ata)
-        .mint(*mint)
-        .token_owner(*owner)
-        .amount(amount)
+    ctx.create_token_account().pubkey(ata).mint(*mint).token_owner(*owner).amount(amount).create().expect("create ata");
+    ata
+}
+
+// Token-2022 base accounts share the classic SPL layout (82-byte mint, 165-byte token account) and
+// are accepted by the program without an account-type discriminator, so they are packed directly.
+#[cfg(feature = "invariant_subscriptions_t22")]
+pub fn create_mint(ctx: &mut TestContext, mint: &Pubkey, authority: &Pubkey, decimals: u8) {
+    use solana_program_pack::Pack;
+    use spl_token_interface::state::Mint;
+
+    let mut data = vec![0u8; Mint::LEN];
+    Mint {
+        mint_authority: Some(*authority).into(),
+        supply: 0,
+        decimals,
+        is_initialized: true,
+        freeze_authority: None.into(),
+    }
+    .pack_into_slice(&mut data);
+    ctx.create_account()
+        .pubkey(*mint)
+        .lamports(INITIAL_LAMPORTS)
+        .owner(TOKEN_PROGRAM)
+        .data(&data)
         .create()
-        .expect("create token account");
+        .expect("create token-2022 mint");
+}
+
+#[cfg(feature = "invariant_subscriptions_t22")]
+pub fn create_ata(ctx: &mut TestContext, owner: &Pubkey, mint: &Pubkey, amount: u64) -> Pubkey {
+    use solana_program_pack::Pack;
+    use spl_token_interface::state::{Account, AccountState};
+
+    let ata = ata_address(owner, mint);
+    let mut data = vec![0u8; Account::LEN];
+    Account {
+        mint: *mint,
+        owner: *owner,
+        amount,
+        delegate: None.into(),
+        state: AccountState::Initialized,
+        is_native: None.into(),
+        delegated_amount: 0,
+        close_authority: None.into(),
+    }
+    .pack_into_slice(&mut data);
+    ctx.create_account()
+        .pubkey(ata)
+        .lamports(INITIAL_LAMPORTS)
+        .owner(TOKEN_PROGRAM)
+        .data(&data)
+        .create()
+        .expect("create token-2022 ata");
     ata
 }
 
