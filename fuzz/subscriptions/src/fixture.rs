@@ -148,10 +148,21 @@ impl SubscriptionsFixture {
         self.set_time(self.now_ts + hours * 3600);
     }
 
-    pub fn action_subscribe(&mut self, #[range(0..3)] subscriber_idx: usize) -> bool {
-        let subscriber = self.subscribers[subscriber_idx].clone();
-        let Some(plan) = self.read_plan() else { return false };
-        let Some(authority) = self.read_authority(&subscriber.pubkey()) else { return false };
+    fn current_subscribe_data(&self, subscriber: &Pubkey) -> Option<SubscribeData> {
+        let plan = self.read_plan()?;
+        let authority = self.read_authority(subscriber)?;
+        Some(SubscribeData {
+            plan_id: PLAN_ID,
+            plan_bump: self.plan_bump,
+            expected_mint: plan.data.mint,
+            expected_amount: plan.data.terms.amount,
+            expected_period_hours: plan.data.terms.period_hours,
+            expected_created_at: plan.data.terms.created_at,
+            expected_subscription_authority_init_id: authority.init_id,
+        })
+    }
+
+    fn send_subscribe(&mut self, subscriber: &Rc<Keypair>, data: SubscribeData) -> bool {
         let (authority_pda, _) = SubscriptionAuthority::find_pda(&subscriber.pubkey(), &self.mint);
         let ix = SubscribeBuilder::new()
             .subscriber(subscriber.pubkey())
@@ -160,17 +171,39 @@ impl SubscriptionsFixture {
             .subscription_pda(self.subscription_pda(&subscriber.pubkey()))
             .subscription_authority_pda(authority_pda)
             .event_authority(EventAuthority::find_pda().0)
-            .subscribe_data(SubscribeData {
-                plan_id: PLAN_ID,
-                plan_bump: self.plan_bump,
-                expected_mint: plan.data.mint,
-                expected_amount: plan.data.terms.amount,
-                expected_period_hours: plan.data.terms.period_hours,
-                expected_created_at: plan.data.terms.created_at,
-                expected_subscription_authority_init_id: authority.init_id,
-            })
+            .subscribe_data(data)
             .instruction();
-        self.ctx.raw_call(ix).signers(&[&subscriber]).send().map(|outcome| outcome.is_success()).unwrap_or(false)
+        self.ctx.raw_call(ix).signers(&[subscriber]).send().map(|outcome| outcome.is_success()).unwrap_or(false)
+    }
+
+    pub fn action_subscribe(&mut self, #[range(0..3)] subscriber_idx: usize) -> bool {
+        let subscriber = self.subscribers[subscriber_idx].clone();
+        let Some(data) = self.current_subscribe_data(&subscriber.pubkey()) else { return false };
+        self.send_subscribe(&subscriber, data)
+    }
+
+    // Subscribe with one expected_* field deliberately wrong, forcing a compare-and-swap
+    // mismatch. The program's guards must reject every variant (StaleSubscriptionAuthority for a
+    // wrong init_id, PlanTermsMismatch for wrong terms); the shared invariants confirm a rejected
+    // attempt leaves no partial state behind.
+    pub fn action_subscribe_wrong_approval(
+        &mut self,
+        #[range(0..3)] subscriber_idx: usize,
+        #[range(0..5)] field: usize,
+    ) -> bool {
+        let subscriber = self.subscribers[subscriber_idx].clone();
+        let Some(mut data) = self.current_subscribe_data(&subscriber.pubkey()) else { return false };
+        match field {
+            0 => data.expected_amount = data.expected_amount.wrapping_add(1),
+            1 => data.expected_period_hours = data.expected_period_hours.wrapping_add(1),
+            2 => data.expected_created_at = data.expected_created_at.wrapping_add(1),
+            3 => {
+                data.expected_subscription_authority_init_id =
+                    data.expected_subscription_authority_init_id.wrapping_add(1)
+            }
+            _ => data.expected_mint = self.plan_pda,
+        }
+        self.send_subscribe(&subscriber, data)
     }
 
     pub fn action_pull_payment(
