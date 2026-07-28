@@ -31,6 +31,10 @@ jobs:
     if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        test: [invariant_subscriptions, invariant_subscriptions_t22, invariant_subscriptions_hook]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -50,12 +54,15 @@ jobs:
       - name: Install crucible CLI
         run: command -v crucible >/dev/null || just install-fuzzer
 
+      - name: Build transfer-hook program
+        run: just build-test-hook
+
       - name: Fuzz (smoke)
-        run: just fuzz invariant_subscriptions 60
+        run: just fuzz ${{ matrix.test }} 60
 
       - name: Check for crashes
         run: |
-          crashes="fuzz/subscriptions/crashes/invariant_subscriptions"
+          crashes="fuzz/subscriptions/crashes/${{ matrix.test }}"
           if [ -d "$crashes" ] && [ -n "$(ls -A "$crashes" 2>/dev/null)" ]; then
             echo "::error::Fuzzer found crashes"
             ls -la "$crashes"
@@ -67,7 +74,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: fuzz-smoke-crashes
+          name: fuzz-smoke-crashes-${{ matrix.test }}
           path: fuzz/subscriptions/crashes/
           if-no-files-found: ignore
 
@@ -77,6 +84,10 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        test: [invariant_subscriptions, invariant_subscriptions_t22, invariant_subscriptions_hook]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -99,32 +110,32 @@ jobs:
       - name: Restore corpus
         uses: actions/cache@v4
         with:
-          path: fuzz/subscriptions/corpus
-          key: fuzz-corpus-${{ github.run_id }}
-          restore-keys: fuzz-corpus-
+          path: fuzz/subscriptions/corpus-${{ matrix.test }}
+          key: fuzz-corpus-${{ matrix.test }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.test }}-
 
       - name: Build program and clients
-        run: just build-program && just generate-clients
+        run: just build-program && just generate-clients && just build-test-hook
 
       - name: Fuzz (deep)
         run: |
-          crucible run subscriptions invariant_subscriptions \
+          crucible run subscriptions ${{ matrix.test }} \
             --release -j 4 \
             --timeout ${{ github.event.inputs.timeout || '7200' }} \
-            --corpus-in fuzz/subscriptions/corpus \
-            --corpus-out fuzz/subscriptions/corpus
+            --corpus-in fuzz/subscriptions/corpus-${{ matrix.test }} \
+            --corpus-out fuzz/subscriptions/corpus-${{ matrix.test }}
 
       - name: Upload crashes
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: fuzz-nightly-crashes
+          name: fuzz-nightly-crashes-${{ matrix.test }}
           path: fuzz/subscriptions/crashes/
           if-no-files-found: ignore
 
       - name: Fail on crashes
         run: |
-          crashes="fuzz/subscriptions/crashes/invariant_subscriptions"
+          crashes="fuzz/subscriptions/crashes/${{ matrix.test }}"
           if [ -d "$crashes" ] && [ -n "$(ls -A "$crashes" 2>/dev/null)" ]; then
             echo "::error::Fuzzer found crashes"
             ls -la "$crashes"

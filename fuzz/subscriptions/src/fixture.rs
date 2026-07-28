@@ -22,7 +22,8 @@ use crate::constants::{
     GENESIS_TS, INITIAL_TOKENS, MINT_DECIMALS, PLAN_AMOUNT, PLAN_ID, PLAN_PERIOD_HOURS, SUBSCRIBER_COUNT,
 };
 use crate::helpers::{
-    ata_address, create_ata, create_funded_wallet, delegation_pda_address, plan_pda_address, set_clock,
+    ata_address, create_ata, create_funded_wallet, create_mint, delegation_pda_address, plan_pda_address, set_clock,
+    TOKEN_PROGRAM,
 };
 
 #[derive(Clone)]
@@ -39,6 +40,9 @@ pub struct SubscriptionsFixture {
     // action runs between checks, so a balance drop observed while the flag was false means
     // tokens moved through a closed authority.
     pub prev_spend_state: Vec<(u64, bool)>,
+    // (hook program, extra-account-metas PDA, counter) when the mint carries a transfer hook;
+    // appended as remaining accounts on transfers so the Token-2022 hook CPI can resolve.
+    pub hook_accounts: Option<(Pubkey, Pubkey, Pubkey)>,
 }
 
 impl SubscriptionsFixture {
@@ -87,12 +91,15 @@ impl SubscriptionsFixture {
 
         let mint_authority = Keypair::new();
         let mint = Pubkey::new_unique();
-        ctx.create_mint()
-            .pubkey(mint)
-            .mint_authority(mint_authority.pubkey())
-            .decimals(MINT_DECIMALS)
-            .create()
-            .expect("create mint");
+        create_mint(&mut ctx, &mint, &mint_authority.pubkey(), MINT_DECIMALS);
+
+        #[cfg(feature = "invariant_subscriptions_hook")]
+        let hook_accounts = {
+            let (validation_pda, counter) = crate::helpers::setup_hook(&mut ctx, &mint);
+            Some((crate::helpers::HOOK_PROGRAM, validation_pda, counter))
+        };
+        #[cfg(not(feature = "invariant_subscriptions_hook"))]
+        let hook_accounts = None;
 
         let merchant = create_funded_wallet(&mut ctx);
         let merchant_ata = create_ata(&mut ctx, &merchant.pubkey(), &mint, 0);
@@ -107,7 +114,7 @@ impl SubscriptionsFixture {
                 .subscription_authority(authority_pda)
                 .token_mint(mint)
                 .user_ata(user_ata)
-                .token_program(spl_token_interface::ID)
+                .token_program(TOKEN_PROGRAM)
                 .instruction();
             ctx.raw_call(ix).signers(&[&subscriber]).send().expect("send init authority").unwrap();
             subscribers.push(subscriber);
@@ -122,6 +129,7 @@ impl SubscriptionsFixture {
             .merchant(merchant.pubkey())
             .plan_pda(plan_pda)
             .token_mint(mint)
+            .token_program(TOKEN_PROGRAM)
             .plan_data(PlanData {
                 plan_id: PLAN_ID,
                 mint,
@@ -144,6 +152,15 @@ impl SubscriptionsFixture {
             plan_bump,
             now_ts: GENESIS_TS,
             prev_spend_state: vec![(INITIAL_TOKENS, true); SUBSCRIBER_COUNT],
+            hook_accounts,
+        }
+    }
+
+    fn append_hook_accounts(&self, ix: &mut solana_instruction::Instruction) {
+        if let Some((program, validation, counter)) = self.hook_accounts {
+            ix.accounts.push(solana_instruction::AccountMeta::new_readonly(program, false));
+            ix.accounts.push(solana_instruction::AccountMeta::new_readonly(validation, false));
+            ix.accounts.push(solana_instruction::AccountMeta::new(counter, false));
         }
     }
 
@@ -151,10 +168,67 @@ impl SubscriptionsFixture {
         self.set_time(self.now_ts + hours * 3600);
     }
 
-    pub fn action_subscribe(&mut self, #[range(0..3)] subscriber_idx: usize) -> bool {
-        let subscriber = self.subscribers[subscriber_idx].clone();
-        let Some(plan) = self.read_plan() else { return false };
-        let Some(authority) = self.read_authority(&subscriber.pubkey()) else { return false };
+    // Create plans with fuzzed shapes to reach the CreatePlan validation branches that the single
+    // fixed setup plan never touches: zero amount, out-of-range periods, end_ts bounds, and
+    // varied destination/puller counts. plan_id 1 collides with the setup plan (already-exists
+    // path); 2..5 are fresh.
+    pub fn action_create_plan(
+        &mut self,
+        #[range(1..5)] plan_id: u64,
+        #[range(0..2_000_001)] amount: u64,
+        #[range(0..8762)] period_hours: u64,
+        #[range(0..5)] destination_count: usize,
+        #[range(0..5)] puller_count: usize,
+        #[range(0..100)] end_hours: i64,
+    ) -> bool {
+        let candidates = [
+            self.merchant.pubkey(),
+            self.subscribers[0].pubkey(),
+            self.subscribers[1].pubkey(),
+            self.subscribers[2].pubkey(),
+        ];
+        let mut destinations = [Pubkey::default(); 4];
+        let mut pullers = [Pubkey::default(); 4];
+        for (i, slot) in destinations.iter_mut().enumerate().take(destination_count) {
+            *slot = candidates[i];
+        }
+        for (i, slot) in pullers.iter_mut().enumerate().take(puller_count) {
+            *slot = candidates[i];
+        }
+        let (plan_pda, _) = plan_pda_address(&self.merchant.pubkey(), plan_id);
+        let ix = CreatePlanBuilder::new()
+            .merchant(self.merchant.pubkey())
+            .plan_pda(plan_pda)
+            .token_mint(self.mint)
+            .token_program(TOKEN_PROGRAM)
+            .plan_data(PlanData {
+                plan_id,
+                mint: self.mint,
+                terms: PlanTerms { amount, period_hours, created_at: 0 },
+                end_ts: if end_hours == 0 { 0 } else { self.now_ts + end_hours * 3600 },
+                destinations,
+                pullers,
+                metadata_uri: [0u8; 128],
+            })
+            .instruction();
+        self.ctx.raw_call(ix).signers(&[&self.merchant.clone()]).send().map(|o| o.is_success()).unwrap_or(false)
+    }
+
+    fn current_subscribe_data(&self, subscriber: &Pubkey) -> Option<SubscribeData> {
+        let plan = self.read_plan()?;
+        let authority = self.read_authority(subscriber)?;
+        Some(SubscribeData {
+            plan_id: PLAN_ID,
+            plan_bump: self.plan_bump,
+            expected_mint: plan.data.mint,
+            expected_amount: plan.data.terms.amount,
+            expected_period_hours: plan.data.terms.period_hours,
+            expected_created_at: plan.data.terms.created_at,
+            expected_subscription_authority_init_id: authority.init_id,
+        })
+    }
+
+    fn send_subscribe(&mut self, subscriber: &Rc<Keypair>, data: SubscribeData) -> bool {
         let (authority_pda, _) = SubscriptionAuthority::find_pda(&subscriber.pubkey(), &self.mint);
         let ix = SubscribeBuilder::new()
             .subscriber(subscriber.pubkey())
@@ -163,17 +237,39 @@ impl SubscriptionsFixture {
             .subscription_pda(self.subscription_pda(&subscriber.pubkey()))
             .subscription_authority_pda(authority_pda)
             .event_authority(EventAuthority::find_pda().0)
-            .subscribe_data(SubscribeData {
-                plan_id: PLAN_ID,
-                plan_bump: self.plan_bump,
-                expected_mint: plan.data.mint,
-                expected_amount: plan.data.terms.amount,
-                expected_period_hours: plan.data.terms.period_hours,
-                expected_created_at: plan.data.terms.created_at,
-                expected_subscription_authority_init_id: authority.init_id,
-            })
+            .subscribe_data(data)
             .instruction();
-        self.ctx.raw_call(ix).signers(&[&subscriber]).send().map(|outcome| outcome.is_success()).unwrap_or(false)
+        self.ctx.raw_call(ix).signers(&[subscriber]).send().map(|outcome| outcome.is_success()).unwrap_or(false)
+    }
+
+    pub fn action_subscribe(&mut self, #[range(0..3)] subscriber_idx: usize) -> bool {
+        let subscriber = self.subscribers[subscriber_idx].clone();
+        let Some(data) = self.current_subscribe_data(&subscriber.pubkey()) else { return false };
+        self.send_subscribe(&subscriber, data)
+    }
+
+    // Subscribe with one expected_* field deliberately wrong, forcing a compare-and-swap
+    // mismatch. The program's guards must reject every variant (StaleSubscriptionAuthority for a
+    // wrong init_id, PlanTermsMismatch for wrong terms); the shared invariants confirm a rejected
+    // attempt leaves no partial state behind.
+    pub fn action_subscribe_wrong_approval(
+        &mut self,
+        #[range(0..3)] subscriber_idx: usize,
+        #[range(0..5)] field: usize,
+    ) -> bool {
+        let subscriber = self.subscribers[subscriber_idx].clone();
+        let Some(mut data) = self.current_subscribe_data(&subscriber.pubkey()) else { return false };
+        match field {
+            0 => data.expected_amount = data.expected_amount.wrapping_add(1),
+            1 => data.expected_period_hours = data.expected_period_hours.wrapping_add(1),
+            2 => data.expected_created_at = data.expected_created_at.wrapping_add(1),
+            3 => {
+                data.expected_subscription_authority_init_id =
+                    data.expected_subscription_authority_init_id.wrapping_add(1)
+            }
+            _ => data.expected_mint = self.plan_pda,
+        }
+        self.send_subscribe(&subscriber, data)
     }
 
     pub fn action_pull_payment(
@@ -194,10 +290,12 @@ impl SubscriptionsFixture {
             .receiver_ata(self.merchant_ata)
             .caller(self.merchant.pubkey())
             .token_mint(self.mint)
-            .token_program(spl_token_interface::ID)
+            .token_program(TOKEN_PROGRAM)
             .event_authority(EventAuthority::find_pda().0)
             .transfer_data(TransferData { amount, delegator: subscriber.pubkey(), mint: self.mint })
             .instruction();
+        let mut ix = ix;
+        self.append_hook_accounts(&mut ix);
         self.ctx
             .raw_call(ix)
             .signers(&[&self.merchant.clone()])
@@ -329,11 +427,13 @@ impl SubscriptionsFixture {
             .delegator_ata(ata_address(&subscriber.pubkey(), &self.mint))
             .receiver_ata(self.merchant_ata)
             .token_mint(self.mint)
-            .token_program(spl_token_interface::ID)
+            .token_program(TOKEN_PROGRAM)
             .delegatee(delegatee)
             .event_authority(EventAuthority::find_pda().0)
             .transfer_data(TransferData { amount, delegator: subscriber.pubkey(), mint: self.mint })
             .instruction();
+        let mut ix = ix;
+        self.append_hook_accounts(&mut ix);
         self.ctx
             .raw_call(ix)
             .signers(&[&self.merchant.clone()])
@@ -411,7 +511,7 @@ impl SubscriptionsFixture {
             .user(subscriber.pubkey())
             .user_ata(ata_address(&subscriber.pubkey(), &self.mint))
             .token_mint(self.mint)
-            .token_program(spl_token_interface::ID)
+            .token_program(TOKEN_PROGRAM)
             .subscription_authority(authority_pda)
             .instruction();
         self.ctx.raw_call(ix).signers(&[&subscriber]).send().map(|outcome| outcome.is_success()).unwrap_or(false)
@@ -435,7 +535,7 @@ impl SubscriptionsFixture {
             .subscription_authority(authority_pda)
             .token_mint(self.mint)
             .user_ata(ata_address(&subscriber.pubkey(), &self.mint))
-            .token_program(spl_token_interface::ID)
+            .token_program(TOKEN_PROGRAM)
             .instruction();
         self.ctx.raw_call(ix).signers(&[&subscriber]).send().map(|outcome| outcome.is_success()).unwrap_or(false)
     }
