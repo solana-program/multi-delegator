@@ -684,6 +684,50 @@
                   "kind": "stringTypeNode"
                 }
               }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "expectedCreatedAt",
+              "type": {
+                "endian": "le",
+                "format": "i64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "expectedEndTs",
+              "type": {
+                "endian": "le",
+                "format": "i64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "expectedPullers",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 4
+                },
+                "item": {
+                  "kind": "publicKeyTypeNode"
+                },
+                "kind": "arrayTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "expectedMetadataUri",
+              "type": {
+                "kind": "fixedSizeTypeNode",
+                "size": 128,
+                "type": {
+                  "encoding": "utf8",
+                  "kind": "stringTypeNode"
+                }
+              }
             }
           ],
           "kind": "structTypeNode"
@@ -1301,6 +1345,12 @@
         "kind": "errorNode",
         "message": "Subscription approval does not match the current subscription",
         "name": "staleSubscriptionApproval"
+      },
+      {
+        "code": 522,
+        "kind": "errorNode",
+        "message": "Plan update approval does not match the current plan state",
+        "name": "stalePlanApproval"
       },
       {
         "code": 600,
@@ -2711,6 +2761,16 @@
             "isWritable": false,
             "kind": "instructionAccountNode",
             "name": "tokenProgram"
+          },
+          {
+            "docs": [
+              "Optional sponsor that funds the plan rent. Defaults to the merchant/signer when omitted; delete_plan refunds the owner, not the payer."
+            ],
+            "isOptional": true,
+            "isSigner": true,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "payer"
           }
         ],
         "arguments": [
@@ -2745,7 +2805,8 @@
           }
         ],
         "kind": "instructionNode",
-        "name": "createPlan"
+        "name": "createPlan",
+        "optionalAccountStrategy": "omitted"
       },
       {
         "accounts": [

@@ -9,7 +9,7 @@ use crate::{
     tests::{
         asserts::TransactionResultExt,
         constants::{MINT_DECIMALS, TOKEN_PROGRAM_ID},
-        utils::{current_ts, days, hours, init_mint, move_clock_forward, setup, CreatePlan, UpdatePlan},
+        utils::{current_ts, days, hours, init_mint, move_clock_forward, setup, CreatePlan, DeletePlan, UpdatePlan},
     },
 };
 
@@ -540,4 +540,64 @@ fn update_plan_rejects_near_immediate_end_ts() {
 
     let res = UpdatePlan::new(litesvm, owner, plan_pda).end_ts(current_ts() + 2).execute();
     res.assert_err(crate::SubscriptionsError::InvalidEndTs);
+}
+
+#[test]
+fn update_plan_rejects_stale_approval_that_restores_removed_puller() {
+    let (litesvm, owner) = &mut setup();
+    let mint = init_mint(litesvm, TOKEN_PROGRAM_ID, MINT_DECIMALS, 1_000_000_000, None, &[]);
+    let puller = Pubkey::new_unique();
+
+    let (res, plan_pda) = CreatePlan::new(litesvm, owner, mint)
+        .plan_id(1)
+        .amount(1_000_000)
+        .period_hours(720)
+        .pullers(vec![puller])
+        .execute();
+    res.assert_ok();
+
+    UpdatePlan::new(litesvm, owner, plan_pda).execute().assert_ok();
+
+    // Stale approval carrying the pre-removal puller set must not re-authorize it.
+    UpdatePlan::new(litesvm, owner, plan_pda)
+        .pullers(vec![puller])
+        .expected_pullers(vec![puller])
+        .execute()
+        .assert_err(crate::SubscriptionsError::StalePlanApproval);
+
+    let account = litesvm.get_account(&plan_pda).unwrap();
+    let plan = Plan::load(&account.data).unwrap();
+    let pullers = plan.data.pullers;
+    let zero: pinocchio::Address = [0u8; 32].into();
+    assert_eq!(pullers, [zero; 4]);
+}
+
+#[test]
+fn update_plan_rejects_approval_from_previous_plan_lifecycle() {
+    let (litesvm, owner) = &mut setup();
+    let mint = init_mint(litesvm, TOKEN_PROGRAM_ID, MINT_DECIMALS, 1_000_000_000, None, &[]);
+
+    let end_ts = current_ts() + days(1) as i64;
+    let (res, plan_pda) =
+        CreatePlan::new(litesvm, owner, mint).plan_id(1).amount(1_000_000).period_hours(1).end_ts(end_ts).execute();
+    res.assert_ok();
+
+    let first_created_at = {
+        let account = litesvm.get_account(&plan_pda).unwrap();
+        Plan::load(&account.data).unwrap().data.terms.created_at
+    };
+
+    move_clock_forward(litesvm, days(2));
+    DeletePlan::new(litesvm, owner, plan_pda).execute().assert_ok();
+
+    let (res, recreated_pda) =
+        CreatePlan::new(litesvm, owner, mint).plan_id(1).amount(1_000_000).period_hours(1).execute();
+    res.assert_ok();
+    assert_eq!(recreated_pda, plan_pda);
+
+    // Approval signed for the deleted plan must not apply to its recreation at the same PDA.
+    UpdatePlan::new(litesvm, owner, plan_pda)
+        .expected_created_at(first_created_at)
+        .execute()
+        .assert_err(crate::SubscriptionsError::StalePlanApproval);
 }

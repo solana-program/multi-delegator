@@ -137,6 +137,10 @@ function EditPlanDialog({
                 endTs,
                 metadataUri: metadataJson,
                 pullers: filteredPullers,
+                expectedCreatedAt: plan.data.terms.createdAt,
+                expectedEndTs: plan.data.endTs,
+                expectedMetadataUri: plan.data.metadataUri,
+                expectedPullers: plan.data.pullers,
             },
             { onSuccess: () => onOpenChange(false) },
         );

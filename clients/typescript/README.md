@@ -48,6 +48,10 @@ await client.subscriptions.instructions
 
 For custom wallet flows, use the exported `get*OverlayInstruction*` functions. They return a single Kit `Instruction` or `Promise<Instruction>` that you can add to your own transaction builder.
 
+### Sponsored (gasless) flows
+
+Installing a distinct `payer()` alongside `identity()` makes that signer sponsor **rent**, not just fees, on every creation instruction (init-authority, create-delegation, subscribe, create-plan). Some sponsored rent is not unilaterally recoverable by the sponsor: an open `SubscriptionAuthority` closes only by the user, non-expiring delegations and perpetual subscriptions stay open indefinitely, and sponsored plan rent refunds to the merchant on delete. Prefer finite `expiryTs`/`endTs` when sponsoring, and enforce per-user and aggregate rent quotas relayer-side. To cover fees without sponsoring rent, set the instruction's `payer` to the user so rent is self-funded while `client.payer` still pays the fee.
+
 ## Capabilities
 
 ### Delegation Management

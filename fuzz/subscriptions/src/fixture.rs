@@ -482,6 +482,7 @@ impl SubscriptionsFixture {
     }
 
     pub fn action_update_plan(&mut self, #[range(0..2)] status: u8, #[range(0..73)] end_hours: i64) -> bool {
+        let Some(plan) = self.read_plan() else { return false };
         let status = if status == 0 { PlanStatus::Sunset } else { PlanStatus::Active };
         let ix = UpdatePlanBuilder::new()
             .owner(self.merchant.pubkey())
@@ -492,6 +493,10 @@ impl SubscriptionsFixture {
                 end_ts: if end_hours == 0 { 0 } else { self.now_ts + end_hours * 3600 },
                 pullers: [self.merchant.pubkey(), Pubkey::default(), Pubkey::default(), Pubkey::default()],
                 metadata_uri: [0u8; 128],
+                expected_created_at: plan.data.terms.created_at,
+                expected_end_ts: plan.data.end_ts,
+                expected_pullers: plan.data.pullers,
+                expected_metadata_uri: plan.data.metadata_uri,
             })
             .instruction();
         self.ctx
