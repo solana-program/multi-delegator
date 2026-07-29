@@ -1,0 +1,144 @@
+name: Fuzz
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      timeout:
+        description: 'Fuzz duration in seconds'
+        required: false
+        default: '7200'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  SOLANA_VERSION: '4.0.0'
+  CRUCIBLE_REV: '812cd55434c297c422dc165a43d731c592762ca9'
+
+jobs:
+  # Fast smoke test on every PR: keeps the harness compiling and the happy path alive.
+  # Not a bug hunt — that is the scheduled job below.
+  fuzz-smoke:
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        test: [invariant_subscriptions, invariant_subscriptions_t22, invariant_subscriptions_hook]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - uses: ./.github/actions/setup
+        with:
+          rust-cache-key: 'fuzz'
+          solana-version: ${{ env.SOLANA_VERSION }}
+
+      - name: Cache crucible CLI
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/crucible
+          key: crucible-cli-${{ env.CRUCIBLE_REV }}
+
+      - name: Install crucible CLI
+        run: command -v crucible >/dev/null || just install-fuzzer
+
+      - name: Build transfer-hook program
+        run: just build-test-hook
+
+      - name: Fuzz (smoke)
+        run: just fuzz ${{ matrix.test }} 60
+
+      - name: Check for crashes
+        run: |
+          crashes="fuzz/subscriptions/crashes/${{ matrix.test }}"
+          if [ -d "$crashes" ] && [ -n "$(ls -A "$crashes" 2>/dev/null)" ]; then
+            echo "::error::Fuzzer found crashes"
+            ls -la "$crashes"
+            exit 1
+          fi
+          echo "No crashes found"
+
+      - name: Upload crashes
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-smoke-crashes-${{ matrix.test }}
+          path: fuzz/subscriptions/crashes/
+          if-no-files-found: ignore
+
+  # Nightly deep run: release build, multi-core, persisted corpus so each night
+  # resumes from what prior nights discovered instead of relearning from scratch.
+  fuzz-nightly:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        test: [invariant_subscriptions, invariant_subscriptions_t22, invariant_subscriptions_hook]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - uses: ./.github/actions/setup
+        with:
+          rust-cache-key: 'fuzz'
+          solana-version: ${{ env.SOLANA_VERSION }}
+
+      - name: Cache crucible CLI
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/crucible
+          key: crucible-cli-${{ env.CRUCIBLE_REV }}
+
+      - name: Install crucible CLI
+        run: command -v crucible >/dev/null || just install-fuzzer
+
+      - name: Restore corpus
+        uses: actions/cache@v4
+        with:
+          path: fuzz/subscriptions/corpus-${{ matrix.test }}
+          key: fuzz-corpus-${{ matrix.test }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.test }}-
+
+      - name: Build program and clients
+        run: just build-program && just generate-clients && just build-test-hook
+
+      - name: Fuzz (deep)
+        run: |
+          crucible run subscriptions ${{ matrix.test }} \
+            --release -j 4 \
+            --timeout ${{ github.event.inputs.timeout || '7200' }} \
+            --corpus-in fuzz/subscriptions/corpus-${{ matrix.test }} \
+            --corpus-out fuzz/subscriptions/corpus-${{ matrix.test }}
+
+      - name: Upload crashes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-nightly-crashes-${{ matrix.test }}
+          path: fuzz/subscriptions/crashes/
+          if-no-files-found: ignore
+
+      - name: Fail on crashes
+        run: |
+          crashes="fuzz/subscriptions/crashes/${{ matrix.test }}"
+          if [ -d "$crashes" ] && [ -n "$(ls -A "$crashes" 2>/dev/null)" ]; then
+            echo "::error::Fuzzer found crashes"
+            ls -la "$crashes"
+            exit 1
+          fi
+          echo "No crashes found"

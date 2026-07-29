@@ -1,0 +1,38 @@
+[package]
+name = "subscriptions_fuzz"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+crucible-fuzzer = { git = "https://github.com/asymmetric-research/crucible", rev = "812cd55434c297c422dc165a43d731c592762ca9" }
+crucible-test-context = { git = "https://github.com/asymmetric-research/crucible", rev = "812cd55434c297c422dc165a43d731c592762ca9" }
+subscriptions = { path = "../../clients/rust" }
+arbitrary = { version = "1", features = ["derive"] }
+ctrlc = "3.4"
+libafl = { version = "0.15.1", features = ["std", "cli", "prelude"] }
+libafl_bolts = { version = "0.15.1", features = ["std"] }
+solana-clock = "3.0"
+solana-instruction = "3.1"
+solana-keypair = "3.0"
+solana-pubkey = "3.0"
+solana-rent = "3.0"
+solana-sdk-ids = "3.0"
+solana-program-pack = "3.0"
+solana-signer = "3.0"
+spl-associated-token-account-interface = "2.0.0"
+spl-token-interface = "3.0.0"
+spl-token-2022-interface = "2.1"
+spl-tlv-account-resolution = "0.11.1"
+spl-transfer-hook-interface = "2.1.0"
+
+[[bin]]
+name = "invariant_test"
+path = "src/main.rs"
+
+[features]
+invariant_subscriptions = []
+invariant_subscriptions_t22 = []
+invariant_subscriptions_hook = []
