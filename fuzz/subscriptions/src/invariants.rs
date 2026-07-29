@@ -1,9 +1,9 @@
 use crucible_fuzzer::*;
 use solana_signer::Signer;
-use subscriptions::accounts::{RecurringDelegation, SubscriptionDelegation};
+use subscriptions::accounts::{FixedDelegation, RecurringDelegation, SubscriptionDelegation};
 
 use crate::constants::{INITIAL_TOKENS, SUBSCRIBER_COUNT};
-use crate::fixture::SubscriptionsFixture;
+use crate::fixture::{SubscriptionsFixture, FIXED_NONCES};
 use crate::helpers::{ata_address, token_amount};
 
 const RECURRING_NONCES: [u64; 3] = [3, 4, 5];
@@ -29,7 +29,7 @@ pub fn check_subscriptions_decodable_and_capped(fixture: &SubscriptionsFixture) 
 pub fn check_recurring_delegation_caps(fixture: &SubscriptionsFixture) {
     for subscriber in &fixture.subscribers {
         for nonce in RECURRING_NONCES {
-            let pda = fixture.recurring_delegation_pda(&subscriber.pubkey(), nonce);
+            let pda = fixture.delegation_pda_for(&subscriber.pubkey(), nonce);
             if !fixture.ctx.account_has_data(&pda, 1) {
                 continue;
             }
@@ -40,6 +40,29 @@ pub fn check_recurring_delegation_caps(fixture: &SubscriptionsFixture) {
                 delegation.amount_per_period,
                 "recurring delegation pulled more than the authorized per-period amount"
             );
+        }
+    }
+}
+
+pub fn check_fixed_delegation_cap(fixture: &mut SubscriptionsFixture) {
+    for idx in 0..fixture.subscribers.len() {
+        let subscriber = fixture.subscribers[idx].pubkey();
+        for (slot, &nonce) in FIXED_NONCES.iter().enumerate() {
+            let pda = fixture.delegation_pda_for(&subscriber, nonce);
+            let current = if fixture.ctx.account_has_data(&pda, 1) {
+                fixture
+                    .ctx
+                    .get_account(&pda)
+                    .ok()
+                    .and_then(|a| FixedDelegation::from_bytes(&a.data).ok())
+                    .map(|d| d.amount)
+            } else {
+                None
+            };
+            if let (Some(prev), Some(cur)) = (fixture.prev_fixed_amount[idx][slot], current) {
+                fuzz_assert_le!(cur, prev, "fixed delegation remaining budget increased while the account stayed live");
+            }
+            fixture.prev_fixed_amount[idx][slot] = current;
         }
     }
 }

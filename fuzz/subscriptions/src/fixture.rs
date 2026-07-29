@@ -26,6 +26,9 @@ use crate::helpers::{
     TOKEN_PROGRAM,
 };
 
+// Nonces action_create_fixed_delegation draws from; recurring uses a disjoint range.
+pub const FIXED_NONCES: [u64; 3] = [0, 1, 2];
+
 #[derive(Clone)]
 pub struct SubscriptionsFixture {
     pub ctx: TestContext,
@@ -40,6 +43,10 @@ pub struct SubscriptionsFixture {
     // action runs between checks, so a balance drop observed while the flag was false means
     // tokens moved through a closed authority.
     pub prev_spend_state: Vec<(u64, bool)>,
+    // Last observed remaining budget of each fixed delegation (per subscriber, per fixed nonce);
+    // None while the delegation account does not exist. transfer_fixed only decrements this budget,
+    // so it must never increase while the account stays live.
+    pub prev_fixed_amount: Vec<[Option<u64>; FIXED_NONCES.len()]>,
     // (hook program, extra-account-metas PDA, counter) when the mint carries a transfer hook;
     // appended as remaining accounts on transfers so the Token-2022 hook CPI can resolve.
     pub hook_accounts: Option<(Pubkey, Pubkey, Pubkey)>,
@@ -71,7 +78,7 @@ impl SubscriptionsFixture {
         SubscriptionDelegation::from_bytes(&account.data).ok()
     }
 
-    pub fn recurring_delegation_pda(&self, subscriber: &Pubkey, nonce: u64) -> Pubkey {
+    pub fn delegation_pda_for(&self, subscriber: &Pubkey, nonce: u64) -> Pubkey {
         let (authority_pda, _) = SubscriptionAuthority::find_pda(subscriber, &self.mint);
         delegation_pda_address(&authority_pda, subscriber, &self.merchant.pubkey(), nonce).0
     }
@@ -152,6 +159,7 @@ impl SubscriptionsFixture {
             plan_bump,
             now_ts: GENESIS_TS,
             prev_spend_state: vec![(INITIAL_TOKENS, true); SUBSCRIBER_COUNT],
+            prev_fixed_amount: vec![[None; FIXED_NONCES.len()]; SUBSCRIBER_COUNT],
             hook_accounts,
         }
     }
