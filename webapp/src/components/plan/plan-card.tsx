@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/dialog';
 import { ZERO_ADDRESS, PlanStatus } from '@solana/subscriptions';
 import { cn, ellipsify, fmtDate, fmtDateTime, formatPeriod, formatPeriodLabel } from '@/lib/utils';
+import { useFeatures } from '@/hooks/use-features';
 import { useSubscriptionsMutations } from '@/hooks/use-subscriptions-mutations';
 import { useSubscriptionAuthorityStatus } from '@/hooks/use-subscription-authority-status';
 import { useTimeTravel } from '@/hooks/use-time-travel';
@@ -700,6 +701,7 @@ export function PlanCard({
     isExpanded?: boolean;
     onToggleExpand?: () => void;
 }) {
+    const features = useFeatures();
     const [editOpen, setEditOpen] = useState(false);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [subscribeOpen, setSubscribeOpen] = useState(false);
@@ -1012,7 +1014,7 @@ export function PlanCard({
 
                     {variant === 'owner' && (
                         <div className="flex items-center gap-2 pt-2 border-t border-sand-200">
-                            {!planExpired && (
+                            {!planExpired && features.updatePlan && (
                                 <Button
                                     variant="outline"
                                     size="sm"
@@ -1046,7 +1048,9 @@ export function PlanCard({
 
             {variant === 'owner' && (
                 <>
-                    <EditPlanDialog plan={plan} meta={meta} open={editOpen} onOpenChange={setEditOpen} />
+                    {features.updatePlan && (
+                        <EditPlanDialog plan={plan} meta={meta} open={editOpen} onOpenChange={setEditOpen} />
+                    )}
                     <DeletePlanDialog plan={plan} meta={meta} open={deleteOpen} onOpenChange={setDeleteOpen} />
                 </>
             )}
