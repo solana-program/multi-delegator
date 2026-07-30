@@ -49,18 +49,21 @@ export interface Features {
     revokeAbandonedDelegation: boolean;
     revokeSubscriptionAuthority: boolean;
     startNowRecurringDelegation: boolean;
+    updatePlan: boolean;
 }
 
 const SOAK_FEATURES: Features = {
     revokeAbandonedDelegation: true,
     revokeSubscriptionAuthority: true,
     startNowRecurringDelegation: true,
+    updatePlan: true,
 };
 
 const STABLE_FEATURES: Features = {
     revokeAbandonedDelegation: true,
     revokeSubscriptionAuthority: true,
     startNowRecurringDelegation: true,
+    updatePlan: false,
 };
 
 export const FEATURES: Record<Network, Features> = {
