@@ -9,6 +9,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Generated `CancelSubscriptionNow` instruction and CPI builders for merchant-approved immediate cancellation.
+- Generated error variants `StaleSubscriptionApproval` (521) and `StalePlanApproval` (522). ([#214], [#222])
+
+### Changed
+
+- **Breaking** — `ResumeSubscription` builders require `resume_data` with `expected_expires_at_ts`, the expiry observed when signing. ([#214])
+- **Breaking** — `CancelSubscriptionNow` builders require `cancel_subscription_now_data` with `expected_current_period_start_ts`, the period start observed when signing. ([#221])
+- **Breaking** — `UpdatePlanData` adds `expected_created_at`, `expected_end_ts`, `expected_pullers`, and `expected_metadata_uri`, the plan state observed when signing. ([#222])
 
 ## [0.4.0] — 2026-07-13
 
@@ -36,3 +43,6 @@ _Releases before `0.4.0` predate this changelog; see the `rust-client-v*` tags a
 [#162]: https://github.com/solana-foundation/subscriptions/pull/162
 [#163]: https://github.com/solana-foundation/subscriptions/pull/163
 [#164]: https://github.com/solana-foundation/subscriptions/pull/164
+[#214]: https://github.com/solana-foundation/subscriptions/pull/214
+[#221]: https://github.com/solana-foundation/subscriptions/pull/221
+[#222]: https://github.com/solana-foundation/subscriptions/pull/222
