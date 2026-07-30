@@ -1,8 +1,19 @@
 # Audit Status
 
-Last updated: 2026-06-26
+Last updated: 2026-07-30
 
 ## Current Baseline
+
+- Auditor: Cantina
+- Report: `audits/report-cli-cantina-a1f6fc40-7817-446d-bb88-abd0f2b96106-2026-07-30-solana-foundation-subscriptions.pdf`
+- Audited-through commit: `d6b3a5dc7ab18c4168441af733c81ab0a599d414`
+- Compare audited baseline delta: https://github.com/solana-foundation/subscriptions/compare/d6b3a5dc7ab18c4168441af733c81ab0a599d414...main
+- Audit fixes implemented/verified through commit: `debb4f75ff7571218b39de3b633074dd843e70db`
+- Compare post-fix delta: https://github.com/solana-foundation/subscriptions/compare/debb4f75ff7571218b39de3b633074dd843e70db...main
+
+Audit scope is commit-based. The external audit baseline is `d6b3a5dc...`. Audit remediation was implemented and verified through `debb4f75...`.
+
+## Previous Audits
 
 - Auditor: Cantina
 - Report: `audits/report-cli-cantina-0c329845-47bc-4915-a50d-56dbc442b76a-solana-subscriptions.pdf`
@@ -12,8 +23,6 @@ Last updated: 2026-06-26
 - Compare post-fix delta: https://github.com/solana-foundation/subscriptions/compare/2d7b45bdc998dc582874fc8ab32ac03f9c786c1e...main
 
 Audit scope is commit-based. The external audit baseline is `38b88beb...`. Audit remediation was implemented and verified through `2d7b45bd...`.
-
-## Previous Audits
 
 > **Note**: This program was previously named `multi-delegator`. The audit report filename and audited-through commits were generated under the old name and are preserved verbatim as signed artifacts.
 
@@ -36,22 +45,22 @@ Audit scope is commit-based. The external audit baseline is `18a50bc...`. Audit 
 
 ```bash
 # Count commits after the external audited baseline
-git rev-list --count 38b88bebd2c3f13ba2fbd54795e9ecc8619f8c0c..main
+git rev-list --count d6b3a5dc7ab18c4168441af733c81ab0a599d414..main
 
 # Inspect commit list since external audited baseline
-git log --oneline 38b88bebd2c3f13ba2fbd54795e9ecc8619f8c0c..main
+git log --oneline d6b3a5dc7ab18c4168441af733c81ab0a599d414..main
 
 # Inspect file-level diff since external audited baseline
-git diff --name-status 38b88bebd2c3f13ba2fbd54795e9ecc8619f8c0c..main
+git diff --name-status d6b3a5dc7ab18c4168441af733c81ab0a599d414..main
 
 # Count commits after fixes implemented/verified through commit
-git rev-list --count 2d7b45bdc998dc582874fc8ab32ac03f9c786c1e..main
+git rev-list --count debb4f75ff7571218b39de3b633074dd843e70db..main
 
 # Inspect commit list since fixes implemented/verified through commit
-git log --oneline 2d7b45bdc998dc582874fc8ab32ac03f9c786c1e..main
+git log --oneline debb4f75ff7571218b39de3b633074dd843e70db..main
 
 # Inspect file-level diff since fixes implemented/verified through commit
-git diff --name-status 2d7b45bdc998dc582874fc8ab32ac03f9c786c1e..main
+git diff --name-status debb4f75ff7571218b39de3b633074dd843e70db..main
 ```
 
 ## Maintenance Rules
