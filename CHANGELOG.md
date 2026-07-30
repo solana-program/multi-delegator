@@ -9,14 +9,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- `CancelSubscriptionNow` (discriminator 17) immediately expires a subscription when both the subscriber and current plan owner sign. It can shorten a pending cancellation, leaves the shared `SubscriptionAuthority` intact, and allows immediate subscription revocation without creating a unilateral skip-payment path.
+- `CancelSubscriptionNow` (discriminator 17) immediately expires a subscription when both the subscriber and current plan owner sign. It can shorten a pending cancellation, leaves the shared `SubscriptionAuthority` intact, and allows immediate subscription revocation without creating a unilateral skip-payment path. The instruction data carries `expected_current_period_start_ts`, binding the dual approval to the subscription incarnation; a signed cancellation replayed against a later re-subscription at the same PDA is rejected with `StaleSubscriptionApproval` (521). ([#221])
 - `CreatePlan` accepts an optional trailing payer that funds plan rent while the merchant remains the owner, enabling sponsored plan creation. Deleting the plan still refunds the merchant, so sponsors must gate access to trusted merchants. ([#204])
 - `UNKNOWN_INIT_ID` (`i64::MIN`) enables one-transaction authority initialization with `Subscribe`, `CreateFixedDelegation`, or `CreateRecurringDelegation` when the new `SubscriptionAuthority.init_id` matches the current slot. The sentinel is slot-scoped and fails for authorities created in an earlier slot; callers should pass the real `init_id` when known. ([#206])
 
 ### Security
 
 - **Breaking** — `ResumeSubscription` now carries `expected_expires_at_ts`, the expiry the subscriber observed when signing; a mismatch is rejected with `StaleSubscriptionApproval` (521), so a stale signed resume cannot clear a later cancellation the subscriber never approved. ([#214])
-- **Breaking** — `CancelSubscriptionNow` now carries `expected_current_period_start_ts`, binding the dual approval to the subscription incarnation; a signed cancellation replayed against a later re-subscription at the same PDA is rejected with `StaleSubscriptionApproval` (521). ([#221])
 - **Breaking** — `UpdatePlan` data appends the observed plan state (`expected_created_at`, `expected_end_ts`, `expected_pullers`, `expected_metadata_uri`); any mismatch with the live plan is rejected with `StalePlanApproval` (522), so a stale signed update cannot restore removed pullers or revert later edits. ([#222])
 - `RevokeAbandonedDelegation` and `RevokeAbandonedSubscription` treat a closed `SubscriptionAuthority` as terminal only once the slot recorded as `init_id` has passed — within that slot a re-initialized authority recreates the same slot-derived `init_id`, so the permission was not actually dead when rent was reclaimed. ([#221])
 

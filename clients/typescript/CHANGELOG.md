@@ -8,7 +8,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- `cancelSubscriptionNow` generated builder, overlay, and plugin instruction. The plugin defaults the subscriber to `client.identity` and the approving plan owner to `client.payer` for sponsored cancellation flows.
+- `cancelSubscriptionNow` generated builder, overlay, and plugin instruction. The plugin defaults the subscriber to `client.identity` and the approving plan owner to `client.payer` for sponsored cancellation flows. Requires `expectedCurrentPeriodStartTs`, the period start observed when signing. ([#221])
 - `createPlan` accepts an optional `payer`; the plugin defaults it to `client.payer` when that signer differs from `client.identity`, enabling sponsored plan creation. ([#204])
 - `UNKNOWN_INIT_ID` is exported for same-slot, one-transaction `SubscriptionAuthority` initialization with subscribe or delegation creation instructions. ([#206])
 - Generated error constants `SUBSCRIPTIONS_ERROR__STALE_SUBSCRIPTION_APPROVAL` (521) and `SUBSCRIPTIONS_ERROR__STALE_PLAN_APPROVAL` (522). ([#214], [#222])
@@ -16,7 +16,6 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - **Breaking** — `resumeSubscription` (generated builder, overlay, and plugin) requires `expectedExpiresAtTs`, the expiry observed when signing. ([#214])
-- **Breaking** — `cancelSubscriptionNow` requires `expectedCurrentPeriodStartTs`, the period start observed when signing. ([#221])
 - **Breaking** — `updatePlan` data adds `expectedCreatedAt`, `expectedEndTs`, `expectedPullers`, and `expectedMetadataUri`; the overlay requires them explicitly, and the plugin client fetches them from the live plan when omitted. ([#222])
 
 ## [0.4.0] — 2026-07-13
