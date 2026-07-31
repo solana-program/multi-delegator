@@ -40,19 +40,19 @@
         "docs": "npx typedoc"
     },
     "dependencies": {
-        "@solana-program/token": "^0.14.0",
-        "@solana-program/token-2022": "^0.12.0",
-        "@solana/kit-plugin-rpc": "^0.12.1",
-        "@solana/kit-plugin-signer": "^0.12.1",
-        "@solana/program-client-core": "^6.10.0"
+        "@solana-program/token": "^0.15.0",
+        "@solana-program/token-2022": "^0.14.0",
+        "@solana/kit-plugin-rpc": "^0.15.0",
+        "@solana/kit-plugin-signer": "^0.13.0",
+        "@solana/program-client-core": "^7.0.0"
     },
     "peerDependencies": {
-        "@solana/kit": "^6.10.0"
+        "@solana/kit": "^7.0.0"
     },
     "devDependencies": {
-        "@solana-program/system": "^0.12.0",
-        "@solana/kit": "^6.10.0",
-        "@solana/kit-plugin-litesvm": "^0.12.1",
+        "@solana-program/system": "^0.13.0",
+        "@solana/kit": "^7.0.0",
+        "@solana/kit-plugin-litesvm": "^0.15.0",
         "@solana/web3.js": "^1.98.4",
         "@sqds/multisig": "^2.1.4",
         "@swig-wallet/kit": "^2.1.0",

@@ -2,7 +2,6 @@ import {
     type Address,
     createClient,
     generateKeyPairSigner,
-    getMinimumBalanceForRentExemption,
     type KeyPairSigner,
     lamports,
 } from '@solana/kit';
@@ -34,8 +33,6 @@ export const ONE_HOUR_IN_SECONDS = 3600;
 export const ONE_DAY_IN_SECONDS = 86400;
 const SYSVAR_CLOCK_ADDRESS = 'SysvarC1ock11111111111111111111111111111111' as Address;
 const SYSVAR_CLOCK_UNIX_TIMESTAMP_OFFSET = 32;
-const SPL_TOKEN_MINT_RENT_LAMPORTS = rentLamports(getMintSize());
-const SPL_TOKEN_ACCOUNT_RENT_LAMPORTS = rentLamports(getTokenSize());
 
 export type SmartWalletName = 'swig' | 'squads';
 
@@ -151,7 +148,7 @@ export class IntegrationTest {
 
         await airdropToAddress(client, payer.address, 10_000_000_000n);
 
-        const tokenMint = await createMint(payer, 6);
+        const tokenMint = await createMint(client.rpc, payer, 6);
 
         return new IntegrationTest(client, payer, tokenMint, TOKEN_PROGRAM_ADDRESS);
     }
@@ -160,14 +157,14 @@ export class IntegrationTest {
      * Creates a new token mint with the payer as the mint authority.
      */
     async createTokenMint(decimals: number = 6): Promise<Address> {
-        return createMint(this.payerKeypair, decimals);
+        return createMint(this.rpc, this.payerKeypair, decimals);
     }
 
     /**
      * Creates an Associated Token Account for the given owner and mints tokens to it.
      */
     async createAtaWithBalance(mint: Address, owner: Address, amount: bigint, decimals: number = 6): Promise<Address> {
-        return createAtaWithTokens(mint, owner, amount, decimals);
+        return createAtaWithTokens(this.rpc, mint, owner, amount, decimals);
     }
 
     async createFundedKeypair(lamportsAmount: bigint = 1_000_000_000n): Promise<KeyPairSigner> {
@@ -331,7 +328,7 @@ async function airdropToAddress(client: KitClient, address: Address, lamportsAmo
     await client.airdrop(address, lamports(lamportsAmount));
 }
 
-async function createMint(payer: KeyPairSigner, decimals: number): Promise<Address> {
+async function createMint(rpc: KitClient['rpc'], payer: KeyPairSigner, decimals: number): Promise<Address> {
     const mint = await generateKeyPairSigner();
     await callSurfnetRpc('surfnet_setAccount', [
         mint.address,
@@ -345,14 +342,20 @@ async function createMint(payer: KeyPairSigner, decimals: number): Promise<Addre
                     freezeAuthority: payer.address,
                 }),
             ).toString('hex'),
-            lamports: SPL_TOKEN_MINT_RENT_LAMPORTS,
+            lamports: await rentLamports(rpc, getMintSize()),
             owner: TOKEN_PROGRAM_ADDRESS,
         },
     ]);
     return mint.address;
 }
 
-async function createAtaWithTokens(mint: Address, owner: Address, amount: bigint, _decimals: number): Promise<Address> {
+async function createAtaWithTokens(
+    rpc: KitClient['rpc'],
+    mint: Address,
+    owner: Address,
+    amount: bigint,
+    _decimals: number,
+): Promise<Address> {
     const [ata] = await findAssociatedTokenPda({
         mint,
         owner,
@@ -373,7 +376,7 @@ async function createAtaWithTokens(mint: Address, owner: Address, amount: bigint
                     closeAuthority: null,
                 }),
             ).toString('hex'),
-            lamports: SPL_TOKEN_ACCOUNT_RENT_LAMPORTS,
+            lamports: await rentLamports(rpc, getTokenSize()),
             owner: TOKEN_PROGRAM_ADDRESS,
         },
     ]);
@@ -402,8 +405,8 @@ async function callSurfnetRpc<T = unknown>(method: string, params: unknown[]): P
     return data.result as T;
 }
 
-function rentLamports(space: number): number {
-    const value = getMinimumBalanceForRentExemption(BigInt(space));
+async function rentLamports(rpc: KitClient['rpc'], space: number): Promise<number> {
+    const { value } = await rpc.getMinimumBalanceForRentExemption(BigInt(space)).send();
     if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
         throw new Error(`rent for ${space} bytes exceeds Number.MAX_SAFE_INTEGER`);
     }
