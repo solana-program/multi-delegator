@@ -15,7 +15,6 @@ import {
     type GetProgramAccountsApi,
     getAddressDecoder,
     getAddressEncoder,
-    getMinimumBalanceForRentExemption,
     getProgramDerivedAddress,
     type Instruction,
     type KeyPairSigner,
@@ -60,12 +59,12 @@ const HOOK_SO = resolve(process.cwd(), '../../tests/transfer-hook-example/target
 
 const EXECUTE_DISCRIMINATOR = [0x69, 0x25, 0x65, 0xc5, 0x4b, 0xfb, 0x66, 0x1a];
 
-function encodedAccount(address: Address, data: Uint8Array, owner: Address): EncodedAccount {
+function encodedAccount(svm: LiteSVM, address: Address, data: Uint8Array, owner: Address): EncodedAccount {
     return {
         address,
         data,
         executable: false,
-        lamports: lamports(getMinimumBalanceForRentExemption(BigInt(data.length))),
+        lamports: lamports(svm.minimumBalanceForRentExemption(BigInt(data.length))),
         programAddress: owner,
         space: BigInt(data.length),
     };
@@ -164,15 +163,15 @@ describe('Token-2022 transfer hook (LiteSVM)', () => {
                 supply: 0n,
             }),
         );
-        svm.setAccount(encodedAccount(mint, mintData, TOKEN_2022_PROGRAM_ADDRESS));
+        svm.setAccount(encodedAccount(svm, mint, mintData, TOKEN_2022_PROGRAM_ADDRESS));
 
         [counter] = await getProgramDerivedAddress({ programAddress: HOOK_PROGRAM_ID, seeds: counterPdaSeeds(mint) });
         const [validationPda] = await getProgramDerivedAddress({
             programAddress: HOOK_PROGRAM_ID,
             seeds: ['extra-account-metas', getAddressEncoder().encode(mint)],
         });
-        svm.setAccount(encodedAccount(validationPda, extraAccountMetaListData(), HOOK_PROGRAM_ID));
-        svm.setAccount(encodedAccount(counter, new Uint8Array(1), HOOK_PROGRAM_ID));
+        svm.setAccount(encodedAccount(svm, validationPda, extraAccountMetaListData(), HOOK_PROGRAM_ID));
+        svm.setAccount(encodedAccount(svm, counter, new Uint8Array(1), HOOK_PROGRAM_ID));
     });
 
     it('auto-resolves hook accounts and runs the hook on a fixed-delegation transfer', async () => {
@@ -189,13 +188,19 @@ describe('Token-2022 transfer hook (LiteSVM)', () => {
         });
         svm.setAccount(
             encodedAccount(
+                svm,
                 delegatorAta,
                 hookedTokenAccount(mint, payer.address, 100_000_000n),
                 TOKEN_2022_PROGRAM_ADDRESS,
             ),
         );
         svm.setAccount(
-            encodedAccount(receiverAta, hookedTokenAccount(mint, delegatee.address, 0n), TOKEN_2022_PROGRAM_ADDRESS),
+            encodedAccount(
+                svm,
+                receiverAta,
+                hookedTokenAccount(mint, delegatee.address, 0n),
+                TOKEN_2022_PROGRAM_ADDRESS,
+            ),
         );
 
         await send(
@@ -285,7 +290,12 @@ describe('Token-2022 transfer hook (LiteSVM)', () => {
             tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
         });
         svm.setAccount(
-            encodedAccount(receiverAta, hookedTokenAccount(mint, delegatee.address, 0n), TOKEN_2022_PROGRAM_ADDRESS),
+            encodedAccount(
+                svm,
+                receiverAta,
+                hookedTokenAccount(mint, delegatee.address, 0n),
+                TOKEN_2022_PROGRAM_ADDRESS,
+            ),
         );
 
         const [subscriptionAuthority] = await findSubscriptionAuthorityPda({ tokenMint: mint, user: payer.address });

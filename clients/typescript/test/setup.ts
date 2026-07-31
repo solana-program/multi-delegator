@@ -1,13 +1,6 @@
-import {
-    type Address,
-    createClient,
-    generateKeyPairSigner,
-    getMinimumBalanceForRentExemption,
-    type KeyPairSigner,
-    lamports,
-} from '@solana/kit';
-import { solanaLocalRpc } from '@solana/kit-plugin-rpc';
+import { type Address, createClient, generateKeyPairSigner, type KeyPairSigner, lamports } from '@solana/kit';
 import { signer } from '@solana/kit-plugin-signer';
+import { surfpool } from '@solana/surfpool/kit';
 import {
     AccountState,
     findAssociatedTokenPda,
@@ -34,8 +27,6 @@ export const ONE_HOUR_IN_SECONDS = 3600;
 export const ONE_DAY_IN_SECONDS = 86400;
 const SYSVAR_CLOCK_ADDRESS = 'SysvarC1ock11111111111111111111111111111111' as Address;
 const SYSVAR_CLOCK_UNIX_TIMESTAMP_OFFSET = 32;
-const SPL_TOKEN_MINT_RENT_LAMPORTS = rentLamports(getMintSize());
-const SPL_TOKEN_ACCOUNT_RENT_LAMPORTS = rentLamports(getTokenSize());
 
 export type SmartWalletName = 'swig' | 'squads';
 
@@ -61,13 +52,15 @@ export function getSmartWalletList(): SmartWalletName[] {
 /**
  * Build the Kit plugin client used by the test suite.
  *
- * Surfpool tests use kit's default planner/executor with `skipPreflight` for
- * speed.
+ * The `surfpool` plugin attaches to the already-running detached validator at
+ * {@link SURFPOOL_RPC_URL}, deriving its WebSocket subscriptions URL and
+ * exposing surfnet cheatcodes on `client.cheatcodes`. Transactions skip
+ * preflight for speed.
  */
 async function createTestClient(payer: KeyPairSigner) {
     return createClient()
         .use(signer(payer))
-        .use(solanaLocalRpc({ rpcUrl: SURFPOOL_RPC_URL, skipPreflight: true }))
+        .use(surfpool({ rpcUrl: SURFPOOL_RPC_URL, skipPreflight: true }))
         .use(tokenProgram())
         .use(subscriptionsProgram());
 }
@@ -151,7 +144,7 @@ export class IntegrationTest {
 
         await airdropToAddress(client, payer.address, 10_000_000_000n);
 
-        const tokenMint = await createMint(payer, 6);
+        const tokenMint = await createMint(client, payer, 6);
 
         return new IntegrationTest(client, payer, tokenMint, TOKEN_PROGRAM_ADDRESS);
     }
@@ -160,14 +153,14 @@ export class IntegrationTest {
      * Creates a new token mint with the payer as the mint authority.
      */
     async createTokenMint(decimals: number = 6): Promise<Address> {
-        return createMint(this.payerKeypair, decimals);
+        return createMint(this.client, this.payerKeypair, decimals);
     }
 
     /**
      * Creates an Associated Token Account for the given owner and mints tokens to it.
      */
     async createAtaWithBalance(mint: Address, owner: Address, amount: bigint, decimals: number = 6): Promise<Address> {
-        return createAtaWithTokens(mint, owner, amount, decimals);
+        return createAtaWithTokens(this.client, mint, owner, amount, decimals);
     }
 
     async createFundedKeypair(lamportsAmount: bigint = 1_000_000_000n): Promise<KeyPairSigner> {
@@ -204,7 +197,7 @@ export class IntegrationTest {
     }
 
     async timeTravel(targetTimestampSec: number): Promise<void> {
-        await setSurfpoolClock(targetTimestampSec);
+        await this.client.cheatcodes.timeTravel({ absoluteTimestamp: targetTimestampSec * 1000 }).send();
     }
 
     private smartWalletsInitialized = false;
@@ -266,22 +259,6 @@ export class IntegrationTest {
 // Private Helper Functions
 // ============================================================================
 
-async function setSurfpoolClock(targetTimestampSec: number): Promise<void> {
-    const res = await fetch(SURFPOOL_RPC_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: 1,
-            method: 'surfnet_timeTravel',
-            params: [{ absoluteTimestamp: targetTimestampSec * 1000 }],
-        }),
-    });
-    if (!res.ok) throw new Error(`surfnet_timeTravel failed: ${res.status}`);
-    const data = (await res.json()) as { error?: { message: string } };
-    if (data.error) throw new Error(data.error.message);
-}
-
 async function getClockSysvarTime(rpc: KitClient['rpc']): Promise<bigint | null> {
     const account = await rpc.getAccountInfo(SYSVAR_CLOCK_ADDRESS, { encoding: 'base64' }).send();
     const encodedData = account.value?.data;
@@ -331,11 +308,10 @@ async function airdropToAddress(client: KitClient, address: Address, lamportsAmo
     await client.airdrop(address, lamports(lamportsAmount));
 }
 
-async function createMint(payer: KeyPairSigner, decimals: number): Promise<Address> {
+async function createMint(client: KitClient, payer: KeyPairSigner, decimals: number): Promise<Address> {
     const mint = await generateKeyPairSigner();
-    await callSurfnetRpc('surfnet_setAccount', [
-        mint.address,
-        {
+    await client.cheatcodes
+        .setAccount(mint.address, {
             data: Buffer.from(
                 getMintEncoder().encode({
                     mintAuthority: payer.address,
@@ -345,22 +321,27 @@ async function createMint(payer: KeyPairSigner, decimals: number): Promise<Addre
                     freezeAuthority: payer.address,
                 }),
             ).toString('hex'),
-            lamports: SPL_TOKEN_MINT_RENT_LAMPORTS,
+            lamports: await rentLamports(client.rpc, getMintSize()),
             owner: TOKEN_PROGRAM_ADDRESS,
-        },
-    ]);
+        })
+        .send();
     return mint.address;
 }
 
-async function createAtaWithTokens(mint: Address, owner: Address, amount: bigint, _decimals: number): Promise<Address> {
+async function createAtaWithTokens(
+    client: KitClient,
+    mint: Address,
+    owner: Address,
+    amount: bigint,
+    _decimals: number,
+): Promise<Address> {
     const [ata] = await findAssociatedTokenPda({
         mint,
         owner,
         tokenProgram: TOKEN_PROGRAM_ADDRESS,
     });
-    await callSurfnetRpc('surfnet_setAccount', [
-        ata,
-        {
+    await client.cheatcodes
+        .setAccount(ata, {
             data: Buffer.from(
                 getTokenEncoder().encode({
                     mint,
@@ -373,37 +354,15 @@ async function createAtaWithTokens(mint: Address, owner: Address, amount: bigint
                     closeAuthority: null,
                 }),
             ).toString('hex'),
-            lamports: SPL_TOKEN_ACCOUNT_RENT_LAMPORTS,
+            lamports: await rentLamports(client.rpc, getTokenSize()),
             owner: TOKEN_PROGRAM_ADDRESS,
-        },
-    ]);
+        })
+        .send();
     return ata;
 }
 
-async function callSurfnetRpc<T = unknown>(method: string, params: unknown[]): Promise<T> {
-    const response = await fetch(SURFPOOL_RPC_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: 1,
-            method,
-            params,
-        }),
-    });
-    if (!response.ok) {
-        throw new Error(`${method} failed: HTTP ${response.status}`);
-    }
-
-    const data = (await response.json()) as { error?: { message: string }; result?: T };
-    if (data.error) {
-        throw new Error(`${method} failed: ${data.error.message}`);
-    }
-    return data.result as T;
-}
-
-function rentLamports(space: number): number {
-    const value = getMinimumBalanceForRentExemption(BigInt(space));
+async function rentLamports(rpc: KitClient['rpc'], space: number): Promise<number> {
+    const value = await rpc.getMinimumBalanceForRentExemption(BigInt(space)).send();
     if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
         throw new Error(`rent for ${space} bytes exceeds Number.MAX_SAFE_INTEGER`);
     }
