@@ -195,7 +195,12 @@ describe('Token-2022 transfer hook (LiteSVM)', () => {
             ),
         );
         svm.setAccount(
-            encodedAccount(svm, receiverAta, hookedTokenAccount(mint, delegatee.address, 0n), TOKEN_2022_PROGRAM_ADDRESS),
+            encodedAccount(
+                svm,
+                receiverAta,
+                hookedTokenAccount(mint, delegatee.address, 0n),
+                TOKEN_2022_PROGRAM_ADDRESS,
+            ),
         );
 
         await send(
@@ -285,7 +290,12 @@ describe('Token-2022 transfer hook (LiteSVM)', () => {
             tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
         });
         svm.setAccount(
-            encodedAccount(svm, receiverAta, hookedTokenAccount(mint, delegatee.address, 0n), TOKEN_2022_PROGRAM_ADDRESS),
+            encodedAccount(
+                svm,
+                receiverAta,
+                hookedTokenAccount(mint, delegatee.address, 0n),
+                TOKEN_2022_PROGRAM_ADDRESS,
+            ),
         );
 
         const [subscriptionAuthority] = await findSubscriptionAuthorityPda({ tokenMint: mint, user: payer.address });
