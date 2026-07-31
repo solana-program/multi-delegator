@@ -362,7 +362,7 @@ async function createAtaWithTokens(
 }
 
 async function rentLamports(rpc: KitClient['rpc'], space: number): Promise<number> {
-    const { value } = await rpc.getMinimumBalanceForRentExemption(BigInt(space)).send();
+    const value = await rpc.getMinimumBalanceForRentExemption(BigInt(space)).send();
     if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
         throw new Error(`rent for ${space} bytes exceeds Number.MAX_SAFE_INTEGER`);
     }
