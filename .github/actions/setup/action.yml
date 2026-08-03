@@ -60,14 +60,14 @@ runs:
   steps:
     - name: Setup Rust
       if: inputs.install-rust == 'true'
-      uses: dtolnay/rust-toolchain@master
+      uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
       with:
         toolchain: ${{ inputs.rust-toolchain }}
         components: ${{ inputs.rust-components }}
 
     - name: Rust cache
       if: inputs.install-rust == 'true' && inputs.enable-rust-cache == 'true'
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       with:
         workspaces: '. -> target'
         shared-key: ${{ inputs.rust-cache-key }}
@@ -88,7 +88,7 @@ runs:
     - name: Cache Solana CLI
       if: inputs.install-solana == 'true'
       id: solana-cache
-      uses: actions/cache@v4
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: |
           ~/.local/share/solana
@@ -119,17 +119,17 @@ runs:
 
     - name: Install just
       if: inputs.install-just == 'true'
-      uses: extractions/setup-just@v4
+      uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
       with:
         just-version: '1.50.0'
 
     - name: Install pnpm
       if: inputs.install-pnpm == 'true'
-      uses: pnpm/action-setup@v4
+      uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
     - name: Setup Node.js
       if: inputs.install-pnpm == 'true'
-      uses: actions/setup-node@v6
+      uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
       with:
         node-version-file: '.nvmrc'
 
@@ -142,7 +142,7 @@ runs:
     - name: Cache pnpm store
       if: inputs.install-pnpm == 'true'
       id: pnpm-cache
-      uses: actions/cache@v4
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ${{ steps.pnpm-store.outputs.path }}
         key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
@@ -168,7 +168,7 @@ runs:
     - name: Cache surfpool
       if: inputs.install-surfpool == 'true'
       id: surfpool-cache
-      uses: actions/cache@v4
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ~/.local/bin/surfpool
         key: ${{ runner.os }}-surfpool-${{ steps.surfpool-release.outputs.version }}
