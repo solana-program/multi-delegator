@@ -120,7 +120,6 @@ jobs:
         name: Validate Squads config
         run: |
           : "${SQUADS_VAULT:?Set SQUADS_VAULT in Doppler prd_github}"
-          : "${SQUADS_MULTISIG:?Set SQUADS_MULTISIG in Doppler prd_github}"
 
       - if: inputs.network == 'mainnet'
         id: prepare-squads-release
@@ -151,17 +150,28 @@ jobs:
           vault-address: ${{ env.SQUADS_VAULT }}
 
       - if: inputs.network == 'mainnet'
-        name: Create Squads upgrade transaction (mainnet)
-        uses: solana-foundation/squads-program-action@95eaae9225126e9207fa9686d9d84f6840f5414b # v0.4.4
+        id: export-metadata-tx
+        name: Export metadata write transaction (mainnet)
+        uses: solana-foundation/github-actions/metadata-upload@4dcdecb13d956467088835b1c644b38e0ee1d5d9
         with:
-          rpc: ${{ env.RPC_URL }}
-          program: ${{ env.PROGRAM_ID }}
-          buffer: ${{ steps.prepare-squads-release.outputs.buffer }}
-          metadata-buffer: ${{ steps.prepare-squads-release.outputs.metadata-buffer }}
-          multisig: ${{ env.SQUADS_MULTISIG }}
+          program-id: ${{ env.PROGRAM_ID }}
+          rpc-url: ${{ env.RPC_URL }}
           keypair: ${{ env.DEPLOYER_KEYPAIR }}
-          priority-fee: ${{ inputs.priority-fee }}
-          pda-tx: ${{ steps.export-verify-tx.outputs.pda_tx }}
+          buffer: ${{ steps.prepare-squads-release.outputs.metadata-buffer }}
+          export: ${{ env.SQUADS_VAULT }}
+          priority-fees: ${{ inputs.priority-fee }}
+
+      - if: inputs.network == 'mainnet'
+        id: export-squads-tx
+        name: Export combined Squads transaction (mainnet)
+        env:
+          PROGRAM_BUFFER: ${{ steps.prepare-squads-release.outputs.buffer }}
+          SPILL_ADDRESS: ${{ steps.deployer.outputs.pubkey }}
+          VERIFY_TX: ${{ steps.export-verify-tx.outputs.pda_tx }}
+          METADATA_TXS: ${{ steps.export-metadata-tx.outputs.tx }}
+        run: |
+          TX=$(pnpm exec tsx scripts/export-squads-release-tx.ts | tail -n 1)
+          echo "tx=$TX" >> "$GITHUB_OUTPUT"
 
       - name: Cleanup keypair
         if: always()
@@ -177,9 +187,12 @@ jobs:
             echo "- Buffer: \`${{ steps['prepare-squads-release'].outputs.buffer }}\`" >> $GITHUB_STEP_SUMMARY
             echo "- IDL buffer: \`${{ steps['prepare-squads-release'].outputs['metadata-buffer'] }}\`" >> $GITHUB_STEP_SUMMARY
             echo "- Buffer authority: \`${{ env.SQUADS_VAULT }}\`" >> $GITHUB_STEP_SUMMARY
-            echo "- Squads vault transaction created: program upgrade + IDL metadata write + verify PDA in one transaction" >> $GITHUB_STEP_SUMMARY
-            echo "- **Action required**: approve and execute the transaction in the Squads UI (https://v4.squads.so/)" >> $GITHUB_STEP_SUMMARY
-            echo "- CI keypair role: fee payer, buffer writer, and vault transaction creator (needs Squads membership with Initiate permission)" >> $GITHUB_STEP_SUMMARY
+            echo "- Combined transaction (base58, verify PDA + IDL metadata write + program upgrade in one):" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "${{ steps['export-squads-tx'].outputs.tx }}" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "- **Action required**: import the combined transaction into the Squads transaction builder, then approve and execute" >> $GITHUB_STEP_SUMMARY
+            echo "- CI keypair role: fee payer and buffer writer only; it does not need Squads membership" >> $GITHUB_STEP_SUMMARY
           else
             echo "- Buffer: \`${{ steps.write-buffer.outputs.buffer }}\`" >> $GITHUB_STEP_SUMMARY
           fi
