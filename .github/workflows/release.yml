@@ -36,6 +36,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: ./.github/actions/setup
+        with:
+          rust-cache-key: 'release-${{ inputs.network }}'
+          solana-version: 'v4.0.0'
+
+      - name: Install solana-verify
+        run: cargo install solana-verify --locked
+
+      # Fetch secrets only after all toolchain setup (third-party actions and the
+      # remote Solana installer) has run, so deploy credentials are never present
+      # in the environment while untrusted setup code executes.
       - name: Load deploy config from Doppler
         uses: dopplerhq/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534 # v2.0.0
         with:
@@ -44,14 +55,6 @@ jobs:
           doppler-project: subscriptions
           doppler-config: ${{ inputs.network == 'mainnet' && 'prd_github' || 'stg_github' }}
           inject-env-vars: true
-
-      - uses: ./.github/actions/setup
-        with:
-          rust-cache-key: 'release-${{ inputs.network }}'
-          solana-version: 'v4.0.0'
-
-      - name: Install solana-verify
-        run: cargo install solana-verify --locked
 
       - name: Materialize deployer keypair
         run: |
