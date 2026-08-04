@@ -120,6 +120,7 @@ jobs:
         name: Validate Squads config
         run: |
           : "${SQUADS_VAULT:?Set SQUADS_VAULT in Doppler prd_github}"
+          : "${SQUADS_MULTISIG:?Set SQUADS_MULTISIG in Doppler prd_github}"
 
       - if: inputs.network == 'mainnet'
         id: prepare-squads-release
@@ -150,28 +151,18 @@ jobs:
           vault-address: ${{ env.SQUADS_VAULT }}
 
       - if: inputs.network == 'mainnet'
-        id: export-metadata-tx
-        name: Export metadata write transaction (mainnet)
-        uses: solana-foundation/github-actions/metadata-upload@4dcdecb13d956467088835b1c644b38e0ee1d5d9
-        with:
-          program-id: ${{ env.PROGRAM_ID }}
-          rpc-url: ${{ env.RPC_URL }}
-          keypair: ${{ env.DEPLOYER_KEYPAIR }}
-          buffer: ${{ steps.prepare-squads-release.outputs.metadata-buffer }}
-          export: ${{ env.SQUADS_VAULT }}
-          priority-fees: ${{ inputs.priority-fee }}
-
-      - if: inputs.network == 'mainnet'
         id: export-squads-tx
         name: Export combined Squads transaction (mainnet)
-        env:
-          PROGRAM_BUFFER: ${{ steps.prepare-squads-release.outputs.buffer }}
-          SPILL_ADDRESS: ${{ steps.deployer.outputs.pubkey }}
-          VERIFY_TX: ${{ steps.export-verify-tx.outputs.pda_tx }}
-          METADATA_TXS: ${{ steps.export-metadata-tx.outputs.tx }}
-        run: |
-          TX=$(pnpm exec tsx scripts/export-squads-release-tx.ts | tail -n 1)
-          echo "tx=$TX" >> "$GITHUB_OUTPUT"
+        uses: solana-foundation/squads-program-action@bf638f8d1c99f6951f467041dc56eb1128d03143 # v0.5.0
+        with:
+          rpc: ${{ env.RPC_URL }}
+          program: ${{ env.PROGRAM_ID }}
+          buffer: ${{ steps.prepare-squads-release.outputs.buffer }}
+          metadata-buffer: ${{ steps.prepare-squads-release.outputs.metadata-buffer }}
+          multisig: ${{ env.SQUADS_MULTISIG }}
+          keypair: ${{ env.DEPLOYER_KEYPAIR }}
+          pda-tx: ${{ steps.export-verify-tx.outputs.pda_tx }}
+          export: 'true'
 
       - name: Cleanup keypair
         if: always()
