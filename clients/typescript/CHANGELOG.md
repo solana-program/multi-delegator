@@ -6,6 +6,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-08-10
+
+_Matches on-chain program `program-v0.5.0`. Supersedes prereleases `0.5.0-beta.1` and `0.5.0-beta.2`._
+
 ### Added
 
 - `cancelSubscriptionNow` generated builder, overlay, and plugin instruction. The plugin defaults the subscriber to `client.identity` and the approving plan owner to `client.payer` for sponsored cancellation flows. Requires `expectedCurrentPeriodStartTs`, the period start observed when signing. ([#221])
