@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `CancelSubscriptionNow` accepts any address authorized to pull for the plan as the second signer, not only the plan owner: the account (renamed `merchant` → `authorizer` in the IDL) is checked with `Plan::can_pull`, so a whitelisted puller can co-sign an immediate cancellation and a multisig plan owner no longer has to route every cancellation through a proposal. A key that is neither the owner nor a listed puller is rejected with `Unauthorized` (130) instead of `NotPlanOwner` (504). Zero-padded puller slots still cannot authorize. Accounts, their order, and the instruction data are unchanged.
+- **Breaking** — event wire format: `SubscriptionCancelledEvent` gains `authorized_by`, the address whose approval cancelled the subscription — the subscriber for `cancel_subscription`, the authorizer for `cancel_subscription_now` (appended; existing field offsets preserved, total event size changed).
+
 ## [0.5.0] — 2026-08-10
 
 _Target mainnet deploy 2026-08-10. Reproducible via `solana-verify`. **Includes breaking changes vs the deployed v0.4.0 — see Security.** Audit status: [`audits/AUDIT_STATUS.md`](audits/AUDIT_STATUS.md). The deployed binary and on-chain IDL report `0.5.0-beta.1`: they were built at the release commit `364a419`, which predates this version bump._

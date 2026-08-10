@@ -9,7 +9,7 @@ use crate::{
         utils::{
             build_and_send_transaction, current_ts, days, hours, init_ata, init_wallet, move_clock_forward,
             setup_with_subscription, CancelSubscription, CancelSubscriptionNow, CreatePlan, RevokeSubscription,
-            Subscribe, TransferSubscription,
+            Subscribe, TransferSubscription, UpdatePlan,
         },
     },
     SubscriptionsError,
@@ -22,8 +22,8 @@ use solana_signer::Signer;
 fn cancel_subscription_now_instruction(
     subscriber: Pubkey,
     subscriber_is_signer: bool,
-    merchant: Pubkey,
-    merchant_is_signer: bool,
+    authorizer: Pubkey,
+    authorizer_is_signer: bool,
     plan_pda: Pubkey,
     subscription_pda: Pubkey,
     expected_current_period_start_ts: i64,
@@ -35,7 +35,7 @@ fn cancel_subscription_now_instruction(
         program_id: PROGRAM_ID,
         accounts: vec![
             AccountMeta::new_readonly(subscriber, subscriber_is_signer),
-            AccountMeta::new_readonly(merchant, merchant_is_signer),
+            AccountMeta::new_readonly(authorizer, authorizer_is_signer),
             AccountMeta::new_readonly(plan_pda, false),
             AccountMeta::new(subscription_pda, false),
             AccountMeta::new_readonly(event_authority, false),
@@ -76,7 +76,7 @@ fn cancel_subscription_now_requires_both_signatures() {
     build_and_send_transaction(&mut litesvm, &[&merchant], &merchant.pubkey(), &missing_subscriber)
         .assert_err(SubscriptionsError::NotSigner);
 
-    let missing_merchant = cancel_subscription_now_instruction(
+    let missing_authorizer = cancel_subscription_now_instruction(
         subscriber.pubkey(),
         true,
         merchant.pubkey(),
@@ -85,7 +85,7 @@ fn cancel_subscription_now_requires_both_signatures() {
         subscription_pda,
         period_start,
     );
-    build_and_send_transaction(&mut litesvm, &[&subscriber], &subscriber.pubkey(), &missing_merchant)
+    build_and_send_transaction(&mut litesvm, &[&subscriber], &subscriber.pubkey(), &missing_authorizer)
         .assert_err(SubscriptionsError::NotSigner);
 }
 
@@ -113,7 +113,7 @@ fn cancel_subscription_now_rejects_legacy_zero_payload() {
 }
 
 #[test]
-fn cancel_subscription_now_rejects_wrong_subscriber_merchant_and_plan() {
+fn cancel_subscription_now_rejects_wrong_subscriber_authorizer_and_plan() {
     let (mut litesvm, subscriber, merchant, mint, plan_pda, _, subscription_pda) = setup_with_subscription();
     let attacker = init_wallet(&mut litesvm, 10_000_000_000);
 
@@ -123,7 +123,7 @@ fn cancel_subscription_now_rejects_wrong_subscriber_merchant_and_plan() {
 
     CancelSubscriptionNow::new(&mut litesvm, &subscriber, &attacker, plan_pda, subscription_pda)
         .execute()
-        .assert_err(SubscriptionsError::NotPlanOwner);
+        .assert_err(SubscriptionsError::Unauthorized);
 
     let (create_plan, other_plan) = CreatePlan::new(&mut litesvm, &merchant, mint)
         .plan_id(2)
@@ -247,4 +247,60 @@ fn cancel_subscription_now_rejects_effective_cancellation_and_old_version() {
     CancelSubscriptionNow::new(&mut litesvm, &subscriber, &merchant, plan_pda, subscription_pda)
         .execute()
         .assert_err(SubscriptionsError::MigrationRequired);
+}
+
+#[test]
+fn cancel_subscription_now_accepts_whitelisted_puller() {
+    let (mut litesvm, subscriber, merchant, mint, _, _, _) = setup_with_subscription();
+    let puller = init_wallet(&mut litesvm, 10_000_000_000);
+    let outsider = init_wallet(&mut litesvm, 10_000_000_000);
+
+    let (create_plan, plan_pda) = CreatePlan::new(&mut litesvm, &merchant, mint)
+        .plan_id(2)
+        .amount(50_000_000)
+        .period_hours(1)
+        .end_ts(current_ts() + days(30) as i64)
+        .pullers(vec![puller.pubkey()])
+        .execute();
+    create_plan.assert_ok();
+    let (_, plan_bump) = get_plan_pda(&merchant.pubkey(), 2);
+    Subscribe::new(&mut litesvm, &subscriber, merchant.pubkey(), plan_pda, 2, plan_bump, mint).execute().assert_ok();
+    let (subscription_pda, _) = get_subscription_pda(&plan_pda, &subscriber.pubkey());
+
+    CancelSubscriptionNow::new(&mut litesvm, &subscriber, &outsider, plan_pda, subscription_pda)
+        .execute()
+        .assert_err(SubscriptionsError::Unauthorized);
+
+    CancelSubscriptionNow::new(&mut litesvm, &subscriber, &puller, plan_pda, subscription_pda).execute().assert_ok();
+
+    let account = litesvm.get_account(&subscription_pda).unwrap();
+    let subscription = SubscriptionDelegation::load(&account.data).unwrap();
+    assert_eq!({ subscription.expires_at_ts }, litesvm.get_sysvar::<Clock>().unix_timestamp);
+}
+
+#[test]
+fn cancel_subscription_now_rejects_removed_puller() {
+    let (mut litesvm, subscriber, merchant, mint, _, _, _) = setup_with_subscription();
+    let puller = init_wallet(&mut litesvm, 10_000_000_000);
+
+    let end_ts = current_ts() + days(30) as i64;
+    let (create_plan, plan_pda) = CreatePlan::new(&mut litesvm, &merchant, mint)
+        .plan_id(2)
+        .amount(50_000_000)
+        .period_hours(1)
+        .end_ts(end_ts)
+        .pullers(vec![puller.pubkey()])
+        .execute();
+    create_plan.assert_ok();
+    let (_, plan_bump) = get_plan_pda(&merchant.pubkey(), 2);
+    Subscribe::new(&mut litesvm, &subscriber, merchant.pubkey(), plan_pda, 2, plan_bump, mint).execute().assert_ok();
+    let (subscription_pda, _) = get_subscription_pda(&plan_pda, &subscriber.pubkey());
+
+    UpdatePlan::new(&mut litesvm, &merchant, plan_pda).end_ts(end_ts).pullers(vec![]).execute().assert_ok();
+
+    CancelSubscriptionNow::new(&mut litesvm, &subscriber, &puller, plan_pda, subscription_pda)
+        .execute()
+        .assert_err(SubscriptionsError::Unauthorized);
+
+    CancelSubscriptionNow::new(&mut litesvm, &subscriber, &merchant, plan_pda, subscription_pda).execute().assert_ok();
 }

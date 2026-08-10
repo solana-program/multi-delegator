@@ -144,7 +144,7 @@ ADR-001 provides the core delegation infrastructure. Plans add a subscription mo
 | **Discoverability**    | Manual PDA sharing                                     | Plans can be discovered/marketplace                                                                                                                                                                                                                              |
 | **Use Cases**          | P2P, custom, one-off                                   | Subscription services, SaaS, platforms                                                                                                                                                                                                                           |
 | **Pull Authorization** | Delegatee-only (`transfer_fixed`/`transfer_recurring`) | Owner + configurable pullers array (`transfer_subscription`)                                                                                                                                                                                                     |
-| **Cancellability**     | Not implemented (add later)                            | `cancel_subscription` preserves current-period pull rights; `cancel_subscription_now` requires subscriber and plan-owner approval and expires immediately. `resume_subscription` clears a pending cancellation, and `revoke_delegation` closes after expiration. |
+| **Cancellability**     | Not implemented (add later)                            | `cancel_subscription` preserves current-period pull rights; `cancel_subscription_now` requires subscriber and authorizer approval and expires immediately. `resume_subscription` clears a pending cancellation, and `revoke_delegation` closes after expiration. |
 
 ### Integration With ADR-001
 
@@ -199,7 +199,7 @@ When a subscriber subscribes, the plan's `PlanTerms` (amount, period_hours, crea
 | **NEW**: `SubscriptionDelegation` PDA                | -                     | Tracks per-subscriber billing state                                           |
 | **NEW**: `subscribe` instruction                     | -                     | Creates SubscriptionDelegation referencing a Plan                             |
 | **NEW**: `cancel_subscription` instruction           | -                     | Sets expires_at_ts, grace period                                              |
-| **NEW**: `cancel_subscription_now` instruction       | -                     | Sets expires_at_ts to the current clock with subscriber and merchant approval |
+| **NEW**: `cancel_subscription_now` instruction       | -                     | Sets expires_at_ts to the current clock with subscriber + authorizer approval |
 | **NEW**: `resume_subscription` instruction           | -                     | Clears expires_at_ts to resume autopay                                        |
 | **NEW**: `transfer_subscription` instruction         | -                     | Pulls tokens using Plan terms + Delegation state                              |
 | **NEW**: `revoke_abandoned_subscription` instruction | -                     | Sponsor reclaims rent from a subscription whose SubscriptionAuthority is dead |
@@ -280,7 +280,7 @@ Per-subscriber billing state linked to a Plan:
 
 **PDA seeds**: `["subscription", plan_pda, subscriber]`
 
-**Cancellation semantics**: `expires_at_ts == 0` means the subscription is active. `cancel_subscription` sets it to the end of the current billing period. `cancel_subscription_now`, signed by both the subscriber and plan owner, sets it to the current clock and may shorten a future scheduled cancellation. Transfers are blocked at or after `expires_at_ts`, and the account can be closed via `revoke_delegation`. Immediate cancellation does not close or modify the shared `SubscriptionAuthority`.
+**Cancellation semantics**: `expires_at_ts == 0` means the subscription is active. `cancel_subscription` sets it to the end of the current billing period. `cancel_subscription_now`, signed by both the subscriber and a plan-side authorizer, sets it to the current clock and may shorten a future scheduled cancellation. Transfers are blocked at or after `expires_at_ts`, and the account can be closed via `revoke_delegation`. Immediate cancellation does not close or modify the shared `SubscriptionAuthority`.
 
 ---
 
@@ -511,26 +511,26 @@ After `expires_at_ts` passes, pulls are blocked. The subscriber can then call `r
 **Cancellation flow:**
 
 - `cancel_subscription` → pre-computes `expires_at_ts` (end of current period), allows pulls until then
-- `cancel_subscription_now` → requires subscriber and plan-owner signatures, sets `expires_at_ts = current_ts`, and blocks subsequent pulls immediately
+- `cancel_subscription_now` → requires subscriber and plan-side authorizer signatures, sets `expires_at_ts = current_ts`, and blocks subsequent pulls immediately
 - `resume_subscription` → clears `expires_at_ts` back to `0` before the cancellation period ends, provided the plan is not closed, expired, or recreated with different terms
 - `revoke_delegation` → closes account (requires `expires_at_ts != 0` and `expires_at_ts <= current_ts`)
 
 ### `cancel_subscription_now` (Discriminator: 17)
 
-Subscriber and plan owner jointly cancel a subscription immediately. This instruction can also shorten a future expiration created by `cancel_subscription`. It rejects a cancellation that is already effective.
+Subscriber and a plan-side authorizer jointly cancel a subscription immediately. This instruction can also shorten a future expiration created by `cancel_subscription`. It rejects a cancellation that is already effective.
 
-| Account | Type     | Description                   |
-| ------- | -------- | ----------------------------- |
-| 0       | signer   | Subscriber (delegator)        |
-| 1       | signer   | Merchant (current plan owner) |
-| 2       |          | Plan PDA                      |
-| 3       | writable | SubscriptionDelegation PDA    |
-| 4       |          | Event authority PDA           |
-| 5       |          | Self program                  |
+| Account | Type     | Description                              |
+| ------- | -------- | ---------------------------------------- |
+| 0       | signer   | Subscriber (delegator)                   |
+| 1       | signer   | Authorizer (plan owner or listed puller) |
+| 2       |          | Plan PDA                                 |
+| 3       | writable | SubscriptionDelegation PDA               |
+| 4       |          | Event authority PDA                      |
+| 5       |          | Self program                             |
 
-**Parameters:** None (only discriminator byte)
+**Parameters:** `expected_current_period_start_ts: i64` — the `current_period_start_ts` both parties observed when signing.
 
-**Validation:** Both actors must sign, the merchant must equal `plan.owner`, the subscriber must equal `subscription.header.delegator`, and the subscription must reference the supplied plan.
+**Validation:** Both actors must sign, the authorizer must pass `plan.can_pull` (plan owner or a non-zero entry of `plan.data.pullers`), the subscriber must equal `subscription.header.delegator`, the subscription must reference the supplied plan, and `expected_current_period_start_ts` must match the stored value.
 
 **Process:** Set `expires_at_ts = current_ts` and emit `SubscriptionCancelledEvent`. `transfer_subscription` rejects from that timestamp onward, while `revoke_delegation` can close the subscription immediately. Other delegations using the same `SubscriptionAuthority` are unaffected.
 
@@ -657,7 +657,7 @@ Grace-period cancellation is a three-step flow (resume is optional):
 2. **`resume_subscription`** — Optional. Clears a pending cancellation without resetting period accounting. Rejected once the cancellation period elapses, or if the plan is closed, expired, or recreated with different terms. Sunset plans may still resume existing subscriptions before `end_ts`.
 3. **`revoke_delegation`** — Closes the subscription account and reclaims rent. Only allowed after `expires_at_ts` is in the past.
 
-For prepaid services, the subscriber and plan owner can instead co-sign `cancel_subscription_now`. Pulls are blocked immediately, and `revoke_delegation` may run without waiting for a period boundary. The normal cancellation path remains available when the merchant does not approve immediate cancellation.
+For prepaid services, the subscriber and a plan-side authorizer — the plan owner or any whitelisted puller — can instead co-sign `cancel_subscription_now`. Pulls are blocked immediately, and `revoke_delegation` may run without waiting for a period boundary. The normal cancellation path remains available when the plan side does not approve immediate cancellation.
 
 ```mermaid
 sequenceDiagram
@@ -788,7 +788,7 @@ All transfer and lifecycle instructions emit events via self-CPI through an even
 | Event                        | Emitted By                                       | Data                                                                                                                                           |
 | ---------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SubscriptionCreatedEvent`   | `subscribe`                                      | plan, subscriber, mint, created_ts, payer                                                                                                      |
-| `SubscriptionCancelledEvent` | `cancel_subscription`, `cancel_subscription_now` | plan, subscriber, expires_at_ts                                                                                                                |
+| `SubscriptionCancelledEvent` | `cancel_subscription`, `cancel_subscription_now` | plan, subscriber, expires_at_ts, authorized_by                                                                                                 |
 | `SubscriptionResumedEvent`   | `resume_subscription`                            | plan, subscriber, resumed_ts                                                                                                                   |
 | `SubscriptionTransferEvent`  | `transfer_subscription`                          | subscription, plan, delegator, mint, amount, period_start_ts, period_end_ts, amount_pulled_in_period, receiver, receiver_token_account, puller |
 | `FixedTransferEvent`         | `transfer_fixed`                                 | delegation, delegator, delegatee, mint, amount, remaining_amount, receiver, receiver_token_account                                             |

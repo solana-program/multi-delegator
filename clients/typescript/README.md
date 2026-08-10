@@ -87,7 +87,7 @@ For Token-2022 mints with a configured transfer hook, the plugin resolves and ap
 | `deletePlan` / `getDeletePlanOverlayInstruction`                            | Delete an expired plan and reclaim rent                          |
 | `subscribe` / `getSubscribeOverlayInstructionAsync`                         | Subscribe to a plan                                              |
 | `cancelSubscription` / `getCancelSubscriptionOverlayInstructionAsync`       | Cancel a subscription (grace period until end of billing period) |
-| `cancelSubscriptionNow` / `getCancelSubscriptionNowOverlayInstructionAsync` | Cancel immediately with subscriber and plan-owner approval       |
+| `cancelSubscriptionNow` / `getCancelSubscriptionNowOverlayInstructionAsync` | Cancel immediately with subscriber and plan-side approval        |
 | `resumeSubscription` / `getResumeSubscriptionOverlayInstructionAsync`       | Resume a cancelled subscription before revocation                |
 
 ### Account Queries

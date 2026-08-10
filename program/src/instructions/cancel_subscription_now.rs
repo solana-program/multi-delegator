@@ -42,7 +42,7 @@ impl CancelSubscriptionNowData {
 }
 
 /// Cancels a subscription immediately with approval from both the subscriber
-/// and the plan owner.
+/// and a plan-side authorizer (the plan owner or a whitelisted puller).
 ///
 /// The subscription can be closed via
 /// [`RevokeDelegation`](crate::instructions::revoke_delegation) as soon as this
@@ -53,10 +53,7 @@ pub fn process(accounts: &mut [AccountView], data: &CancelSubscriptionNowData) -
 
     {
         let plan_data = accounts.plan_pda.try_borrow()?;
-        let plan = Plan::load(&plan_data)?;
-        if &plan.owner != accounts.merchant.address() {
-            return Err(SubscriptionsError::NotPlanOwner.into());
-        }
+        Plan::load(&plan_data)?.can_pull(accounts.authorizer.address())?;
     }
 
     {
@@ -83,8 +80,12 @@ pub fn process(accounts: &mut [AccountView], data: &CancelSubscriptionNowData) -
         subscription.expires_at_ts = current_ts;
     }
 
-    let event =
-        SubscriptionCancelledEvent::new(*accounts.plan_pda.address(), *accounts.subscriber.address(), current_ts);
+    let event = SubscriptionCancelledEvent::new(
+        *accounts.plan_pda.address(),
+        *accounts.subscriber.address(),
+        current_ts,
+        *accounts.authorizer.address(),
+    );
     let event_data = event.to_bytes();
     event_engine::emit_event(&crate::ID, accounts.event_authority, accounts.self_program, &event_data)?;
 
@@ -96,7 +97,7 @@ pub fn process(accounts: &mut [AccountView], data: &CancelSubscriptionNowData) -
 /// instruction.
 pub struct CancelSubscriptionNowAccounts<'a> {
     pub subscriber: &'a AccountView,
-    pub merchant: &'a AccountView,
+    pub authorizer: &'a AccountView,
     pub plan_pda: &'a AccountView,
     pub subscription_pda: &'a mut AccountView,
     pub event_authority: &'a AccountView,
@@ -107,16 +108,16 @@ impl<'a> TryFrom<&'a mut [AccountView]> for CancelSubscriptionNowAccounts<'a> {
     type Error = ProgramError;
 
     fn try_from(accounts: &'a mut [AccountView]) -> Result<Self, Self::Error> {
-        let [subscriber, merchant, plan_pda, subscription_pda, event_authority, self_program] = accounts else {
+        let [subscriber, authorizer, plan_pda, subscription_pda, event_authority, self_program] = accounts else {
             return Err(SubscriptionsError::NotEnoughAccountKeys.into());
         };
 
         SignerAccount::check(subscriber)?;
-        SignerAccount::check(merchant)?;
+        SignerAccount::check(authorizer)?;
         ProgramAccount::check(plan_pda)?;
         ProgramAccount::check(subscription_pda)?;
         WritableAccount::check(subscription_pda)?;
 
-        Ok(Self { subscriber, merchant, plan_pda, subscription_pda, event_authority, self_program })
+        Ok(Self { subscriber, authorizer, plan_pda, subscription_pda, event_authority, self_program })
     }
 }

@@ -1716,6 +1716,13 @@
                 "format": "i64",
                 "kind": "numberTypeNode"
               }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "authorizedBy",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
             }
           ],
           "kind": "structTypeNode"
@@ -3723,12 +3730,12 @@
           },
           {
             "docs": [
-              "The owner of the subscription plan approving immediate cancellation"
+              "The plan owner or a whitelisted puller approving immediate cancellation"
             ],
             "isSigner": true,
             "isWritable": false,
             "kind": "instructionAccountNode",
-            "name": "merchant"
+            "name": "authorizer"
           },
           {
             "docs": [

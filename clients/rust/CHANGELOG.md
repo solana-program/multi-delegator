@@ -6,6 +6,11 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking** — `CancelSubscriptionNow` builders rename the `merchant` account to `authorizer`, matching the program's widened check: the plan owner or any whitelisted puller may approve.
+- `SubscriptionCancelledEvent` gains `authorized_by`, the address whose approval cancelled the subscription.
+
 ## [0.5.0] — 2026-08-10
 
 _Matches on-chain program `program-v0.5.0`. Supersedes prerelease `0.5.0-beta.1`._

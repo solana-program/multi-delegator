@@ -1568,7 +1568,7 @@ impl<'a> CancelSubscription<'a> {
 pub struct CancelSubscriptionNow<'a> {
     litesvm: &'a mut LiteSVM,
     subscriber: &'a Keypair,
-    merchant: &'a Keypair,
+    authorizer: &'a Keypair,
     plan_pda: Pubkey,
     subscription_pda: Pubkey,
     expected_current_period_start_ts: Option<i64>,
@@ -1578,11 +1578,11 @@ impl<'a> CancelSubscriptionNow<'a> {
     pub fn new(
         litesvm: &'a mut LiteSVM,
         subscriber: &'a Keypair,
-        merchant: &'a Keypair,
+        authorizer: &'a Keypair,
         plan_pda: Pubkey,
         subscription_pda: Pubkey,
     ) -> Self {
-        Self { litesvm, subscriber, merchant, plan_pda, subscription_pda, expected_current_period_start_ts: None }
+        Self { litesvm, subscriber, authorizer, plan_pda, subscription_pda, expected_current_period_start_ts: None }
     }
 
     pub fn expected_current_period_start_ts(mut self, ts: i64) -> Self {
@@ -1595,7 +1595,7 @@ impl<'a> CancelSubscriptionNow<'a> {
         let event_authority = Pubkey::new_from_array(event_authority_pda::ID.to_bytes());
         let accounts = vec![
             AccountMeta::new_readonly(self.subscriber.pubkey(), true),
-            AccountMeta::new_readonly(self.merchant.pubkey(), true),
+            AccountMeta::new_readonly(self.authorizer.pubkey(), true),
             AccountMeta::new_readonly(self.plan_pda, false),
             AccountMeta::new(self.subscription_pda, false),
             AccountMeta::new_readonly(event_authority, false),
@@ -1611,7 +1611,7 @@ impl<'a> CancelSubscriptionNow<'a> {
         data.extend_from_slice(&expected_current_period_start_ts.to_le_bytes());
         let ix = Instruction { program_id: PROGRAM_ID, accounts, data };
 
-        build_and_send_transaction(self.litesvm, &[self.subscriber, self.merchant], &self.merchant.pubkey(), &ix)
+        build_and_send_transaction(self.litesvm, &[self.subscriber, self.authorizer], &self.subscriber.pubkey(), &ix)
     }
 }
 

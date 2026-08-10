@@ -19,6 +19,10 @@ pub struct SubscriptionCancelledEvent {
     pub subscriber: Address,
     /// Unix timestamp when the subscription will expire.
     pub expires_at_ts: i64,
+    /// The address whose approval cancelled the subscription: the subscriber for
+    /// `cancel_subscription`, the plan owner or a whitelisted puller for
+    /// `cancel_subscription_now`.
+    pub authorized_by: Address,
 }
 
 impl SubscriptionCancelledEvent {
@@ -26,8 +30,8 @@ impl SubscriptionCancelledEvent {
     pub const DATA_LEN: usize = size_of::<Self>();
 
     /// Constructs a new event.
-    pub fn new(plan: Address, subscriber: Address, expires_at_ts: i64) -> Self {
-        Self { plan, subscriber, expires_at_ts }
+    pub fn new(plan: Address, subscriber: Address, expires_at_ts: i64, authorized_by: Address) -> Self {
+        Self { plan, subscriber, expires_at_ts, authorized_by }
     }
 }
 
@@ -42,6 +46,7 @@ impl EventSerialize for SubscriptionCancelledEvent {
         writer.extend_from_slice(self.plan.as_ref());
         writer.extend_from_slice(self.subscriber.as_ref());
         writer.extend_from_slice(&{ self.expires_at_ts }.to_le_bytes());
+        writer.extend_from_slice(self.authorized_by.as_ref());
     }
 }
 
@@ -60,9 +65,13 @@ mod tests {
         Address::new_from_array([2u8; 32])
     }
 
+    fn authorized_by() -> Address {
+        Address::new_from_array([3u8; 32])
+    }
+
     #[test]
     fn roundtrip() {
-        let event = SubscriptionCancelledEvent::new(plan(), subscriber(), 1_700_000_000);
+        let event = SubscriptionCancelledEvent::new(plan(), subscriber(), 1_700_000_000, authorized_by());
         let bytes = event.to_bytes();
         let decoded = decode_event(&bytes).unwrap();
 
@@ -71,6 +80,7 @@ mod tests {
                 assert_eq!(e.plan, plan());
                 assert_eq!(e.subscriber, subscriber());
                 assert_eq!({ e.expires_at_ts }, 1_700_000_000);
+                assert_eq!(e.authorized_by, authorized_by());
             }
             _ => panic!("expected Cancelled event"),
         }
@@ -78,7 +88,7 @@ mod tests {
 
     #[test]
     fn wire_format() {
-        let event = SubscriptionCancelledEvent::new(plan(), subscriber(), 99);
+        let event = SubscriptionCancelledEvent::new(plan(), subscriber(), 99, authorized_by());
         let bytes = event.to_bytes();
 
         assert_eq!(&bytes[..8], &EVENT_IX_TAG_LE);
@@ -86,11 +96,12 @@ mod tests {
         assert_eq!(&bytes[9..41], plan().as_ref());
         assert_eq!(&bytes[41..73], subscriber().as_ref());
         assert_eq!(&bytes[73..81], &99i64.to_le_bytes());
+        assert_eq!(&bytes[81..113], authorized_by().as_ref());
     }
 
     #[test]
     fn negative_timestamp() {
-        let event = SubscriptionCancelledEvent::new(plan(), subscriber(), -1);
+        let event = SubscriptionCancelledEvent::new(plan(), subscriber(), -1, authorized_by());
         let bytes = event.to_bytes();
         let decoded = decode_event(&bytes).unwrap();
         match decoded {

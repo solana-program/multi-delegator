@@ -371,9 +371,9 @@ pub enum SubscriptionsInstruction {
 
     #[codama(account(name = "subscriber", signer, docs = "The subscriber cancelling the subscription"))]
     #[codama(account(
-        name = "merchant",
+        name = "authorizer",
         signer,
-        docs = "The owner of the subscription plan approving immediate cancellation"
+        docs = "The plan owner or a whitelisted puller approving immediate cancellation"
     ))]
     #[codama(account(name = "plan_pda", docs = "The plan PDA for the subscription"))]
     #[codama(account(

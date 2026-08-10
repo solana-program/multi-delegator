@@ -343,7 +343,7 @@ impl SubscriptionsFixture {
         let Some(subscription) = self.read_subscription(&subscriber.pubkey()) else { return false };
         let ix = CancelSubscriptionNowBuilder::new()
             .subscriber(subscriber.pubkey())
-            .merchant(self.merchant.pubkey())
+            .authorizer(self.merchant.pubkey())
             .plan_pda(self.plan_pda)
             .subscription_pda(self.subscription_pda(&subscriber.pubkey()))
             .event_authority(EventAuthority::find_pda().0)

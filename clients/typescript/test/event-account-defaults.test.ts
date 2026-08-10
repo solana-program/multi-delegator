@@ -28,11 +28,11 @@ describe('generated event-emitting builders resolve event accounts from the acti
     test('cancelSubscriptionNow defaults eventAuthority + selfProgram to a custom programAddress', async () => {
         const programAddress = (await generateKeyPairSigner()).address;
         const subscriber = await generateKeyPairSigner();
-        const merchant = await generateKeyPairSigner();
+        const authorizer = await generateKeyPairSigner();
         const planPda = (await generateKeyPairSigner()).address;
 
         const ix = await getCancelSubscriptionNowInstructionAsync(
-            { merchant, planPda, subscriber, cancelSubscriptionNowData: { expectedCurrentPeriodStartTs: 0n } },
+            { authorizer, planPda, subscriber, cancelSubscriptionNowData: { expectedCurrentPeriodStartTs: 0n } },
             { programAddress },
         );
 

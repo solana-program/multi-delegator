@@ -6,6 +6,11 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking** — `cancelSubscriptionNow` renames its second signer from `merchant` to `authorizer` (generated builder, overlay, and plugin), matching the program's widened check: the plan owner or any whitelisted puller may approve. The plugin still defaults it to `client.payer`.
+- `SubscriptionCancelledEvent` decoders expose `authorizedBy`, the address whose approval cancelled the subscription.
+
 ## [0.5.0] — 2026-08-10
 
 _Matches on-chain program `program-v0.5.0`. Supersedes prereleases `0.5.0-beta.1` and `0.5.0-beta.2`._

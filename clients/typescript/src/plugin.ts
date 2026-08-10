@@ -291,8 +291,8 @@ export type CancelSubscriptionInput = WithProgramAddress & {
 };
 
 export type CancelSubscriptionNowInput = WithProgramAddress & {
+    authorizer: TransactionSigner;
     expectedCurrentPeriodStartTs: bigint;
-    merchant: TransactionSigner;
     planPda: Address;
     subscriber: TransactionSigner;
     subscriptionPda?: Address;
@@ -714,8 +714,8 @@ export async function getCancelSubscriptionNowOverlayInstructionAsync(
     return await getCancelSubscriptionNowInstructionAsync(
         {
             ...(await eventAccounts(input.programAddress)),
+            authorizer: input.authorizer,
             cancelSubscriptionNowData: { expectedCurrentPeriodStartTs: input.expectedCurrentPeriodStartTs },
-            merchant: input.merchant,
             planPda: input.planPda,
             subscriber: input.subscriber,
             subscriptionPda: input.subscriptionPda,
@@ -758,7 +758,7 @@ type Self<T> = SelfPlanAndSendFunctions & T;
 export type SubscriptionsPluginInstructions = {
     cancelSubscription: (input: MakeOptional<CancelSubscriptionInput, 'subscriber'>) => Self<Promise<Instruction>>;
     cancelSubscriptionNow: (
-        input: MakeOptional<CancelSubscriptionNowInput, 'merchant' | 'subscriber'>,
+        input: MakeOptional<CancelSubscriptionNowInput, 'authorizer' | 'subscriber'>,
     ) => Self<Promise<Instruction>>;
     closeSubscriptionAuthority: (
         input: MakeOptional<CloseSubscriptionAuthorityInput, 'user'>,
@@ -890,7 +890,7 @@ export function subscriptionsProgram() {
                         client,
                         getCancelSubscriptionNowOverlayInstructionAsync({
                             ...input,
-                            merchant: input.merchant ?? client.payer,
+                            authorizer: input.authorizer ?? client.payer,
                             subscriber: input.subscriber ?? client.identity,
                         }),
                     ),
