@@ -63,7 +63,7 @@ const STABLE_FEATURES: Features = {
     revokeAbandonedDelegation: true,
     revokeSubscriptionAuthority: true,
     startNowRecurringDelegation: true,
-    updatePlan: false,
+    updatePlan: true,
 };
 
 export const FEATURES: Record<Network, Features> = {
