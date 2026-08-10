@@ -7,6 +7,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-08-10
+
+_Target mainnet deploy 2026-08-10. Reproducible via `solana-verify`. **Includes breaking changes vs the deployed v0.4.0 — see Security.** Audit status: [`audits/AUDIT_STATUS.md`](audits/AUDIT_STATUS.md). The deployed binary and on-chain IDL report `0.5.0-beta.1`: they were built at the release commit `364a419`, which predates this version bump._
+
 ### Added
 
 - `CancelSubscriptionNow` (discriminator 17) immediately expires a subscription when both the subscriber and current plan owner sign. It can shorten a pending cancellation, leaves the shared `SubscriptionAuthority` intact, and allows immediate subscription revocation without creating a unilateral skip-payment path. Emits a `SubscriptionCancelledEvent` — indexers now also see this event from dual-signed immediate cancels, with `expires_at_ts` set to the cancellation time instead of the end of the current billing period. The instruction data carries `expected_current_period_start_ts`, binding the dual approval to the subscription incarnation; a signed cancellation replayed against a later re-subscription at the same PDA is rejected with `StaleSubscriptionApproval` (521). ([#221])
