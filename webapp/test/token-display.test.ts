@@ -48,4 +48,10 @@ describe('token display', () => {
         assert.equal(parseTokenAmount('10', 0), 10n);
         assert.throws(() => parseTokenAmount('1.2345678', 6), /more than 6 decimal places/);
     });
+
+    test('ignores trailing zeroes beyond the token decimals', () => {
+        assert.equal(parseTokenAmount('1.5000000', 6), 1_500_000n);
+        assert.equal(parseTokenAmount('1.2300000', 6), 1_230_000n);
+        assert.equal(parseTokenAmount('2.5000000000', 6), 2_500_000n);
+    });
 });
