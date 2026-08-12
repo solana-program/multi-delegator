@@ -51,7 +51,7 @@ export function parseTokenAmount(value: string, decimals: number): bigint {
 
     const divisor = 10n ** BigInt(decimals);
     const wholeUnits = BigInt(whole) * divisor;
-    const fractionUnits = fraction.length === 0 ? 0n : BigInt(fraction.padEnd(decimals, '0') || '0');
+    const fractionUnits = fraction.length === 0 ? 0n : BigInt(fraction.slice(0, decimals).padEnd(decimals, '0') || '0');
 
     return wholeUnits + fractionUnits;
 }
