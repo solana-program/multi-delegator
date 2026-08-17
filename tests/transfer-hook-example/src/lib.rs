@@ -1,8 +1,5 @@
-//! Minimal Token-2022 transfer-hook program for tests and devnet fixtures.
-//! - `Execute`: increments a per-mint counter account (CPI target proof).
-//! - `InitializeExtraAccountMetaList`: creates the validation PDA (one
-//!   seed-derived counter meta) and the counter PDA so a hooked
-//!   `TransferChecked` resolves and runs on-chain.
+//! Minimal transfer hook for tests and devnet fixtures: `Execute` increments a
+//! per-mint counter PDA, proving the hook ran.
 #![no_std]
 
 use pinocchio::{
@@ -66,16 +63,15 @@ fn initialize_extra_account_metas(program_id: &Address, accounts: &mut [AccountV
     Ok(())
 }
 
-// Meta: counter = PDA of the hook program from seeds [Literal("counter"),
-// AccountKey(mint)], writable.
+// Meta: writable PDA of this program from seeds [Literal("counter"), AccountKey(mint)].
 fn write_validation_list(accounts: &mut [AccountView]) -> ProgramResult {
     let mut data = accounts[1].try_borrow_mut()?;
     write_single_meta_list_header(&mut data);
-    data[META_OFFSET] = 1; // ExtraAccountMeta discriminator: PDA of the hook program
-    data[META_OFFSET + 1] = 1; // seed 0: Literal
+    data[META_OFFSET] = 1; // PDA of this program
+    data[META_OFFSET + 1] = 1; // Seed::Literal
     data[META_OFFSET + 2] = COUNTER_SEED.len() as u8;
     data[META_OFFSET + 3..META_OFFSET + 3 + COUNTER_SEED.len()].copy_from_slice(COUNTER_SEED);
-    data[META_OFFSET + 10] = 3; // seed 1: AccountKey
+    data[META_OFFSET + 10] = 3; // Seed::AccountKey
     data[META_OFFSET + 11] = MINT_ACCOUNT_INDEX as u8;
     data[META_OFFSET + 33] = 0; // is_signer
     data[META_OFFSET + 34] = 1; // is_writable

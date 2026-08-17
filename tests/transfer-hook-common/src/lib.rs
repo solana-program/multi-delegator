@@ -16,20 +16,19 @@ pub const INIT_METAS_DISCRIMINATOR: [u8; 8] = [43, 34, 13, 49, 167, 88, 235, 235
 
 pub const EXTRA_ACCOUNT_METAS_SEED: &[u8] = b"extra-account-metas";
 
-// ExtraAccountMetaList with one 35-byte meta: 8-byte execute discriminator,
-// u32 value length (4 + 35), u32 entry count (1), the meta.
+// Single-meta ExtraAccountMetaList: discriminator (8) || value len (u32) || count (u32) || meta (35).
 pub const SINGLE_META_VALIDATION_LEN: usize = 51;
 pub const META_OFFSET: usize = 16;
 
-/// Writes the `ExtraAccountMetaList` header for a single-meta list; the caller
-/// fills the 35-byte meta at [`META_OFFSET`].
+/// Header for a single-meta `ExtraAccountMetaList`; caller writes the 35-byte
+/// meta at [`META_OFFSET`].
 pub fn write_single_meta_list_header(data: &mut [u8]) {
     data[..8].copy_from_slice(&EXECUTE_DISCRIMINATOR);
     data[8..12].copy_from_slice(&((4 + 35) as u32).to_le_bytes());
     data[12..16].copy_from_slice(&1u32.to_le_bytes());
 }
 
-/// Creates a PDA of `program_id` at `accounts[account_index]` from seeds
+/// PDA of `program_id` at `accounts[account_index]` from seeds
 /// `[prefix, key]`, funded by `accounts[0]`.
 pub fn create_pda(
     accounts: &mut [AccountView],

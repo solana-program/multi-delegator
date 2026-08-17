@@ -1,5 +1,4 @@
-# Shared pieces of the example transfer-hook programs. Standalone workspace so
-# the parent workspace's host builds never compile the BPF-only consumers.
+# Shared code for the example transfer-hook fixtures; standalone like its consumers.
 [workspace]
 
 [package]

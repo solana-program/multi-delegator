@@ -1,13 +1,8 @@
-//! Token-2022 transfer-hook example enforcing a destination-owner allowlist on
-//! delegated transfers. `Execute` classifies the transfer authority:
-//! - the source token account's owner passes unconditionally,
-//! - the subscriptions program's SubscriptionAuthority PDA passes only when an
-//!   allow-entry PDA exists for the destination token account's owner,
-//! - every other delegate is rejected.
-//! `InitializeExtraAccountMetaList` writes the validation PDA whose single meta
-//! derives the allow-entry from the destination owner (AccountData seed), so
-//! Token-2022 resolves and forwards it on every transfer.
-//! `InitializeAllowEntry` creates the allow-entry PDA for an approved owner.
+//! Transfer hook enforcing a destination-owner allowlist on delegated
+//! transfers: the source owner passes, the subscriptions SubscriptionAuthority
+//! PDA passes only if an allow-entry PDA exists for the destination owner,
+//! any other delegate is rejected. The validation list derives the allow-entry
+//! from the destination owner via an AccountData seed.
 #![no_std]
 
 use pinocchio::{
@@ -131,19 +126,18 @@ fn initialize_allow_entry(
     create_pda(accounts, 1, ALLOW_SEED, &owner, program_id, ALLOW_ENTRY_LEN)
 }
 
-// Meta: PDA of the hook program from seeds [Literal("allow"),
-// AccountData(destination.owner)], readonly non-signer.
+// Meta: readonly PDA of this program from seeds [Literal("allow"), AccountData(destination.owner)].
 fn write_validation_list(accounts: &mut [AccountView]) -> ProgramResult {
     let mut data = accounts[1].try_borrow_mut()?;
     write_single_meta_list_header(&mut data);
-    data[META_OFFSET] = 1; // ExtraAccountMeta discriminator: PDA of the hook program
-    data[META_OFFSET + 1] = 1; // seed 0: Literal
+    data[META_OFFSET] = 1; // PDA of this program
+    data[META_OFFSET + 1] = 1; // Seed::Literal
     data[META_OFFSET + 2] = ALLOW_SEED.len() as u8;
     data[META_OFFSET + 3..META_OFFSET + 3 + ALLOW_SEED.len()].copy_from_slice(ALLOW_SEED);
-    data[META_OFFSET + 8] = 4; // seed 1: AccountData
+    data[META_OFFSET + 8] = 4; // Seed::AccountData
     data[META_OFFSET + 9] = DESTINATION_ACCOUNT_INDEX as u8;
     data[META_OFFSET + 10] = TOKEN_ACCOUNT_OWNER_OFFSET as u8;
-    data[META_OFFSET + 11] = 32; // owner length
+    data[META_OFFSET + 11] = 32;
     data[META_OFFSET + 33] = 0; // is_signer
     data[META_OFFSET + 34] = 0; // is_writable
     Ok(())
