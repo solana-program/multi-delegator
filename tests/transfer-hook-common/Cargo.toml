@@ -1,0 +1,13 @@
+# Shared pieces of the example transfer-hook programs. Standalone workspace so
+# the parent workspace's host builds never compile the BPF-only consumers.
+[workspace]
+
+[package]
+name = "transfer-hook-common"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+pinocchio = { version = "0.11.1", features = ["cpi"] }
+pinocchio-system = "0.6.1"

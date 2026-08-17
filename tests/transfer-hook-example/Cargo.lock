@@ -198,11 +198,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "transfer-hook-example"
+name = "transfer-hook-common"
 version = "0.1.0"
 dependencies = [
  "pinocchio",
  "pinocchio-system",
+]
+
+[[package]]
+name = "transfer-hook-example"
+version = "0.1.0"
+dependencies = [
+ "pinocchio",
+ "transfer-hook-common",
 ]
 
 [[package]]
