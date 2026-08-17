@@ -43,6 +43,8 @@ mod test_subscribe;
 #[cfg(test)]
 mod test_transfer_fixed_delegation;
 #[cfg(test)]
+mod test_transfer_hook_allowlist;
+#[cfg(test)]
 mod test_transfer_recurring_delegation;
 #[cfg(test)]
 mod test_transfer_subscription;

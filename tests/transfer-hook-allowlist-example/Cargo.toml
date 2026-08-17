@@ -1,0 +1,23 @@
+# Token-2022 transfer-hook program enforcing a destination-owner allowlist on
+# delegated transfers, used as a CPI target in the subscriptions integration
+# tests. Standalone workspace so the parent workspace's host builds never
+# compile this cdylib (its entrypoint emits BPF-only items).
+[workspace]
+
+[package]
+name = "transfer-hook-allowlist-example"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+pinocchio = { version = "0.11.1", features = ["cpi"] }
+pinocchio-system = "0.6.1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

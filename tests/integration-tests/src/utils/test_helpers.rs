@@ -310,6 +310,55 @@ pub fn install_transfer_hook_extra_metas(litesvm: &mut LiteSVM, mint: Pubkey) ->
     (validation_pda, counter)
 }
 
+pub const TRANSFER_HOOK_ALLOWLIST_PROGRAM_ID: Pubkey = Pubkey::new_from_array([43u8; 32]);
+
+pub fn load_transfer_hook_allowlist_example(litesvm: &mut LiteSVM) {
+    let so_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../transfer-hook-allowlist-example/target/deploy/transfer_hook_allowlist_example.so");
+    litesvm.add_program_from_file(TRANSFER_HOOK_ALLOWLIST_PROGRAM_ID.to_bytes(), so_path).unwrap();
+}
+
+#[cfg(test)]
+pub fn install_allowlist_hook_metas(litesvm: &mut LiteSVM, payer: &Keypair, mint: Pubkey) -> Pubkey {
+    let program_id = TRANSFER_HOOK_ALLOWLIST_PROGRAM_ID;
+    let (validation_pda, _) = Pubkey::find_program_address(&[b"extra-account-metas", mint.as_ref()], &program_id);
+    let ix = Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(payer.pubkey(), true),
+            AccountMeta::new(validation_pda, false),
+            AccountMeta::new_readonly(mint, false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+        ],
+        data: vec![43, 34, 13, 49, 167, 88, 235, 235],
+    };
+    build_and_send_transaction(litesvm, &[payer], &payer.pubkey(), &ix).unwrap();
+    validation_pda
+}
+
+#[cfg(test)]
+pub fn allowlist_entry_pda(owner: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[b"allow", owner.as_ref()], &TRANSFER_HOOK_ALLOWLIST_PROGRAM_ID).0
+}
+
+#[cfg(test)]
+pub fn install_allowlist_entry(litesvm: &mut LiteSVM, payer: &Keypair, owner: Pubkey) -> Pubkey {
+    let entry = allowlist_entry_pda(owner);
+    let mut data = b"initallo".to_vec();
+    data.extend_from_slice(owner.as_ref());
+    let ix = Instruction {
+        program_id: TRANSFER_HOOK_ALLOWLIST_PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(payer.pubkey(), true),
+            AccountMeta::new(entry, false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+        ],
+        data,
+    };
+    build_and_send_transaction(litesvm, &[payer], &payer.pubkey(), &ix).unwrap();
+    entry
+}
+
 pub fn init_ata(litesvm: &mut LiteSVM, mint: Pubkey, owner: Pubkey, amount: u64) -> Pubkey {
     let token_program = litesvm.get_account(&mint).unwrap().owner;
     let ata = get_associated_token_address_with_program_id(&owner, &mint, &token_program);

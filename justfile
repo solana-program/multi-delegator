@@ -57,10 +57,11 @@ build-program:
     cd {{program_dir}} && cargo build-sbf
     @echo "✓ Program built"
 
-# Build the example transfer-hook program used as a CPI target in integration tests
+# Build the example transfer-hook programs used as CPI targets in integration tests
 build-test-hook:
     cd tests/transfer-hook-example && cargo build-sbf
-    @echo "✓ Test transfer-hook program built"
+    cd tests/transfer-hook-allowlist-example && cargo build-sbf
+    @echo "✓ Test transfer-hook programs built"
 
 # Generate IDL from Rust source
 generate-idl:
