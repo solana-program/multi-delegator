@@ -76,6 +76,7 @@ clients/typescript/src/generated/  (auto-generated; wrapped by hand-written SDK 
 - [docs/002-subscriptions-architecture.md](docs/002-subscriptions-architecture.md) — Plans + pull-payment subscriptions
 - [docs/003-versioning-migration-architecture.md](docs/003-versioning-migration-architecture.md) — Three-tier account versioning/migration
 - [docs/004-program-upgrade-mechanism.md](docs/004-program-upgrade-mechanism.md) — Upgrade authority and deployment
+- [docs/005-transfer-context.md](docs/005-transfer-context.md) — Transfer context for Token-2022 transfer hooks
 
 ### Key Modules
 
