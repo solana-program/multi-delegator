@@ -1,119 +1,55 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Solana program (Pinocchio, `no_std`) for token delegations + pull-payment
+subscriptions, with Codama-generated Rust/TS clients and a demo webapp.
+Build/test recipes: `just --list`. ADRs: `docs/00*.md`.
 
-## Required Versions
+## Gotchas
 
-- **Rust**: See `rust-toolchain.toml` (auto-installed by rustup)
-- **Node.js**: See `.nvmrc` (use `nvm use` or `fnm use`)
-- **pnpm**: See `package.json` `packageManager` field
+**Wire format is not Anchor's.** Instruction discriminators are 1 byte, not
+Anchor's 8. Events are the exception: emitted via self-CPI with Anchor's
+`Sha256("anchor:event")[..8]` tag so indexers pick them up, followed by a
+1-byte event discriminator. Any tool that assumes Anchor layout (IDL
+converters, fuzzers, decoders) will mis-decode instructions; use raw
+instruction calls or `clients/rust`.
 
-## Build Commands
+**The IDL is a build-script side effect.** `program/build.rs` writes
+`idl/subscriptions.json` only when `GENERATE_IDL=1` is set (`just
+generate-idl` runs `cargo check` with it). A plain `cargo build` leaves a
+stale IDL. `#[codama(...)]` attributes silently drift from the Rust types;
+`just check-generated` is the only thing that catches it, and CI fails on it.
 
-```bash
-# Full build (program .so → IDL → clients → TS client dist)
-just build
+**Account versioning runs on raw bytes.** `check_and_update_version` must be
+called before any typed struct load: a lazy migration can change the layout
+under you. It also validates the kind byte first so a migration never mutates
+a wrong-kind account.
 
-# Individual steps
-just generate-idl          # Generate IDL via Codama (GENERATE_IDL=1 cargo check, build.rs writes it)
-just generate-clients      # Generate TypeScript + Rust clients from IDL
-just build-program         # Build .so binary only (cargo build-sbf)
-just build-client          # Build TypeScript client (tsup)
+**TS integration tests need two validator passes.** `just test-client` runs a
+fork pass, then restarts surfpool with `--offline` for `*.offline.test.ts`.
+Reason: surfpool forwards `getProgramAccounts` to public mainnet-beta, which
+rejects it (-32603). Anything scanning program accounts belongs in an
+`.offline.test.ts` file.
 
-# Formatting and linting
-just fmt                   # cargo fmt + prettier
-just check                 # fmt-check + lint-check
+**surfpool-sdk's in-process VM cannot execute our `.so`.** For TS-side program
+tests use node-litesvm, not the SDK VM.
 
-# Testing
-just test                  # All tests (program + client)
-just unit-test             # Rust unit tests
-just integration-test      # Rust LiteSVM integration tests
-just test-program          # backwards-compatible alias for unit-test
-just test-client           # Vitest against Surfpool
-just test-and-benchmark    # CU report → cu_report.md
+**LiteSVM clock reads are not stable.** `current_ts()` is read more than once
+per instruction, so period-boundary tests with tiny periods flake. Pin time
+with the absolute `set_clock` helper instead of relative advances.
 
-# Deployment
-just deploy-idl-devnet     # Write IDL on-chain via program-metadata
-just deploy-idl-mainnet
-just verify-mainnet        # solana-verify against repo
+**No BigInt `toJSON` patch in the webapp.** A global patch was added once and
+corrupted RPC request serialization (silent, took days to find). Serialize
+bigints at the call site.
 
-# Dependencies
-pnpm install               # all workspaces
-```
+**`declare_id!` in `program/src/lib.rs` is parsed by `sed`** in the justfile
+and scripts. Keep it a single literal line.
 
-## Architecture
-
-Solana program using **Pinocchio** (lightweight `no_std` framework) with **Codama** for IDL-driven client generation.
-
-### Code Flow
-
-```
-program/src/lib.rs (declares ID) + entrypoint.rs (dispatches via SubscriptionsInstruction enum)
-    ↓
-program/src/instructions/*.rs (instruction processors)
-    ↓
-program/src/state/*.rs (PDA account structs)
-    ↓
-program/src/event_engine.rs (self-CPI event emission)
-```
-
-### Client Generation Pipeline
-
-```
-Rust code with #[codama(...)] attributes
-    ↓
-program/build.rs → idl/subscriptions.json
-    ↓
-scripts/generate-clients.ts
-    ↓
-clients/rust/src/generated/        (auto-generated)
-clients/typescript/src/generated/  (auto-generated; wrapped by hand-written SDK in src/)
-```
-
-### Architecture Decision Records
-
-- [docs/001-program-architecture.md](docs/001-program-architecture.md) — Subscription Authority + delegations + PDA design
-- [docs/002-subscriptions-architecture.md](docs/002-subscriptions-architecture.md) — Plans + pull-payment subscriptions
-- [docs/003-versioning-migration-architecture.md](docs/003-versioning-migration-architecture.md) — Three-tier account versioning/migration
-- [docs/004-program-upgrade-mechanism.md](docs/004-program-upgrade-mechanism.md) — Upgrade authority and deployment
-
-### Key Modules
-
-- `program/src/instructions/` — 17 instruction handlers (discriminators 0–16) + an internal `emit_event` self-CPI handler + `helpers/` (validation, token ops, traits)
-- `program/src/state/` — Account structs (SubscriptionAuthority, FixedDelegation, RecurringDelegation, Plan, SubscriptionDelegation) + `versioning/`
-- `program/src/events/` — Event structs and self-CPI emission
-- `program/src/errors.rs` — Error codes (ranges 100-699)
-- `program/src/event_engine.rs` — Self-CPI dispatcher for events
-
-### Testing
-
-- Rust unit tests: inline `#[cfg(test)]` modules across `program/src/` plus `program/src/tests/`. Run via `just unit-test`.
-- Rust integration tests: LiteSVM-based workspace crate in `tests/integration-tests/`. Run via `just integration-test`.
-- TypeScript: Vitest against Surfpool, in `clients/typescript/test/`. Includes Squads + Swig smart-wallet integration tests and security-focused tests.
-- CU benchmarks: set `CU_REPORT=1` to write `cu_report.md` (posted as PR comment in CI).
-
-### Program ID
-
-`De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44`
-
-## Audit Status
-
-Audited by Cantina. See [audits/AUDIT_STATUS.md](audits/AUDIT_STATUS.md) for the baseline commit, fix-verified commit, and verification commands. Audit report PDF is in `audits/`.
-
-## Workspace Structure
-
-- `program/` — Pinocchio program (workspace member `subscriptions-program`)
-- `clients/rust/` — Codama-generated Rust client (`subscriptions`)
-- `clients/typescript/` — Hand-written SDK wrapping Codama-generated TS (`@solana/subscriptions`)
-- `webapp/` — Vite + React 19 + Node API demo (faucet, deploy wizard, marketplace)
-- `docs/` — Numbered ADRs
-- `audits/` — Audit report and AUDIT_STATUS.md
-- `runbooks/` — txtx Surfpool deployment runbooks
-- `scripts/` — Validator + webapp shell scripts, client codegen TS (`generate-clients.ts`)
+**Release order:** bump the version string before cutting buffers. v0.5.0
+shipped `-beta.1` on-chain because the bump came after the freeze.
 
 ## Conventions
 
-- **Pinocchio, not Anchor**: do not introduce `anchor-lang`. Use `pinocchio::AccountView`, `Address`, `ProgramResult`.
-- **No `mod.rs` business logic**: only module declarations and re-exports.
-- **PDA seeds co-located with state**: each state struct exposes its seed pattern; helpers live in `state/common.rs`.
-- **Codama attributes drive IDL**: keep `#[codama(...)]` macros in sync with Rust types — `just generate-idl && git diff` catches drift.
+- Pinocchio, never `anchor-lang`. `AccountView`, `Address`, `ProgramResult`.
+- `no_std` + `extern crate alloc`; `std` only under `#[cfg(test)]`.
+- `mod.rs` holds declarations and re-exports only, no logic.
+- PDA seeds live with the state struct; shared helpers in `state/common.rs`.
